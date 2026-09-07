@@ -1,6 +1,8 @@
 import type {
+  AccountCode,
   AuditLogEntry,
   Customer,
+  Expense,
   Guarantor,
   Installment,
   InstallmentContract,
@@ -8,6 +10,8 @@ import type {
   InstallmentPlan,
   InstallmentStatus,
   InventoryMovement,
+  JournalEntry,
+  JournalLine,
   Permission,
   PromiseToPay,
   Product,
@@ -19,11 +23,14 @@ import type {
   RolePermission,
   Sale,
   SaleItem,
+  Shift,
   Supplier,
   SupplierPayment,
   SystemRoleName,
   Tenant,
   TenantSettings,
+  TreasuryAccount,
+  TreasuryMovement,
   User,
   UserRoleAssignment,
 } from "@/types";
@@ -70,6 +77,11 @@ const KEYS = {
   suppliers: `${STORAGE_PREFIX}.suppliers.v1`,
   purchases: `${STORAGE_PREFIX}.purchases.v1`,
   supplierPayments: `${STORAGE_PREFIX}.supplier_payments.v1`,
+  treasuryAccounts: `${STORAGE_PREFIX}.treasury_accounts.v1`,
+  treasuryMovements: `${STORAGE_PREFIX}.treasury_movements.v1`,
+  shifts: `${STORAGE_PREFIX}.shifts.v1`,
+  expenses: `${STORAGE_PREFIX}.expenses.v1`,
+  journalEntries: `${STORAGE_PREFIX}.journal_entries.v1`,
 } as const;
 
 const listeners = new Set<() => void>();
@@ -144,6 +156,7 @@ function seedTenantSettings(): TenantSettings[] {
       credit_hold_days: 7,
       late_fee_enabled: false,
       return_period_days: 14,
+      expense_approval_threshold: 2000,
     },
   ];
 }
@@ -435,6 +448,55 @@ function seedSuppliers(): Supplier[] {
   ];
 }
 
+/** §68 — the two accounts every retailer needs at minimum: a main treasury and one cashier
+ * float. Both are used directly by the cash-sale/collection/expense flows below (default target
+ * = the cashier account), never left unreachable. */
+const MAIN_ACCOUNT_ID = "account_main";
+const CASHIER_ACCOUNT_ID = "account_cashier";
+
+function seedTreasuryAccounts(): TreasuryAccount[] {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: MAIN_ACCOUNT_ID,
+      tenant_id: DEMO_TENANT_ID,
+      name: "الخزينة الرئيسية",
+      kind: "main",
+      active: true,
+      created_at: now,
+    },
+    {
+      id: CASHIER_ACCOUNT_ID,
+      tenant_id: DEMO_TENANT_ID,
+      name: "خزينة الكاشير",
+      kind: "cashier",
+      active: true,
+      created_at: now,
+    },
+  ];
+}
+
+/** An opening deposit for the cashier float — a real movement, not a stored balance field, same
+ * principle as `seedInventoryMovements` establishing starting stock. */
+function seedTreasuryMovements(): TreasuryMovement[] {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: genId("tmov"),
+      tenant_id: DEMO_TENANT_ID,
+      account_id: CASHIER_ACCOUNT_ID,
+      type: "opening",
+      amount: 5000,
+      before: 0,
+      after: 5000,
+      user_id: null,
+      reference: "Seed",
+      reason: "رصيد افتتاحي تجريبي",
+      created_at: now,
+    },
+  ];
+}
+
 /* ---------------- Reads ---------------- */
 
 export function getTenants(): Tenant[] {
@@ -544,6 +606,38 @@ export function getSupplierBalance(supplierId: string): number {
     .filter((p) => p.supplier_id === supplierId)
     .reduce((sum, p) => sum + p.amount, 0);
   return Math.round((totalPurchased - totalPaid) * 100) / 100;
+}
+
+export function getTreasuryAccounts(): TreasuryAccount[] {
+  return readCollection(KEYS.treasuryAccounts, seedTreasuryAccounts);
+}
+
+export function getTreasuryMovements(): TreasuryMovement[] {
+  return readCollection(KEYS.treasuryMovements, seedTreasuryMovements);
+}
+
+export function getShifts(): Shift[] {
+  return readCollection(KEYS.shifts, () => []);
+}
+
+export function getExpenses(): Expense[] {
+  return readCollection(KEYS.expenses, () => []);
+}
+
+export function getJournalEntries(): JournalEntry[] {
+  return readCollection(KEYS.journalEntries, () => []);
+}
+
+/** §68 — the single source of truth for "how much is in this account": sum of every signed
+ * movement, never a standalone balance field. Same principle as `getProductStock`. */
+export function getAccountBalance(accountId: string): number {
+  return (
+    Math.round(
+      getTreasuryMovements()
+        .filter((m) => m.account_id === accountId)
+        .reduce((sum, m) => sum + m.amount, 0) * 100,
+    ) / 100
+  );
 }
 
 export function getInstallmentPlans(): InstallmentPlan[] {
@@ -1206,6 +1300,17 @@ export function createSale(input: CreateSaleInput, actorUserId: string | null): 
     new_value: sale,
   });
 
+  postTreasuryMovement(CASHIER_ACCOUNT_ID, sale.total, "sale", actorUserId, sale.invoice_number);
+  postJournalEntry(
+    [
+      { account_code: "1000", account_name: ACCOUNT_NAMES["1000"], debit: sale.total, credit: 0 },
+      { account_code: "3000", account_name: ACCOUNT_NAMES["3000"], debit: 0, credit: sale.total },
+    ],
+    `بيع نقدي ${sale.invoice_number}`,
+    "sale",
+    sale.id,
+  );
+
   return sale;
 }
 
@@ -1476,6 +1581,57 @@ export function createInstallmentContract(
     new_value: contract,
   });
 
+  if (contract.down_payment > 0) {
+    postTreasuryMovement(
+      CASHIER_ACCOUNT_ID,
+      contract.down_payment,
+      "sale",
+      actorUserId,
+      contract.contract_number,
+    );
+  }
+  // §75 — Product Profit (cash_subtotal) is kept separate from Financing Revenue
+  // (finance_amount): Dr Cash (down payment) + Dr Customers (what's still owed) balances
+  // against Cr Sales Revenue (goods value) + Cr Financing Revenue.
+  postJournalEntry(
+    [
+      ...(contract.down_payment > 0
+        ? [
+            {
+              account_code: "1000" as const,
+              account_name: ACCOUNT_NAMES["1000"],
+              debit: contract.down_payment,
+              credit: 0,
+            },
+          ]
+        : []),
+      {
+        // The customer owes principal + finance_amount (contract.total_amount), not just the
+        // principal — the AR line must carry the full amount still outstanding after the down
+        // payment for the entry to balance against both revenue lines below.
+        account_code: "1100",
+        account_name: ACCOUNT_NAMES["1100"],
+        debit: contract.total_amount,
+        credit: 0,
+      },
+      {
+        account_code: "3000",
+        account_name: ACCOUNT_NAMES["3000"],
+        debit: 0,
+        credit: contract.cash_subtotal,
+      },
+      {
+        account_code: "3100",
+        account_name: ACCOUNT_NAMES["3100"],
+        debit: 0,
+        credit: contract.finance_amount,
+      },
+    ],
+    `عقد تقسيط ${contract.contract_number}`,
+    "installment_contract",
+    contract.id,
+  );
+
   return contract;
 }
 
@@ -1603,6 +1759,23 @@ export function collectPayment(
     entity_id: payment.id,
     new_value: payment,
   });
+
+  postTreasuryMovement(
+    CASHIER_ACCOUNT_ID,
+    amount,
+    "collection",
+    actorUserId,
+    payment.receipt_number,
+  );
+  postJournalEntry(
+    [
+      { account_code: "1000", account_name: ACCOUNT_NAMES["1000"], debit: amount, credit: 0 },
+      { account_code: "1100", account_name: ACCOUNT_NAMES["1100"], debit: 0, credit: amount },
+    ],
+    `تحصيل ${payment.receipt_number}`,
+    "installment_payment",
+    payment.id,
+  );
 
   return payment;
 }
@@ -1963,6 +2136,18 @@ export function createPurchase(input: CreatePurchaseInput, actorUserId: string |
     new_value: purchase,
   });
 
+  // No treasury movement here — the purchase creates a payable (§65), it doesn't pay cash
+  // immediately; `recordSupplierPayment` is what moves money later.
+  postJournalEntry(
+    [
+      { account_code: "1200", account_name: ACCOUNT_NAMES["1200"], debit: total, credit: 0 },
+      { account_code: "2000", account_name: ACCOUNT_NAMES["2000"], debit: 0, credit: total },
+    ],
+    `أمر شراء ${purchase_number}`,
+    "purchase",
+    purchase.id,
+  );
+
   return purchase;
 }
 
@@ -1998,7 +2183,250 @@ export function recordSupplierPayment(
     entity_id: payment.id,
     new_value: payment,
   });
+
+  postTreasuryMovement(
+    MAIN_ACCOUNT_ID,
+    -amount,
+    "purchase_payment",
+    actorUserId,
+    undefined,
+    undefined,
+  );
+  postJournalEntry(
+    [
+      { account_code: "2000", account_name: ACCOUNT_NAMES["2000"], debit: amount, credit: 0 },
+      { account_code: "1000", account_name: ACCOUNT_NAMES["1000"], debit: 0, credit: amount },
+    ],
+    `دفعة لمورد ${supplier.name}`,
+    "supplier_payment",
+    payment.id,
+  );
+
   return payment;
+}
+
+/* ---------------- Treasury (§68) ---------------- */
+
+function postTreasuryMovement(
+  accountId: string,
+  amount: number,
+  type: TreasuryMovement["type"],
+  actorUserId: string | null,
+  reference?: string,
+  reason?: string,
+): TreasuryMovement {
+  const before = getAccountBalance(accountId);
+  const after = Math.round((before + amount) * 100) / 100;
+  const movement: TreasuryMovement = {
+    id: genId("tmov"),
+    tenant_id: DEMO_TENANT_ID,
+    account_id: accountId,
+    type,
+    amount,
+    before,
+    after,
+    user_id: actorUserId,
+    ...(reference ? { reference } : {}),
+    ...(reason ? { reason } : {}),
+    created_at: new Date().toISOString(),
+  };
+  writeCollection(KEYS.treasuryMovements, [...getTreasuryMovements(), movement]);
+  return movement;
+}
+
+/* ---------------- Shifts (§70) ---------------- */
+
+export function openShift(
+  accountId: string,
+  openingBalance: number,
+  actorUserId: string | null,
+): Shift {
+  const account = getTreasuryAccounts().find((a) => a.id === accountId);
+  if (!account) throw new Error("الخزينة غير موجودة");
+  if (getShifts().some((s) => s.account_id === accountId && s.status === "open")) {
+    throw new Error("يوجد وردية مفتوحة بالفعل على هذه الخزينة");
+  }
+  if (openingBalance < 0) throw new Error("الرصيد الافتتاحي لا يمكن أن يكون سالبًا");
+
+  const shift: Shift = {
+    id: genId("shift"),
+    tenant_id: DEMO_TENANT_ID,
+    account_id: accountId,
+    opening_balance: openingBalance,
+    opened_by: actorUserId,
+    opened_at: new Date().toISOString(),
+    status: "open",
+  };
+  writeCollection(KEYS.shifts, [...getShifts(), shift]);
+  recordAudit({
+    tenant_id: DEMO_TENANT_ID,
+    user_id: actorUserId,
+    action: "shift.open",
+    entity: "shifts",
+    entity_id: shift.id,
+    new_value: shift,
+  });
+  return shift;
+}
+
+/**
+ * §70 — expected balance is `opening_balance` plus every movement on that account since
+ * `opened_at` (never a value carried forward and trusted blindly). A reason is mandatory
+ * whenever the counted amount doesn't match, matching "فرق الجرد لازم سبب موثق" (§130).
+ */
+export function closeShift(
+  shiftId: string,
+  countedAmount: number,
+  reason: string | undefined,
+  actorUserId: string | null,
+): Shift {
+  const shifts = getShifts();
+  const shift = shifts.find((s) => s.id === shiftId);
+  if (!shift) throw new Error("الوردية غير موجودة");
+  if (shift.status === "closed") throw new Error("الوردية مقفلة بالفعل");
+
+  const netMovement = getTreasuryMovements()
+    .filter((m) => m.account_id === shift.account_id && m.created_at >= shift.opened_at)
+    .reduce((sum, m) => sum + m.amount, 0);
+  const expected = Math.round((shift.opening_balance + netMovement) * 100) / 100;
+  const diff = Math.round((countedAmount - expected) * 100) / 100;
+  if (diff !== 0 && !reason?.trim()) {
+    throw new Error("لازم تكتب سبب الفرق قبل إقفال الوردية");
+  }
+
+  const after: Shift = {
+    ...shift,
+    status: "closed",
+    closing_counted_amount: countedAmount,
+    closing_expected_amount: expected,
+    closing_diff: diff,
+    ...(reason?.trim() && { closing_reason: reason.trim() }),
+    closed_by: actorUserId,
+    closed_at: new Date().toISOString(),
+  };
+  writeCollection(
+    KEYS.shifts,
+    shifts.map((s) => (s.id === shiftId ? after : s)),
+  );
+  recordAudit({
+    tenant_id: DEMO_TENANT_ID,
+    user_id: actorUserId,
+    action: "shift.close",
+    entity: "shifts",
+    entity_id: shiftId,
+    old_value: shift,
+    new_value: after,
+    ...(reason?.trim() && { reason: reason.trim() }),
+  });
+  return after;
+}
+
+/* ---------------- Expenses (§73) ---------------- */
+
+export function recordExpense(
+  accountId: string,
+  category: string,
+  amount: number,
+  reason: string,
+  actorUserId: string | null,
+): Expense {
+  const account = getTreasuryAccounts().find((a) => a.id === accountId);
+  if (!account) throw new Error("الخزينة غير موجودة");
+  if (amount <= 0) throw new Error("المبلغ يجب أن يكون أكبر من صفر");
+  if (!category.trim()) throw new Error("نوع المصروف مطلوب");
+  if (!reason.trim()) throw new Error("سبب المصروف مطلوب");
+
+  const settings = getCurrentTenantSettings();
+  const expense: Expense = {
+    id: genId("expense"),
+    tenant_id: DEMO_TENANT_ID,
+    account_id: accountId,
+    category: category.trim(),
+    amount,
+    reason: reason.trim(),
+    needs_approval: amount > settings.expense_approval_threshold,
+    user_id: actorUserId,
+    created_at: new Date().toISOString(),
+  };
+  writeCollection(KEYS.expenses, [...getExpenses(), expense]);
+  recordAudit({
+    tenant_id: DEMO_TENANT_ID,
+    user_id: actorUserId,
+    action: "expense.record",
+    entity: "expenses",
+    entity_id: expense.id,
+    new_value: expense,
+    reason: expense.reason,
+  });
+
+  postTreasuryMovement(
+    accountId,
+    -amount,
+    "expense",
+    actorUserId,
+    expense.category,
+    expense.reason,
+  );
+  postJournalEntry(
+    [
+      { account_code: "5000", account_name: ACCOUNT_NAMES["5000"], debit: amount, credit: 0 },
+      { account_code: "1000", account_name: ACCOUNT_NAMES["1000"], debit: 0, credit: amount },
+    ],
+    `مصروف: ${expense.category} — ${expense.reason}`,
+    "expense",
+    expense.id,
+  );
+
+  return expense;
+}
+
+/* ---------------- Accounting — simplified Chart of Accounts + Journal Entries (§74/§75) ---------------- */
+
+const ACCOUNT_NAMES: Record<AccountCode, string> = {
+  "1000": "الخزينة/النقدية",
+  "1100": "عملاء (ذمم مدينة)",
+  "1200": "المخزون",
+  "2000": "موردون (ذمم دائنة)",
+  "3000": "إيرادات المبيعات",
+  "3100": "إيرادات التمويل",
+  "5000": "المصروفات",
+};
+
+function nextJournalEntryNumber(): string {
+  const year = new Date().getFullYear();
+  const prefix = `JE-${year}-`;
+  const count = getJournalEntries().filter((e) => e.entry_number.startsWith(prefix)).length;
+  return `${prefix}${String(count + 1).padStart(6, "0")}`;
+}
+
+/**
+ * The only place a `JournalEntry` is ever created — every caller passes already-balanced lines
+ * (debits must equal credits); this just double-checks that invariant before writing so a bug
+ * in a caller can never silently corrupt the books.
+ */
+function postJournalEntry(
+  lines: JournalLine[],
+  description: string,
+  referenceType: string,
+  referenceId: string,
+): JournalEntry {
+  const totalDebit = Math.round(lines.reduce((sum, l) => sum + l.debit, 0) * 100) / 100;
+  const totalCredit = Math.round(lines.reduce((sum, l) => sum + l.credit, 0) * 100) / 100;
+  if (totalDebit !== totalCredit) {
+    throw new Error(`قيد غير متوازن: مدين ${totalDebit} ≠ دائن ${totalCredit}`);
+  }
+  const entry: JournalEntry = {
+    id: genId("je"),
+    tenant_id: DEMO_TENANT_ID,
+    entry_number: nextJournalEntryNumber(),
+    lines,
+    description,
+    reference_type: referenceType,
+    reference_id: referenceId,
+    created_at: new Date().toISOString(),
+  };
+  writeCollection(KEYS.journalEntries, [...getJournalEntries(), entry]);
+  return entry;
 }
 
 /* ----------------------------------------------------------------------------------------

@@ -10,15 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AccountingRouteImport } from './routes/accounting'
 import { Route as AuditRouteImport } from './routes/audit'
 import { Route as CollectionsRouteImport } from './routes/collections'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ProductsRouteImport } from './routes/products'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as StockCountRouteImport } from './routes/stock-count'
 import { Route as SuppliersRouteImport } from './routes/suppliers'
+import { Route as TreasuryRouteImport } from './routes/treasury'
 import { Route as UsersRouteImport } from './routes/users'
 import { Route as ContractsIdRouteImport } from './routes/contracts_.$id'
 import { Route as CustomersIdRouteImport } from './routes/customers_.$id'
@@ -33,6 +36,11 @@ import { Route as SuppliersIdRouteImport } from './routes/suppliers_.$id'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AccountingRoute = AccountingRouteImport.update({
+  id: '/accounting',
+  path: '/accounting',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuditRoute = AuditRouteImport.update({
@@ -53,6 +61,11 @@ const CustomersRoute = CustomersRouteImport.update({
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExpensesRoute = ExpensesRouteImport.update({
+  id: '/expenses',
+  path: '/expenses',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -78,6 +91,11 @@ const StockCountRoute = StockCountRouteImport.update({
 const SuppliersRoute = SuppliersRouteImport.update({
   id: '/suppliers',
   path: '/suppliers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TreasuryRoute = TreasuryRouteImport.update({
+  id: '/treasury',
+  path: '/treasury',
   getParentRoute: () => rootRouteImport,
 } as any)
 const UsersRoute = UsersRouteImport.update({
@@ -133,15 +151,18 @@ const SuppliersIdRoute = SuppliersIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/accounting': typeof AccountingRoute
   '/audit': typeof AuditRoute
   '/collections': typeof CollectionsRoute
   '/customers': typeof CustomersRoute
   '/dashboard': typeof DashboardRoute
+  '/expenses': typeof ExpensesRoute
   '/login': typeof LoginRoute
   '/products': typeof ProductsRoute
   '/settings': typeof SettingsRoute
   '/stock-count': typeof StockCountRoute
   '/suppliers': typeof SuppliersRoute
+  '/treasury': typeof TreasuryRoute
   '/users': typeof UsersRoute
   '/contracts/$id': typeof ContractsIdRoute
   '/customers/$id': typeof CustomersIdRoute
@@ -155,15 +176,18 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/accounting': typeof AccountingRoute
   '/audit': typeof AuditRoute
   '/collections': typeof CollectionsRoute
   '/customers': typeof CustomersRoute
   '/dashboard': typeof DashboardRoute
+  '/expenses': typeof ExpensesRoute
   '/login': typeof LoginRoute
   '/products': typeof ProductsRoute
   '/settings': typeof SettingsRoute
   '/stock-count': typeof StockCountRoute
   '/suppliers': typeof SuppliersRoute
+  '/treasury': typeof TreasuryRoute
   '/users': typeof UsersRoute
   '/contracts/$id': typeof ContractsIdRoute
   '/customers/$id': typeof CustomersIdRoute
@@ -178,15 +202,18 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/accounting': typeof AccountingRoute
   '/audit': typeof AuditRoute
   '/collections': typeof CollectionsRoute
   '/customers': typeof CustomersRoute
   '/dashboard': typeof DashboardRoute
+  '/expenses': typeof ExpensesRoute
   '/login': typeof LoginRoute
   '/products': typeof ProductsRoute
   '/settings': typeof SettingsRoute
   '/stock-count': typeof StockCountRoute
   '/suppliers': typeof SuppliersRoute
+  '/treasury': typeof TreasuryRoute
   '/users': typeof UsersRoute
   '/contracts_/$id': typeof ContractsIdRoute
   '/customers_/$id': typeof CustomersIdRoute
@@ -202,15 +229,18 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/accounting'
     | '/audit'
     | '/collections'
     | '/customers'
     | '/dashboard'
+    | '/expenses'
     | '/login'
     | '/products'
     | '/settings'
     | '/stock-count'
     | '/suppliers'
+    | '/treasury'
     | '/users'
     | '/contracts/$id'
     | '/customers/$id'
@@ -224,15 +254,18 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/accounting'
     | '/audit'
     | '/collections'
     | '/customers'
     | '/dashboard'
+    | '/expenses'
     | '/login'
     | '/products'
     | '/settings'
     | '/stock-count'
     | '/suppliers'
+    | '/treasury'
     | '/users'
     | '/contracts/$id'
     | '/customers/$id'
@@ -246,15 +279,18 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/accounting'
     | '/audit'
     | '/collections'
     | '/customers'
     | '/dashboard'
+    | '/expenses'
     | '/login'
     | '/products'
     | '/settings'
     | '/stock-count'
     | '/suppliers'
+    | '/treasury'
     | '/users'
     | '/contracts_/$id'
     | '/customers_/$id'
@@ -269,15 +305,18 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AccountingRoute: typeof AccountingRoute
   AuditRoute: typeof AuditRoute
   CollectionsRoute: typeof CollectionsRoute
   CustomersRoute: typeof CustomersRoute
   DashboardRoute: typeof DashboardRoute
+  ExpensesRoute: typeof ExpensesRoute
   LoginRoute: typeof LoginRoute
   ProductsRoute: typeof ProductsRoute
   SettingsRoute: typeof SettingsRoute
   StockCountRoute: typeof StockCountRoute
   SuppliersRoute: typeof SuppliersRoute
+  TreasuryRoute: typeof TreasuryRoute
   UsersRoute: typeof UsersRoute
   ContractsIdRoute: typeof ContractsIdRoute
   CustomersIdRoute: typeof CustomersIdRoute
@@ -297,6 +336,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/accounting': {
+      id: '/accounting'
+      path: '/accounting'
+      fullPath: '/accounting'
+      preLoaderRoute: typeof AccountingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/audit': {
@@ -325,6 +371,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/expenses': {
+      id: '/expenses'
+      path: '/expenses'
+      fullPath: '/expenses'
+      preLoaderRoute: typeof ExpensesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -360,6 +413,13 @@ declare module '@tanstack/react-router' {
       path: '/suppliers'
       fullPath: '/suppliers'
       preLoaderRoute: typeof SuppliersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/treasury': {
+      id: '/treasury'
+      path: '/treasury'
+      fullPath: '/treasury'
+      preLoaderRoute: typeof TreasuryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/users': {
@@ -437,15 +497,18 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AccountingRoute: AccountingRoute,
   AuditRoute: AuditRoute,
   CollectionsRoute: CollectionsRoute,
   CustomersRoute: CustomersRoute,
   DashboardRoute: DashboardRoute,
+  ExpensesRoute: ExpensesRoute,
   LoginRoute: LoginRoute,
   ProductsRoute: ProductsRoute,
   SettingsRoute: SettingsRoute,
   StockCountRoute: StockCountRoute,
   SuppliersRoute: SuppliersRoute,
+  TreasuryRoute: TreasuryRoute,
   UsersRoute: UsersRoute,
   ContractsIdRoute: ContractsIdRoute,
   CustomersIdRoute: CustomersIdRoute,

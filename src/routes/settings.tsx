@@ -30,6 +30,7 @@ function toFormState(settings: TenantSettings): FormState {
     credit_hold_days: String(settings.credit_hold_days),
     late_fee_enabled: String(settings.late_fee_enabled),
     return_period_days: String(settings.return_period_days),
+    expense_approval_threshold: String(settings.expense_approval_threshold),
   };
 }
 
@@ -69,6 +70,7 @@ function SettingsPage() {
         credit_hold_days: Number(form.credit_hold_days) || 0,
         late_fee_enabled: form.late_fee_enabled === "true",
         return_period_days: Number(form.return_period_days) || 0,
+        expense_approval_threshold: Number(form.expense_approval_threshold) || 0,
       },
       actorUserId,
     );
@@ -205,6 +207,22 @@ function SettingsPage() {
                 />
                 تفعيل غرامة تأخير (غير مفعّلة افتراضيًا — §50)
               </label>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+            <h2 className="text-sm font-bold text-foreground">الخزينة والمصروفات (Phase 6)</h2>
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="حد اعتماد المصروفات (ج.م) — أعلى منه يُعلَّم 'يحتاج اعتماد'">
+                <input
+                  type="number"
+                  min="0"
+                  value={form.expense_approval_threshold}
+                  onChange={(e) => setForm({ ...form, expense_approval_threshold: e.target.value })}
+                  className="form-input"
+                  dir="ltr"
+                />
+              </Field>
             </div>
           </section>
 

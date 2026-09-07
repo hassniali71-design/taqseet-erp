@@ -40,6 +40,10 @@ export interface TenantSettings {
   /** §50 — optional feature; no late fee is ever applied while this is false. */
   late_fee_enabled: boolean;
   return_period_days: number;
+  /** §73 — expenses above this amount are flagged `needs_approval` for visibility; a real
+   * Approval Engine (§105) that blocks them outright is deferred, same as every other override
+   * in this project. */
+  expense_approval_threshold: number;
 }
 
 /** §9 — the 8 baseline roles named in the spec; tenants may add more (`is_system: false`). */
@@ -415,5 +419,98 @@ export interface SupplierPayment {
   supplier_id: string;
   amount: number;
   user_id: string | null;
+  created_at: string;
+}
+
+/**
+ * §68 Treasury — multiple accounts (main + at least one cashier float). A balance is never
+ * stored on the account itself; it's always the sum of that account's `TreasuryMovement` rows
+ * (`getAccountBalance` in data-store.ts), same principle §29's Inventory Ledger uses for stock.
+ * §11 governance: no hard delete — `active` only.
+ */
+export interface TreasuryAccount {
+  id: string;
+  tenant_id: string;
+  name: string;
+  kind: "main" | "cashier" | "bank" | "wallet";
+  active: boolean;
+  created_at: string;
+}
+
+export interface TreasuryMovement {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  type: "opening" | "sale" | "collection" | "purchase_payment" | "expense";
+  /** Signed — positive increases the account's balance, negative decreases it. */
+  amount: number;
+  before: number;
+  after: number;
+  user_id: string | null;
+  reference?: string;
+  reason?: string;
+  created_at: string;
+}
+
+/**
+ * §70 Shift management — an opening float count and a closing float count on the same cashier
+ * account; the gap between what the ledger *expects* (`opening_balance` + every movement since
+ * `opened_at`) and what was actually counted must carry a reason whenever it isn't zero.
+ */
+export interface Shift {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  opening_balance: number;
+  opened_by: string | null;
+  opened_at: string;
+  status: "open" | "closed";
+  closing_counted_amount?: number;
+  closing_expected_amount?: number;
+  closing_diff?: number;
+  closing_reason?: string;
+  closed_by?: string | null;
+  closed_at?: string;
+}
+
+/** §73 Expenses — §11 governance: no hard delete, no edit either (a mistaken expense is a new
+ * corrective entry, not a rewrite of history) — `recordExpense` is the only mutation exposed. */
+export interface Expense {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  category: string;
+  amount: number;
+  reason: string;
+  needs_approval: boolean;
+  user_id: string | null;
+  created_at: string;
+}
+
+/**
+ * §74/§75 simplified Chart of Accounts + auto Journal Entries. An employee never enters one of
+ * these by hand — every business action that moves money (`createSale`, `createInstallmentContract`,
+ * `collectPayment`, `createPurchase`, `recordSupplierPayment`, `recordExpense`) posts one behind
+ * the scenes via `postJournalEntry`, so `/accounting` has something real to show without anyone
+ * touching debits/credits directly. Product-Profit vs Financing-Revenue separation (§75) is why
+ * `3100` exists apart from `3000`.
+ */
+export type AccountCode = "1000" | "1100" | "1200" | "2000" | "3000" | "3100" | "5000";
+
+export interface JournalLine {
+  account_code: AccountCode;
+  account_name: string;
+  debit: number;
+  credit: number;
+}
+
+export interface JournalEntry {
+  id: string;
+  tenant_id: string;
+  entry_number: string;
+  lines: JournalLine[];
+  description: string;
+  reference_type: string;
+  reference_id: string;
   created_at: string;
 }
