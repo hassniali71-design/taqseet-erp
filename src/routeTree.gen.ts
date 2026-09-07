@@ -18,13 +18,17 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as ProductsRouteImport } from './routes/products'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as StockCountRouteImport } from './routes/stock-count'
+import { Route as SuppliersRouteImport } from './routes/suppliers'
 import { Route as UsersRouteImport } from './routes/users'
 import { Route as ContractsIdRouteImport } from './routes/contracts_.$id'
 import { Route as CustomersIdRouteImport } from './routes/customers_.$id'
 import { Route as ProductsIdRouteImport } from './routes/products_.$id'
+import { Route as PurchasesIdRouteImport } from './routes/purchases.$id'
+import { Route as PurchasesNewRouteImport } from './routes/purchases.new'
 import { Route as SalesIdRouteImport } from './routes/sales.$id'
 import { Route as SalesNewRouteImport } from './routes/sales.new'
 import { Route as SalesNewInstallmentRouteImport } from './routes/sales.new-installment'
+import { Route as SuppliersIdRouteImport } from './routes/suppliers_.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -71,6 +75,11 @@ const StockCountRoute = StockCountRouteImport.update({
   path: '/stock-count',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SuppliersRoute = SuppliersRouteImport.update({
+  id: '/suppliers',
+  path: '/suppliers',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const UsersRoute = UsersRouteImport.update({
   id: '/users',
   path: '/users',
@@ -91,6 +100,16 @@ const ProductsIdRoute = ProductsIdRouteImport.update({
   path: '/products/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PurchasesIdRoute = PurchasesIdRouteImport.update({
+  id: '/purchases/$id',
+  path: '/purchases/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PurchasesNewRoute = PurchasesNewRouteImport.update({
+  id: '/purchases/new',
+  path: '/purchases/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SalesIdRoute = SalesIdRouteImport.update({
   id: '/sales/$id',
   path: '/sales/$id',
@@ -106,6 +125,11 @@ const SalesNewInstallmentRoute = SalesNewInstallmentRouteImport.update({
   path: '/sales/new-installment',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SuppliersIdRoute = SuppliersIdRouteImport.update({
+  id: '/suppliers_/$id',
+  path: '/suppliers/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -117,13 +141,17 @@ export interface FileRoutesByFullPath {
   '/products': typeof ProductsRoute
   '/settings': typeof SettingsRoute
   '/stock-count': typeof StockCountRoute
+  '/suppliers': typeof SuppliersRoute
   '/users': typeof UsersRoute
   '/contracts/$id': typeof ContractsIdRoute
   '/customers/$id': typeof CustomersIdRoute
   '/products/$id': typeof ProductsIdRoute
+  '/purchases/$id': typeof PurchasesIdRoute
+  '/purchases/new': typeof PurchasesNewRoute
   '/sales/$id': typeof SalesIdRoute
   '/sales/new': typeof SalesNewRoute
   '/sales/new-installment': typeof SalesNewInstallmentRoute
+  '/suppliers/$id': typeof SuppliersIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -135,13 +163,17 @@ export interface FileRoutesByTo {
   '/products': typeof ProductsRoute
   '/settings': typeof SettingsRoute
   '/stock-count': typeof StockCountRoute
+  '/suppliers': typeof SuppliersRoute
   '/users': typeof UsersRoute
   '/contracts/$id': typeof ContractsIdRoute
   '/customers/$id': typeof CustomersIdRoute
   '/products/$id': typeof ProductsIdRoute
+  '/purchases/$id': typeof PurchasesIdRoute
+  '/purchases/new': typeof PurchasesNewRoute
   '/sales/$id': typeof SalesIdRoute
   '/sales/new': typeof SalesNewRoute
   '/sales/new-installment': typeof SalesNewInstallmentRoute
+  '/suppliers/$id': typeof SuppliersIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -154,13 +186,17 @@ export interface FileRoutesById {
   '/products': typeof ProductsRoute
   '/settings': typeof SettingsRoute
   '/stock-count': typeof StockCountRoute
+  '/suppliers': typeof SuppliersRoute
   '/users': typeof UsersRoute
   '/contracts_/$id': typeof ContractsIdRoute
   '/customers_/$id': typeof CustomersIdRoute
   '/products_/$id': typeof ProductsIdRoute
+  '/purchases/$id': typeof PurchasesIdRoute
+  '/purchases/new': typeof PurchasesNewRoute
   '/sales/$id': typeof SalesIdRoute
   '/sales/new': typeof SalesNewRoute
   '/sales/new-installment': typeof SalesNewInstallmentRoute
+  '/suppliers_/$id': typeof SuppliersIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -174,13 +210,17 @@ export interface FileRouteTypes {
     | '/products'
     | '/settings'
     | '/stock-count'
+    | '/suppliers'
     | '/users'
     | '/contracts/$id'
     | '/customers/$id'
     | '/products/$id'
+    | '/purchases/$id'
+    | '/purchases/new'
     | '/sales/$id'
     | '/sales/new'
     | '/sales/new-installment'
+    | '/suppliers/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -192,13 +232,17 @@ export interface FileRouteTypes {
     | '/products'
     | '/settings'
     | '/stock-count'
+    | '/suppliers'
     | '/users'
     | '/contracts/$id'
     | '/customers/$id'
     | '/products/$id'
+    | '/purchases/$id'
+    | '/purchases/new'
     | '/sales/$id'
     | '/sales/new'
     | '/sales/new-installment'
+    | '/suppliers/$id'
   id:
     | '__root__'
     | '/'
@@ -210,13 +254,17 @@ export interface FileRouteTypes {
     | '/products'
     | '/settings'
     | '/stock-count'
+    | '/suppliers'
     | '/users'
     | '/contracts_/$id'
     | '/customers_/$id'
     | '/products_/$id'
+    | '/purchases/$id'
+    | '/purchases/new'
     | '/sales/$id'
     | '/sales/new'
     | '/sales/new-installment'
+    | '/suppliers_/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -229,13 +277,17 @@ export interface RootRouteChildren {
   ProductsRoute: typeof ProductsRoute
   SettingsRoute: typeof SettingsRoute
   StockCountRoute: typeof StockCountRoute
+  SuppliersRoute: typeof SuppliersRoute
   UsersRoute: typeof UsersRoute
   ContractsIdRoute: typeof ContractsIdRoute
   CustomersIdRoute: typeof CustomersIdRoute
   ProductsIdRoute: typeof ProductsIdRoute
+  PurchasesIdRoute: typeof PurchasesIdRoute
+  PurchasesNewRoute: typeof PurchasesNewRoute
   SalesIdRoute: typeof SalesIdRoute
   SalesNewRoute: typeof SalesNewRoute
   SalesNewInstallmentRoute: typeof SalesNewInstallmentRoute
+  SuppliersIdRoute: typeof SuppliersIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -303,6 +355,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StockCountRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/suppliers': {
+      id: '/suppliers'
+      path: '/suppliers'
+      fullPath: '/suppliers'
+      preLoaderRoute: typeof SuppliersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/users': {
       id: '/users'
       path: '/users'
@@ -331,6 +390,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProductsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/purchases/$id': {
+      id: '/purchases/$id'
+      path: '/purchases/$id'
+      fullPath: '/purchases/$id'
+      preLoaderRoute: typeof PurchasesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/purchases/new': {
+      id: '/purchases/new'
+      path: '/purchases/new'
+      fullPath: '/purchases/new'
+      preLoaderRoute: typeof PurchasesNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sales/$id': {
       id: '/sales/$id'
       path: '/sales/$id'
@@ -352,6 +425,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SalesNewInstallmentRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/suppliers_/$id': {
+      id: '/suppliers_/$id'
+      path: '/suppliers/$id'
+      fullPath: '/suppliers/$id'
+      preLoaderRoute: typeof SuppliersIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -365,13 +445,17 @@ const rootRouteChildren: RootRouteChildren = {
   ProductsRoute: ProductsRoute,
   SettingsRoute: SettingsRoute,
   StockCountRoute: StockCountRoute,
+  SuppliersRoute: SuppliersRoute,
   UsersRoute: UsersRoute,
   ContractsIdRoute: ContractsIdRoute,
   CustomersIdRoute: CustomersIdRoute,
   ProductsIdRoute: ProductsIdRoute,
+  PurchasesIdRoute: PurchasesIdRoute,
+  PurchasesNewRoute: PurchasesNewRoute,
   SalesIdRoute: SalesIdRoute,
   SalesNewRoute: SalesNewRoute,
   SalesNewInstallmentRoute: SalesNewInstallmentRoute,
+  SuppliersIdRoute: SuppliersIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

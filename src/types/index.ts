@@ -361,3 +361,59 @@ export interface RestructureEvent {
   user_id: string | null;
   created_at: string;
 }
+
+/** §60 Suppliers — lean subset. §11 governance: no hard delete — `active` is the only way a
+ * supplier is retired. */
+export interface Supplier {
+  id: string;
+  tenant_id: string;
+  code: string;
+  name: string;
+  phone: string;
+  address?: string;
+  notes?: string;
+  active: boolean;
+  created_at: string;
+}
+
+/**
+ * §61-§64 Purchasing — a request and its goods receipt are combined into one action for this
+ * Mock stage (`createPurchase` in data-store.ts calls the same `receiveStock` a manual
+ * "receive stock" click already uses, not a parallel path). Real Phase-with-Supabase work can
+ * split Request → Approval → PO → Receipt into separate states without changing this type's
+ * readers, same rule as every other simplified type in this file. `serial_numbers` mirrors
+ * exactly what was entered for `serial_required` products (one per unit); empty otherwise.
+ */
+export interface PurchaseItem {
+  product_id: string;
+  product_name: string;
+  serial_numbers: string[];
+  quantity: number;
+  unit_cost: number;
+  line_total: number;
+}
+
+export interface Purchase {
+  id: string;
+  tenant_id: string;
+  purchase_number: string;
+  supplier_id: string;
+  supplier_name: string;
+  items: PurchaseItem[];
+  total: number;
+  user_id: string | null;
+  created_at: string;
+}
+
+/** §65 Supplier Payments — unlike customer installments, suppliers have no due-date schedule in
+ * this Mock: a payment simply reduces the running balance
+ * (`sum(purchases.total) - sum(payments.amount)` for that supplier), validated against it in
+ * `recordSupplierPayment` before writing. */
+export interface SupplierPayment {
+  id: string;
+  tenant_id: string;
+  supplier_id: string;
+  amount: number;
+  user_id: string | null;
+  created_at: string;
+}

@@ -12,11 +12,15 @@ import type {
   PromiseToPay,
   Product,
   ProductSerial,
+  Purchase,
+  PurchaseItem,
   RestructureEvent,
   Role,
   RolePermission,
   Sale,
   SaleItem,
+  Supplier,
+  SupplierPayment,
   SystemRoleName,
   Tenant,
   TenantSettings,
@@ -63,6 +67,9 @@ const KEYS = {
   installmentPayments: `${STORAGE_PREFIX}.installment_payments.v1`,
   promisesToPay: `${STORAGE_PREFIX}.promises_to_pay.v1`,
   restructureEvents: `${STORAGE_PREFIX}.restructure_events.v1`,
+  suppliers: `${STORAGE_PREFIX}.suppliers.v1`,
+  purchases: `${STORAGE_PREFIX}.purchases.v1`,
+  supplierPayments: `${STORAGE_PREFIX}.supplier_payments.v1`,
 } as const;
 
 const listeners = new Set<() => void>();
@@ -402,6 +409,32 @@ function seedInventoryMovements(): InventoryMovement[] {
   ];
 }
 
+/** §60 — a couple of demo rows so the Suppliers page isn't empty on first run. */
+function seedSuppliers(): Supplier[] {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: "supplier_demo_1",
+      tenant_id: DEMO_TENANT_ID,
+      code: "SUP-0001",
+      name: "شركة الدلتا للأجهزة",
+      phone: "0223456789",
+      address: "القاهرة",
+      active: true,
+      created_at: now,
+    },
+    {
+      id: "supplier_demo_2",
+      tenant_id: DEMO_TENANT_ID,
+      code: "SUP-0002",
+      name: "مؤسسة النور للتوريدات",
+      phone: "0224567891",
+      active: true,
+      created_at: now,
+    },
+  ];
+}
+
 /* ---------------- Reads ---------------- */
 
 export function getTenants(): Tenant[] {
@@ -487,6 +520,30 @@ export function getGuarantors(): Guarantor[] {
 
 export function getSales(): Sale[] {
   return readCollection(KEYS.sales, () => []);
+}
+
+export function getSuppliers(): Supplier[] {
+  return readCollection(KEYS.suppliers, seedSuppliers);
+}
+
+export function getPurchases(): Purchase[] {
+  return readCollection(KEYS.purchases, () => []);
+}
+
+export function getSupplierPayments(): SupplierPayment[] {
+  return readCollection(KEYS.supplierPayments, () => []);
+}
+
+/** §65 — running balance owed to a supplier: total purchased minus total paid. No due-date
+ * schedule on this side (unlike customer installments), so this is the whole picture. */
+export function getSupplierBalance(supplierId: string): number {
+  const totalPurchased = getPurchases()
+    .filter((p) => p.supplier_id === supplierId)
+    .reduce((sum, p) => sum + p.total, 0);
+  const totalPaid = getSupplierPayments()
+    .filter((p) => p.supplier_id === supplierId)
+    .reduce((sum, p) => sum + p.amount, 0);
+  return Math.round((totalPurchased - totalPaid) * 100) / 100;
 }
 
 export function getInstallmentPlans(): InstallmentPlan[] {
@@ -1727,6 +1784,221 @@ export function restructureContract(
   });
 
   return event;
+}
+
+/* ---------------- Suppliers (§60) ---------------- */
+
+export function createSupplier(
+  input: Omit<Supplier, "id" | "tenant_id" | "code" | "active" | "created_at">,
+  actorUserId: string | null,
+): Supplier {
+  const existing = getSuppliers();
+  const supplier: Supplier = {
+    ...input,
+    id: genId("supplier"),
+    tenant_id: DEMO_TENANT_ID,
+    code: nextCode("SUP", existing.length),
+    active: true,
+    created_at: new Date().toISOString(),
+  };
+  writeCollection(KEYS.suppliers, [...existing, supplier]);
+  recordAudit({
+    tenant_id: supplier.tenant_id,
+    user_id: actorUserId,
+    action: "supplier.create",
+    entity: "suppliers",
+    entity_id: supplier.id,
+    new_value: supplier,
+  });
+  return supplier;
+}
+
+export function updateSupplier(
+  id: string,
+  patch: Partial<Omit<Supplier, "id" | "tenant_id" | "code" | "created_at">>,
+  actorUserId: string | null,
+): void {
+  const suppliers = getSuppliers();
+  const before = suppliers.find((s) => s.id === id);
+  if (!before) throw new Error("المورد غير موجود");
+  const after: Supplier = { ...before, ...patch };
+  writeCollection(
+    KEYS.suppliers,
+    suppliers.map((s) => (s.id === id ? after : s)),
+  );
+  recordAudit({
+    tenant_id: before.tenant_id,
+    user_id: actorUserId,
+    action: "supplier.update",
+    entity: "suppliers",
+    entity_id: id,
+    old_value: before,
+    new_value: after,
+  });
+}
+
+/* ---------------- Purchasing (§61-§65) ---------------- */
+
+function nextPurchaseNumber(): string {
+  const year = new Date().getFullYear();
+  const prefix = `PUR-${year}-`;
+  const count = getPurchases().filter((p) => p.purchase_number.startsWith(prefix)).length;
+  return `${prefix}${String(count + 1).padStart(6, "0")}`;
+}
+
+export interface CreatePurchaseInput {
+  supplier_id: string;
+  items: Array<{
+    product_id: string;
+    quantity: number;
+    unit_cost: number;
+    serial_numbers?: string[];
+  }>;
+}
+
+/**
+ * Combines Purchase Request and Goods Receipt into one action (see the `Purchase` type
+ * comment). Validates every line before writing anything, then applies each line's inventory
+ * effect through `receiveStock` — the exact same function a manual "receive stock" click on a
+ * product's detail page calls, not a parallel path — so serial/ledger behavior can never drift
+ * between the two entry points. Cost is then updated per `TenantSettings.costing_method`;
+ * "fifo" isn't distinctly implemented in Mock mode (no per-lot tracking) and falls back to the
+ * same weighted-average math as "average" — a documented simplification, not a bug.
+ */
+export function createPurchase(input: CreatePurchaseInput, actorUserId: string | null): Purchase {
+  if (input.items.length === 0) throw new Error("لازم تضيف صنف واحد على الأقل");
+
+  const supplier = getSuppliers().find((s) => s.id === input.supplier_id);
+  if (!supplier) throw new Error("المورد غير موجود");
+  if (!supplier.active) throw new Error("المورد غير نشط");
+
+  const products = getProducts();
+  const existingSerials = getProductSerials();
+  const seenSerialsThisPurchase = new Set<string>();
+
+  const purchaseItems: PurchaseItem[] = [];
+  for (const line of input.items) {
+    const product = products.find((p) => p.id === line.product_id);
+    if (!product) throw new Error("منتج غير موجود");
+    if (!product.active) throw new Error(`المنتج "${product.name}" غير نشط`);
+    if (line.quantity <= 0) throw new Error(`كمية غير صحيحة للمنتج "${product.name}"`);
+    if (line.unit_cost < 0) throw new Error(`سعر تكلفة غير صحيح للمنتج "${product.name}"`);
+
+    const serials = (line.serial_numbers ?? []).map((s) => s.trim()).filter(Boolean);
+    if (product.serial_required) {
+      if (serials.length !== line.quantity) {
+        throw new Error(`أدخل ${line.quantity} سيريال بالظبط للمنتج "${product.name}"`);
+      }
+      for (const serial of serials) {
+        const key = serial.toLowerCase();
+        if (seenSerialsThisPurchase.has(key)) {
+          throw new Error(`السيريال "${serial}" مكرر في نفس أمر الشراء`);
+        }
+        if (existingSerials.some((s) => s.serial_number.toLowerCase() === key)) {
+          throw new Error(`السيريال "${serial}" مسجّل بالفعل`);
+        }
+        seenSerialsThisPurchase.add(key);
+      }
+    }
+
+    purchaseItems.push({
+      product_id: product.id,
+      product_name: product.name,
+      serial_numbers: serials,
+      quantity: line.quantity,
+      unit_cost: line.unit_cost,
+      line_total: Math.round(line.unit_cost * line.quantity * 100) / 100,
+    });
+  }
+
+  const purchase_number = nextPurchaseNumber();
+  const settings = getCurrentTenantSettings();
+
+  // Every line already validated above, so applying effects here can't fail partway through.
+  for (const item of purchaseItems) {
+    const productBefore = products.find((p) => p.id === item.product_id)!;
+    const stockBefore = getProductStock(item.product_id, productBefore);
+
+    receiveStock(
+      item.product_id,
+      item.quantity,
+      item.serial_numbers.length > 0 ? item.serial_numbers : undefined,
+      actorUserId,
+      purchase_number,
+    );
+
+    const newCost =
+      settings.costing_method === "last_purchase"
+        ? item.unit_cost
+        : stockBefore + item.quantity > 0
+          ? Math.round(
+              ((stockBefore * productBefore.cost_price + item.quantity * item.unit_cost) /
+                (stockBefore + item.quantity)) *
+                100,
+            ) / 100
+          : item.unit_cost;
+    updateProduct(item.product_id, { cost_price: newCost }, actorUserId);
+  }
+
+  const total = Math.round(purchaseItems.reduce((sum, i) => sum + i.line_total, 0) * 100) / 100;
+  const purchase: Purchase = {
+    id: genId("purchase"),
+    tenant_id: DEMO_TENANT_ID,
+    purchase_number,
+    supplier_id: supplier.id,
+    supplier_name: supplier.name,
+    items: purchaseItems,
+    total,
+    user_id: actorUserId,
+    created_at: new Date().toISOString(),
+  };
+  writeCollection(KEYS.purchases, [...getPurchases(), purchase]);
+
+  recordAudit({
+    tenant_id: DEMO_TENANT_ID,
+    user_id: actorUserId,
+    action: "purchase.create",
+    entity: "purchases",
+    entity_id: purchase.id,
+    new_value: purchase,
+  });
+
+  return purchase;
+}
+
+/** §65 — validates against `getSupplierBalance` before writing so a payment can never push a
+ * supplier's balance negative. */
+export function recordSupplierPayment(
+  supplierId: string,
+  amount: number,
+  actorUserId: string | null,
+): SupplierPayment {
+  const supplier = getSuppliers().find((s) => s.id === supplierId);
+  if (!supplier) throw new Error("المورد غير موجود");
+  if (amount <= 0) throw new Error("المبلغ يجب أن يكون أكبر من صفر");
+  const balance = getSupplierBalance(supplierId);
+  if (amount > balance) {
+    throw new Error(`المبلغ أكبر من الرصيد المستحق للمورد (${balance} ج.م)`);
+  }
+
+  const payment: SupplierPayment = {
+    id: genId("suppay"),
+    tenant_id: DEMO_TENANT_ID,
+    supplier_id: supplierId,
+    amount,
+    user_id: actorUserId,
+    created_at: new Date().toISOString(),
+  };
+  writeCollection(KEYS.supplierPayments, [...getSupplierPayments(), payment]);
+  recordAudit({
+    tenant_id: DEMO_TENANT_ID,
+    user_id: actorUserId,
+    action: "supplier_payment.record",
+    entity: "supplier_payments",
+    entity_id: payment.id,
+    new_value: payment,
+  });
+  return payment;
 }
 
 /* ----------------------------------------------------------------------------------------

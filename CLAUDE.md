@@ -67,18 +67,22 @@ bun run lint
   - **Early Settlement (§47):** `earlySettleContract` بيسدد كل المتبقي دفعة واحدة عبر نفس مسار `collectPayment` (نفس الإيصال/التدقيق)، وبعدين يميّز العقد `settled_early` عن `settled` العادي.
   - **Restructuring (§48):** `restructureContract` **لا يعدّل ولا يحذف الجدول الأصلي أبدًا** — الأقساط المتبقية تتحول `rescheduled` (تُحفظ للأبد كتاريخ) وتُنشأ أقساط جديدة على نفس العقد بمدة جديدة (بدون تمويل إضافي)، مع `RestructureEvent` يربط القديم بالجديد. اتحقق فعليًا بمتصفح: 6 أقساط قديمة اتحولت `rescheduled`، 9 أقساط جديدة اتولدت.
   - **Migration:** `0005_installments.sql` (installment_plans/installment_contracts/installments/installment_payments/promises_to_pay/restructure_events) بـRLS كاملة، `installment_payments`/`restructure_events` بدون policy تعديل/حذف (Append-only زي `audit_logs`).
-- **Migrations:** `0001_foundation.sql` (tenants/tenant_settings/users/roles/permissions/role_permissions/user_roles/audit_logs) + `0002_customers_products.sql` (customers بـcredit_limit، products) + `0003_inventory.sql` (product_serials، inventory_movements) + `0004_sales.sql` (guarantors، sales بـ`items jsonb`) + `0005_installments.sql` (تقسيط كامل) — كلها بـRLS كاملة جاهزة، غير مُطبَّقة بعد.
+- **Phase 5 — Purchasing (§60-§65) — منفّذة بالكامل:**
+  - `/suppliers` — list+add+edit بنفس نمط `/customers` بالحرف (بدون حذف — `active` فقط)، عمود "الرصيد المستحق" محسوب حيًّا من `getSupplierBalance`.
+  - **أمر شراء فعلي (§61-§64):** `/purchases/new` — مورد نشط → أصناف بسعر تكلفة الوحدة (مش سعر بيع) → لمنتجات السيريال: عدد حقول سيريال يتغيّر ديناميكيًا مع الكمية (نفس نمط فورم "استلام كمية" في `/products/$id`) → تأكيد → `/purchases/$id` (إيصال).
+  - `createPurchase` (في `data-store.ts`): **الطلب والاستلام مدموجين في خطوة واحدة عمدًا لهذه المرحلة** (موثّق في تعليق النوع `Purchase`) — يتحقق من كل الأسطر (مورد نشط، منتج نشط، عدد سيريالات مطابق للكمية، لا سيريال مكرر لا في نفس الأمر ولا موجود قبل كده) **قبل** ما يكتب أي حاجة، وبعدين يطبّق كل سطر عبر **نفس دالة `receiveStock`** اللي بيستخدمها زرار "استلام كمية" اليدوي في صفحة المنتج — مش مسار موازٍ، بالظبط زي ما اتوعدنا في تخطيط الـPhase. رقم الأمر `PUR-YYYY-NNNNNN` (§91).
+  - **تحديث سعر التكلفة تلقائيًا حسب `TenantSettings.costing_method`:** `last_purchase` يستبدل السعر مباشرة، `average` يحسب متوسط مرجّح بالكمية (**اتحقق منه فعليًا بمتصفح:** مخزون 3 بسعر 12,000 + شراء 2 بسعر 15,000 = متوسط 13,200 بالظبط). `fifo` مش منفّذ بشكل منفصل في وضع الـMock (يحتاج تتبّع دفعات، Real Phase work) — بيسلك نفس سلوك `average` مؤقتًا، القرار موثّق في تعليق الكود صراحةً كتبسيط متعمد.
+  - `/suppliers/$id` (الملف: `suppliers_.$id.tsx`) — Supplier 360: إجمالي مشتريات، عدد أوامر شراء، الرصيد المستحق، تسجيل دفعة (`recordSupplierPayment` يرفض أي مبلغ أكبر من الرصيد قبل الكتابة — **لا جدول استحقاق للموردين في هذا الـMock** بعكس تقسيط العملاء، مجرد رصيد جاري)، سجل مدفوعات، سجل أوامر شراء (روابط للإيصالات).
+  - **Migration:** `0006_purchasing.sql` (suppliers/purchases/supplier_payments) بـRLS كاملة، `purchases`/`supplier_payments` بدون policy تعديل/حذف (Append-only زي `sales`/`installment_payments`).
+- **Migrations:** `0001_foundation.sql` (tenants/tenant_settings/users/roles/permissions/role_permissions/user_roles/audit_logs) + `0002_customers_products.sql` (customers بـcredit_limit، products) + `0003_inventory.sql` (product_serials، inventory_movements) + `0004_sales.sql` (guarantors، sales بـ`items jsonb`) + `0005_installments.sql` (تقسيط كامل) + `0006_purchasing.sql` (موردون/مشتريات/مدفوعات موردين) — كلها بـRLS كاملة جاهزة، غير مُطبَّقة بعد.
 
 ### التالي مباشرة (بالترتيب — راجع خطة التنفيذ الكاملة أدناه لكل Phase بالتفصيل)
 
-**Phase 5 — Purchasing** ← نحن هنا الآن (راجع تفاصيلها كاملة تحت).
+**Phase 6 — Finance** ← نحن هنا الآن (راجع تفاصيلها كاملة تحت).
 
 ## خطة التنفيذ الكاملة (كل الـPhases 1→9 — المرجع الوحيد الدائم، الجلسة دي ممكن تنقطع فالملف ده اللي بيرجّعك بالظبط لمطرح ما وقفت)
 
 الترتيب مطابق لـ§131 في الـSpec. كل Phase فرعية = تعديل محدد → build/lint/tsc نظيفين → اختبار Playwright فعلي → لقطة شاشة لو فيها قيمة بصرية → تحديث قسم "الحالة الحالية" أعلاه → commit محدد + push. **مفيش وقفات للسؤال إلا عند Blocker حقيقي** (قرار مالي حساس الـSpec نفسها تقول "يحتاج تأكيد" — يتسجل كإعداد قابل للتفعيل بدل ما يُخترع).
-
-**Phase 5 — Purchasing:**
-`/suppliers` CRUD · `/purchases/new` (طلب→استلام يحدّث المخزون وينشئ سيريالات) · Supplier Payments.
 
 **Phase 6 — Finance:**
 Treasury accounts (خزينة رئيسية+كاشير، أرصدة فعلية) · Shift open/close (§70) · Expenses (§73) · محاسبة مبسّطة (§74/75: Chart of Accounts أساسي + قيد تلقائي لكل بيع/تحصيل/شراء/مصروف) · Daily Close Snapshot (عرض فقط، بدون قفل فترات فعلي).
