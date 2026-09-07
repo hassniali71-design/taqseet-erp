@@ -1,0 +1,12 @@
+{
+  "name": "taqseet-erp",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "postCreateCommand": "curl -fsSL https://bun.sh/install | bash && echo 'export PATH=\"$HOME/.bun/bin:$PATH\"' >> ~/.bashrc && export PATH=\"$HOME/.bun/bin:$PATH\" && bun install",
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": {
+      "label": "taqseet-erp dev server",
+      "onAutoForward": "openPreview"
+    }
+  }
+}
