@@ -441,7 +441,7 @@ export interface TreasuryMovement {
   id: string;
   tenant_id: string;
   account_id: string;
-  type: "opening" | "sale" | "collection" | "purchase_payment" | "expense";
+  type: "opening" | "sale" | "collection" | "purchase_payment" | "expense" | "return" | "exchange";
   /** Signed — positive increases the account's balance, negative decreases it. */
   amount: number;
   before: number;
@@ -512,5 +512,74 @@ export interface JournalEntry {
   description: string;
   reference_type: string;
   reference_id: string;
+  created_at: string;
+}
+
+/**
+ * §79/§81 Returns — scoped to cash sales only in this Mock increment (an installment-contract
+ * return would need to unwind AR/schedule math, real Phase-with-Supabase work; the spec doesn't
+ * require it in V1 either). §11 governance: the original `Sale` is never edited or deleted —
+ * a `SaleReturn` is a new, separate record referencing it. A returned `serial_required` unit
+ * goes to `inspection`, never straight back to `available` (§81) — it only becomes sellable
+ * again through a manual product-detail action, not through this flow.
+ */
+export interface ReturnItem {
+  product_id: string;
+  product_name: string;
+  serial_id?: string;
+  serial_number?: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+}
+
+export interface SaleReturn {
+  id: string;
+  tenant_id: string;
+  return_number: string;
+  sale_id: string;
+  customer_id: string | null;
+  customer_name: string;
+  items: ReturnItem[];
+  refund_amount: number;
+  reason: string;
+  user_id: string | null;
+  created_at: string;
+}
+
+/**
+ * §82 Exchange — a simplified compound action: return some items (same Inspection rule as
+ * `SaleReturn`) and sell new ones in the same transaction, settling only the price difference
+ * (paid in cash if positive, refunded in cash if negative) rather than two separate documents.
+ */
+export interface ExchangeTransaction {
+  id: string;
+  tenant_id: string;
+  exchange_number: string;
+  original_sale_id: string;
+  returned_items: ReturnItem[];
+  new_items: SaleItem[];
+  /** new_items total − returned_items total. Positive = customer paid more; negative = refunded. */
+  price_difference: number;
+  reason: string;
+  user_id: string | null;
+  created_at: string;
+}
+
+/**
+ * §84 Delivery Orders — a service tracked separately from the sale's value (§133 rule 11: never
+ * folded into Principal automatically). §11 governance: no hard delete — the state machine
+ * (`scheduled` → `out_for_delivery` → `delivered`) is the only way a delivery moves forward.
+ */
+export interface DeliveryOrder {
+  id: string;
+  tenant_id: string;
+  sale_id: string;
+  customer_name: string;
+  address: string;
+  scheduled_date: string;
+  status: "scheduled" | "out_for_delivery" | "delivered";
+  delivered_at?: string;
+  user_id: string | null;
   created_at: string;
 }

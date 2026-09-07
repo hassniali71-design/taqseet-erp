@@ -24,6 +24,8 @@ const MOVEMENT_TYPE_LABELS: Record<TreasuryMovement["type"], string> = {
   collection: "تحصيل",
   purchase_payment: "دفعة لمورد",
   expense: "مصروف",
+  return: "مرتجع",
+  exchange: "استبدال",
 };
 
 function isToday(isoDate: string): boolean {

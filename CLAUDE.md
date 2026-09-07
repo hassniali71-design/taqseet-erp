@@ -82,18 +82,22 @@ bun run lint
   - **محاسبة مبسّطة (§74/§75):** دليل حسابات ثابت من 7 حسابات (`1000` الخزينة، `1100` عملاء، `1200` المخزون، `2000` موردون، `3000` إيرادات مبيعات، `3100` إيرادات تمويل، `5000` مصروفات). `postJournalEntry` **الدالة الوحيدة** اللي بتنشئ `JournalEntry` — بتتأكد إن مجموع المدين = مجموع الدائن قبل الكتابة (لو مش متوازن بترمي خطأ فورًا، خط دفاع ضد أي باگ مستقبلي في قيد). قيود تلقائية تتولّد من: بيع نقدي، عقد تقسيط (فصل إيراد المبيعات عن إيراد التمويل — §75)، تحصيل، أمر شراء (بدون تأثير خزينة — يُنشئ التزام مورد فقط)، ودفعة مورد/مصروف. `/accounting` — عرض للقراءة فقط لدليل الحسابات والقيود، **الموظف العادي مالوش أي تعامل مباشر مع القيود دي أبدًا**.
   - **Migration:** `0007_finance.sql` (treasury_accounts/treasury_movements/shifts/expenses/journal_entries) بـRLS كاملة، `treasury_movements`/`journal_entries`/`expenses` بدون policy تعديل/حذف (Append-only).
   - **ملاحظة اختبار مهمة (Playwright، مش باگ في التطبيق):** `page.click("text=...")` فشل في الضغط مرتين متتاليتين على نفس الزرار بعد إعادة رسم الصفحة (ظهور رسالة خطأ غيّرت التخطيط) — الحل: استخدام `page.getByRole("button", { name: "..." })` كـLocator ثابت بدل إعادة الاستعلام بالنص كل مرة. اتأكد إن منطق `closeShift` نفسه سليم 100% (نفس النتيجة بالظبط لما استخدمنا getByRole).
-- **Migrations:** `0001_foundation.sql` (tenants/tenant_settings/users/roles/permissions/role_permissions/user_roles/audit_logs) + `0002_customers_products.sql` (customers بـcredit_limit، products) + `0003_inventory.sql` (product_serials، inventory_movements) + `0004_sales.sql` (guarantors، sales بـ`items jsonb`) + `0005_installments.sql` (تقسيط كامل) + `0006_purchasing.sql` (موردون/مشتريات/مدفوعات موردين) + `0007_finance.sql` (خزينة/ورديات/مصروفات/قيود) — كلها بـRLS كاملة جاهزة، غير مُطبَّقة بعد.
+- **Phase 7 — After Sales (§79-§86) — منفّذة بالكامل:**
+  - **نطاق متعمد:** الإرجاع والاستبدال في هذه الزيادة **للبيع النقدي فقط** — عقود التقسيط مؤجّلة لأنها تحتاج فك رياضة AR/الجدول، والـSpec نفسها ما بتلزمش V1 بيها. موثّق في تعليق النوع `SaleReturn`.
+  - **الإرجاع (§79/§81):** `createReturn` — يتحقق من كل سطر قبل أي كتابة (الصنف موجود فعلًا في الفاتورة، الكمية متبقية بعد أي إرجاعات سابقة على نفس الفاتورة، السيريال حالته `sold`، فترة السماح `return_period_days` لسه سارية) ثم يطبّق: **سيريال يدخل `inspection` مش `available` مباشرة** (اتحقق منه فعليًا بمتصفح — الصفحة أظهرت "تحت الفحص" بعد الإرجاع، مش "متاح")، بينما الكمية غير المرتبطة بسيريال بترجع للمخزون فورًا (تبسيط متعمد — مفيش نظام Inspection موازٍ للمخزون السائب في حجم المشروع ده). رقم مرتجع `RET-YYYY-NNNNNN`، استرداد نقدي فوري من الخزينة + قيد محاسبي (مدين إيرادات مبيعات/دائن نقدية). زرار "إرجاع" وفورم كمية لكل صنف على `/sales/$id` نفسها + سجل مرتجعات الفاتورة.
+  - **الاستبدال (§82):** `createExchange` — إجراء واحد مركّب: يرجّع أصناف (نفس قاعدة Inspection) ويبيع أصناف جديدة بسعر البيع النقدي في نفس العملية، ويسوّي **الفرق فقط** نقدًا (تحصيل أو استرداد حسب الاتجاه) بدل ما ينشئ مستندين منفصلين. `/exchanges/new` — بحث برقم فاتورة، إضافة أصناف مرتجعة من نفس الفاتورة + أصناف جديدة، عرض الفرق (يدفع العميل / يُرد له) قبل التأكيد.
+  - **التوصيل (§84):** `scheduleDelivery`/`advanceDeliveryStatus` — حالة أحادية الاتجاه (`scheduled → out_for_delivery → delivered`، مفيش تخطي مراحل)، **خدمة منفصلة تمامًا عن قيمة البيع** (§133 قاعدة 11 — لا تلمس `Sale` نفسها أبدًا). `/deliveries` — جدولة + عرض + نقل للمرحلة التالية.
+  - **الضمان (§86):** `getWarrantyInfo` — **بدون أي كيان مخزّن**، محسوب وقت الطلب فقط من `ProductSerial` + `Product.warranty_months` + تاريخ البيع (نقدي أو تقسيط، الضمان مش مقصور على طريقة الدفع). `/warranty` — بحث برقم سيريال، يعرض تاريخ الشراء/العميل/نهاية الضمان/سارٍ أو منتهٍ.
+  - **Migration:** `0008_after_sales.sql` (sale_returns/exchange_transactions/delivery_orders) بـRLS كاملة، `sale_returns`/`exchange_transactions` بدون policy تعديل/حذف (Append-only).
+- **Migrations:** `0001_foundation.sql` (tenants/tenant_settings/users/roles/permissions/role_permissions/user_roles/audit_logs) + `0002_customers_products.sql` (customers بـcredit_limit، products) + `0003_inventory.sql` (product_serials، inventory_movements) + `0004_sales.sql` (guarantors، sales بـ`items jsonb`) + `0005_installments.sql` (تقسيط كامل) + `0006_purchasing.sql` (موردون/مشتريات/مدفوعات موردين) + `0007_finance.sql` (خزينة/ورديات/مصروفات/قيود) + `0008_after_sales.sql` (مرتجعات/استبدال/توصيل) — كلها بـRLS كاملة جاهزة، غير مُطبَّقة بعد.
 
 ### التالي مباشرة (بالترتيب — راجع خطة التنفيذ الكاملة أدناه لكل Phase بالتفصيل)
 
-**Phase 7 — After Sales** ← نحن هنا الآن (راجع تفاصيلها كاملة تحت).
+**Phase 8 — Reports & Notifications** ← نحن هنا الآن (راجع تفاصيلها كاملة تحت).
 
 ## خطة التنفيذ الكاملة (كل الـPhases 1→9 — المرجع الوحيد الدائم، الجلسة دي ممكن تنقطع فالملف ده اللي بيرجّعك بالظبط لمطرح ما وقفت)
 
 الترتيب مطابق لـ§131 في الـSpec. كل Phase فرعية = تعديل محدد → build/lint/tsc نظيفين → اختبار Playwright فعلي → لقطة شاشة لو فيها قيمة بصرية → تحديث قسم "الحالة الحالية" أعلاه → commit محدد + push. **مفيش وقفات للسؤال إلا عند Blocker حقيقي** (قرار مالي حساس الـSpec نفسها تقول "يحتاج تأكيد" — يتسجل كإعداد قابل للتفعيل بدل ما يُخترع).
-
-**Phase 7 — After Sales:**
-Returns (§79/81، Inspection مش Available مباشرة) · Exchange مبسّط (§82) · Delivery Orders (§84) · Warranty للقراءة (§86، من warranty_months).
 
 **Phase 8 — Reports & Notifications:**
 `/dashboard` بأرقام حقيقية كاملة (مبيعات اليوم/تحصيلات مستحقة/متأخرات/مخزون منخفض) · `/reports` (مبيعات، عقود، كشف حساب، بطيء الحركة) · Notification Center داخلي مُشتق (§92، بدون WhatsApp/SMS فعلي — Feature Flag متوقف، §93).

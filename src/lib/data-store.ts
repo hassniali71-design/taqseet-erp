@@ -2,7 +2,9 @@ import type {
   AccountCode,
   AuditLogEntry,
   Customer,
+  DeliveryOrder,
   Expense,
+  ExchangeTransaction,
   Guarantor,
   Installment,
   InstallmentContract,
@@ -19,10 +21,12 @@ import type {
   Purchase,
   PurchaseItem,
   RestructureEvent,
+  ReturnItem,
   Role,
   RolePermission,
   Sale,
   SaleItem,
+  SaleReturn,
   Shift,
   Supplier,
   SupplierPayment,
@@ -82,6 +86,9 @@ const KEYS = {
   shifts: `${STORAGE_PREFIX}.shifts.v1`,
   expenses: `${STORAGE_PREFIX}.expenses.v1`,
   journalEntries: `${STORAGE_PREFIX}.journal_entries.v1`,
+  saleReturns: `${STORAGE_PREFIX}.sale_returns.v1`,
+  exchangeTransactions: `${STORAGE_PREFIX}.exchange_transactions.v1`,
+  deliveryOrders: `${STORAGE_PREFIX}.delivery_orders.v1`,
 } as const;
 
 const listeners = new Set<() => void>();
@@ -582,6 +589,18 @@ export function getGuarantors(): Guarantor[] {
 
 export function getSales(): Sale[] {
   return readCollection(KEYS.sales, () => []);
+}
+
+export function getSaleReturns(): SaleReturn[] {
+  return readCollection(KEYS.saleReturns, () => []);
+}
+
+export function getExchangeTransactions(): ExchangeTransaction[] {
+  return readCollection(KEYS.exchangeTransactions, () => []);
+}
+
+export function getDeliveryOrders(): DeliveryOrder[] {
+  return readCollection(KEYS.deliveryOrders, () => []);
 }
 
 export function getSuppliers(): Supplier[] {
@@ -2427,6 +2446,579 @@ function postJournalEntry(
   };
   writeCollection(KEYS.journalEntries, [...getJournalEntries(), entry]);
   return entry;
+}
+
+/* ---------------- Returns (§79/§81) — cash sales only in this Mock increment ---------------- */
+
+function nextReturnNumber(): string {
+  const year = new Date().getFullYear();
+  const prefix = `RET-${year}-`;
+  const count = getSaleReturns().filter((r) => r.return_number.startsWith(prefix)).length;
+  return `${prefix}${String(count + 1).padStart(6, "0")}`;
+}
+
+export interface CreateReturnInput {
+  sale_id: string;
+  items: Array<{ product_id: string; serial_id?: string; quantity: number }>;
+  reason: string;
+}
+
+/**
+ * §79/§81 — validates every line before writing anything, same discipline as `createSale`. A
+ * returned `serial_required` unit moves to `inspection`, never straight back to `available`;
+ * only non-serialized quantity restocks immediately (documented simplification — at this Mock's
+ * scale, "Inspection" for loose non-serial stock isn't worth a parallel status system).
+ */
+export function createReturn(input: CreateReturnInput, actorUserId: string | null): SaleReturn {
+  if (input.items.length === 0) throw new Error("لازم تختار صنف واحد على الأقل للإرجاع");
+  if (!input.reason.trim()) throw new Error("سبب الإرجاع مطلوب");
+
+  const sale = getSales().find((s) => s.id === input.sale_id);
+  if (!sale) throw new Error("الفاتورة غير موجودة");
+  if (sale.status === "cancelled") throw new Error("لا يمكن إرجاع فاتورة ملغاة");
+
+  const settings = getCurrentTenantSettings();
+  const saleAgeDays = (Date.now() - new Date(sale.created_at).getTime()) / (24 * 60 * 60 * 1000);
+  if (saleAgeDays > settings.return_period_days) {
+    throw new Error(`انتهت فترة السماح بالإرجاع (${settings.return_period_days} يوم)`);
+  }
+
+  const previousReturns = getSaleReturns().filter((r) => r.sale_id === sale.id);
+  const products = getProducts();
+  const allSerials = getProductSerials();
+
+  const returnItems: ReturnItem[] = [];
+  const serialIdsToInspect = new Set<string>();
+
+  for (const line of input.items) {
+    const saleLine = sale.items.find(
+      (i) =>
+        i.product_id === line.product_id &&
+        (line.serial_id ? i.serial_id === line.serial_id : !i.serial_id),
+    );
+    if (!saleLine) throw new Error("الصنف غير موجود في هذه الفاتورة");
+    const product = products.find((p) => p.id === line.product_id);
+    if (!product) throw new Error("منتج غير موجود");
+
+    if (product.serial_required) {
+      if (line.quantity !== 1 || !line.serial_id) {
+        throw new Error(`إرجاع منتج السيريال "${product.name}" لازم سيريال واحد محدد`);
+      }
+      if (serialIdsToInspect.has(line.serial_id)) {
+        throw new Error("نفس السيريال اتكرر في طلب الإرجاع");
+      }
+      if (previousReturns.some((r) => r.items.some((ri) => ri.serial_id === line.serial_id))) {
+        throw new Error(`السيريال "${saleLine.serial_number}" اتُرجع قبل كده`);
+      }
+      const serial = allSerials.find((s) => s.id === line.serial_id);
+      if (!serial || serial.status !== "sold") {
+        throw new Error("السيريال مش في حالة تسمح بالإرجاع");
+      }
+      serialIdsToInspect.add(line.serial_id);
+      returnItems.push({
+        product_id: product.id,
+        product_name: product.name,
+        serial_id: serial.id,
+        serial_number: serial.serial_number,
+        quantity: 1,
+        unit_price: saleLine.unit_price,
+        line_total: saleLine.unit_price,
+      });
+    } else {
+      const alreadyReturnedQty = previousReturns.reduce(
+        (sum, r) =>
+          sum +
+          r.items
+            .filter((ri) => ri.product_id === product.id && !ri.serial_id)
+            .reduce((s, ri) => s + ri.quantity, 0),
+        0,
+      );
+      const remaining = saleLine.quantity - alreadyReturnedQty;
+      if (line.quantity <= 0 || line.quantity > remaining) {
+        throw new Error(
+          `كمية إرجاع غير صحيحة للمنتج "${product.name}" (المتاح للإرجاع ${remaining})`,
+        );
+      }
+      returnItems.push({
+        product_id: product.id,
+        product_name: product.name,
+        quantity: line.quantity,
+        unit_price: saleLine.unit_price,
+        line_total: Math.round(saleLine.unit_price * line.quantity * 100) / 100,
+      });
+    }
+  }
+
+  const refund_amount =
+    Math.round(returnItems.reduce((sum, i) => sum + i.line_total, 0) * 100) / 100;
+  const return_number = nextReturnNumber();
+  const now = new Date().toISOString();
+
+  if (serialIdsToInspect.size > 0) {
+    writeCollection(
+      KEYS.productSerials,
+      allSerials.map((s) =>
+        serialIdsToInspect.has(s.id) ? { ...s, status: "inspection" as const } : s,
+      ),
+    );
+  }
+  const nonSerialMovements: InventoryMovement[] = returnItems
+    .filter((i) => !i.serial_id)
+    .map((i) => {
+      const product = products.find((p) => p.id === i.product_id)!;
+      const before = getProductStock(i.product_id, product);
+      return {
+        id: genId("mov"),
+        tenant_id: DEMO_TENANT_ID,
+        product_id: i.product_id,
+        type: "return" as const,
+        quantity: i.quantity,
+        before,
+        after: before + i.quantity,
+        user_id: actorUserId,
+        reference: return_number,
+        created_at: now,
+      };
+    });
+  if (nonSerialMovements.length > 0) {
+    writeCollection(KEYS.inventoryMovements, [...getInventoryMovements(), ...nonSerialMovements]);
+  }
+
+  const saleReturn: SaleReturn = {
+    id: genId("return"),
+    tenant_id: DEMO_TENANT_ID,
+    return_number,
+    sale_id: sale.id,
+    customer_id: sale.customer_id,
+    customer_name: sale.customer_name,
+    items: returnItems,
+    refund_amount,
+    reason: input.reason.trim(),
+    user_id: actorUserId,
+    created_at: now,
+  };
+  writeCollection(KEYS.saleReturns, [...getSaleReturns(), saleReturn]);
+
+  recordAudit({
+    tenant_id: DEMO_TENANT_ID,
+    user_id: actorUserId,
+    action: "sale_return.create",
+    entity: "sale_returns",
+    entity_id: saleReturn.id,
+    new_value: saleReturn,
+    reason: saleReturn.reason,
+  });
+
+  postTreasuryMovement(CASHIER_ACCOUNT_ID, -refund_amount, "return", actorUserId, return_number);
+  postJournalEntry(
+    [
+      {
+        account_code: "3000",
+        account_name: ACCOUNT_NAMES["3000"],
+        debit: refund_amount,
+        credit: 0,
+      },
+      {
+        account_code: "1000",
+        account_name: ACCOUNT_NAMES["1000"],
+        debit: 0,
+        credit: refund_amount,
+      },
+    ],
+    `مرتجع ${return_number}`,
+    "sale_return",
+    saleReturn.id,
+  );
+
+  return saleReturn;
+}
+
+/* ---------------- Exchange (§82) ---------------- */
+
+function nextExchangeNumber(): string {
+  const year = new Date().getFullYear();
+  const prefix = `EXC-${year}-`;
+  const count = getExchangeTransactions().filter((e) =>
+    e.exchange_number.startsWith(prefix),
+  ).length;
+  return `${prefix}${String(count + 1).padStart(6, "0")}`;
+}
+
+export interface CreateExchangeInput {
+  original_sale_id: string;
+  returned_items: Array<{ product_id: string; serial_id?: string; quantity: number }>;
+  new_items: Array<{ product_id: string; serial_id?: string; quantity: number }>;
+  reason: string;
+}
+
+/**
+ * A compound return+sale settled as a single price difference (§82), not two documents. Reuses
+ * the same "Inspection not Available" rule for returned serials and the same sold-serial
+ * marking for new ones as `createReturn`/`createSale`. Simplification: unlike `createReturn`,
+ * this does not cross-check against separate `SaleReturn`/`ExchangeTransaction` history for the
+ * same sale line — fine at this Mock's scale; a shared "already processed" ledger is real
+ * Phase-with-Supabase work.
+ */
+export function createExchange(
+  input: CreateExchangeInput,
+  actorUserId: string | null,
+): ExchangeTransaction {
+  if (input.returned_items.length === 0) throw new Error("لازم صنف واحد على الأقل للإرجاع");
+  if (input.new_items.length === 0) throw new Error("لازم صنف واحد على الأقل للاستبدال به");
+  if (!input.reason.trim()) throw new Error("سبب الاستبدال مطلوب");
+
+  const sale = getSales().find((s) => s.id === input.original_sale_id);
+  if (!sale) throw new Error("الفاتورة الأصلية غير موجودة");
+
+  const products = getProducts();
+  const allSerials = getProductSerials();
+
+  const returnedItems: ReturnItem[] = [];
+  const returnedSerialIds = new Set<string>();
+  for (const line of input.returned_items) {
+    const saleLine = sale.items.find(
+      (i) =>
+        i.product_id === line.product_id &&
+        (line.serial_id ? i.serial_id === line.serial_id : !i.serial_id),
+    );
+    if (!saleLine) throw new Error("صنف الإرجاع غير موجود في الفاتورة الأصلية");
+    const product = products.find((p) => p.id === line.product_id);
+    if (!product) throw new Error("منتج غير موجود");
+    if (product.serial_required) {
+      if (line.quantity !== 1 || !line.serial_id) {
+        throw new Error(`إرجاع "${product.name}" لازم سيريال واحد محدد`);
+      }
+      const serial = allSerials.find((s) => s.id === line.serial_id);
+      if (!serial || serial.status !== "sold") throw new Error("السيريال مش في حالة تسمح بالإرجاع");
+      returnedSerialIds.add(serial.id);
+      returnedItems.push({
+        product_id: product.id,
+        product_name: product.name,
+        serial_id: serial.id,
+        serial_number: serial.serial_number,
+        quantity: 1,
+        unit_price: saleLine.unit_price,
+        line_total: saleLine.unit_price,
+      });
+    } else {
+      if (line.quantity <= 0 || line.quantity > saleLine.quantity) {
+        throw new Error(`كمية إرجاع غير صحيحة للمنتج "${product.name}"`);
+      }
+      returnedItems.push({
+        product_id: product.id,
+        product_name: product.name,
+        quantity: line.quantity,
+        unit_price: saleLine.unit_price,
+        line_total: Math.round(saleLine.unit_price * line.quantity * 100) / 100,
+      });
+    }
+  }
+  const returnedValue =
+    Math.round(returnedItems.reduce((sum, i) => sum + i.line_total, 0) * 100) / 100;
+
+  const newItems: SaleItem[] = [];
+  const soldSerialIds = new Set<string>();
+  const stockTracker = new Map<string, number>();
+  const movementDrafts: Array<{
+    product_id: string;
+    quantity: number;
+    before: number;
+    after: number;
+  }> = [];
+  for (const line of input.new_items) {
+    const product = products.find((p) => p.id === line.product_id);
+    if (!product) throw new Error("منتج غير موجود");
+    if (!product.active) throw new Error(`المنتج "${product.name}" غير نشط`);
+    const currentStock = stockTracker.get(product.id) ?? getProductStock(product.id, product);
+    if (product.serial_required) {
+      if (line.quantity !== 1 || !line.serial_id) {
+        throw new Error(`اختر سيريال للمنتج "${product.name}"`);
+      }
+      if (soldSerialIds.has(line.serial_id) || returnedSerialIds.has(line.serial_id)) {
+        throw new Error("تعارض في اختيار السيريالات");
+      }
+      const serial = allSerials.find((s) => s.id === line.serial_id && s.product_id === product.id);
+      if (!serial || serial.status !== "available") {
+        throw new Error(`السيريال غير متاح للمنتج "${product.name}"`);
+      }
+      soldSerialIds.add(serial.id);
+      newItems.push({
+        product_id: product.id,
+        product_name: product.name,
+        serial_id: serial.id,
+        serial_number: serial.serial_number,
+        quantity: 1,
+        unit_price: product.cash_price,
+        line_total: product.cash_price,
+      });
+      stockTracker.set(product.id, currentStock - 1);
+      movementDrafts.push({
+        product_id: product.id,
+        quantity: -1,
+        before: currentStock,
+        after: currentStock - 1,
+      });
+    } else {
+      if (line.quantity <= 0 || line.quantity > currentStock) {
+        throw new Error(`المخزون غير كافٍ للمنتج "${product.name}"`);
+      }
+      newItems.push({
+        product_id: product.id,
+        product_name: product.name,
+        quantity: line.quantity,
+        unit_price: product.cash_price,
+        line_total: Math.round(product.cash_price * line.quantity * 100) / 100,
+      });
+      stockTracker.set(product.id, currentStock - line.quantity);
+      movementDrafts.push({
+        product_id: product.id,
+        quantity: -line.quantity,
+        before: currentStock,
+        after: currentStock - line.quantity,
+      });
+    }
+  }
+  const newValue = Math.round(newItems.reduce((sum, i) => sum + i.line_total, 0) * 100) / 100;
+  const price_difference = Math.round((newValue - returnedValue) * 100) / 100;
+  const exchange_number = nextExchangeNumber();
+  const now = new Date().toISOString();
+
+  if (returnedSerialIds.size > 0 || soldSerialIds.size > 0) {
+    writeCollection(
+      KEYS.productSerials,
+      allSerials.map((s) => {
+        if (returnedSerialIds.has(s.id)) return { ...s, status: "inspection" as const };
+        if (soldSerialIds.has(s.id)) return { ...s, status: "sold" as const };
+        return s;
+      }),
+    );
+  }
+  const newMovements: InventoryMovement[] = [
+    ...returnedItems
+      .filter((i) => !i.serial_id)
+      .map((i) => {
+        const product = products.find((p) => p.id === i.product_id)!;
+        const before = getProductStock(i.product_id, product);
+        return {
+          id: genId("mov"),
+          tenant_id: DEMO_TENANT_ID,
+          product_id: i.product_id,
+          type: "return" as const,
+          quantity: i.quantity,
+          before,
+          after: before + i.quantity,
+          user_id: actorUserId,
+          reference: exchange_number,
+          created_at: now,
+        };
+      }),
+    ...movementDrafts.map((m) => ({
+      id: genId("mov"),
+      tenant_id: DEMO_TENANT_ID,
+      product_id: m.product_id,
+      type: "sale" as const,
+      quantity: m.quantity,
+      before: m.before,
+      after: m.after,
+      user_id: actorUserId,
+      reference: exchange_number,
+      created_at: now,
+    })),
+  ];
+  writeCollection(KEYS.inventoryMovements, [...getInventoryMovements(), ...newMovements]);
+
+  const exchange: ExchangeTransaction = {
+    id: genId("exchange"),
+    tenant_id: DEMO_TENANT_ID,
+    exchange_number,
+    original_sale_id: sale.id,
+    returned_items: returnedItems,
+    new_items: newItems,
+    price_difference,
+    reason: input.reason.trim(),
+    user_id: actorUserId,
+    created_at: now,
+  };
+  writeCollection(KEYS.exchangeTransactions, [...getExchangeTransactions(), exchange]);
+
+  recordAudit({
+    tenant_id: DEMO_TENANT_ID,
+    user_id: actorUserId,
+    action: "exchange.create",
+    entity: "exchange_transactions",
+    entity_id: exchange.id,
+    new_value: exchange,
+    reason: exchange.reason,
+  });
+
+  if (price_difference !== 0) {
+    postTreasuryMovement(
+      CASHIER_ACCOUNT_ID,
+      price_difference,
+      "exchange",
+      actorUserId,
+      exchange_number,
+    );
+  }
+  const journalLines: JournalLine[] = [];
+  if (returnedValue > 0) {
+    journalLines.push({
+      account_code: "3000",
+      account_name: ACCOUNT_NAMES["3000"],
+      debit: returnedValue,
+      credit: 0,
+    });
+  }
+  if (newValue > 0) {
+    journalLines.push({
+      account_code: "3000",
+      account_name: ACCOUNT_NAMES["3000"],
+      debit: 0,
+      credit: newValue,
+    });
+  }
+  if (price_difference > 0) {
+    journalLines.push({
+      account_code: "1000",
+      account_name: ACCOUNT_NAMES["1000"],
+      debit: price_difference,
+      credit: 0,
+    });
+  } else if (price_difference < 0) {
+    journalLines.push({
+      account_code: "1000",
+      account_name: ACCOUNT_NAMES["1000"],
+      debit: 0,
+      credit: -price_difference,
+    });
+  }
+  postJournalEntry(journalLines, `استبدال ${exchange_number}`, "exchange", exchange.id);
+
+  return exchange;
+}
+
+/* ---------------- Delivery Orders (§84) ---------------- */
+
+export function scheduleDelivery(
+  saleId: string,
+  address: string,
+  scheduledDate: string,
+  actorUserId: string | null,
+): DeliveryOrder {
+  const sale = getSales().find((s) => s.id === saleId);
+  if (!sale) throw new Error("الفاتورة غير موجودة");
+  if (!address.trim()) throw new Error("العنوان مطلوب");
+  if (!scheduledDate) throw new Error("تاريخ التوصيل مطلوب");
+
+  const order: DeliveryOrder = {
+    id: genId("delivery"),
+    tenant_id: DEMO_TENANT_ID,
+    sale_id: saleId,
+    customer_name: sale.customer_name,
+    address: address.trim(),
+    scheduled_date: scheduledDate,
+    status: "scheduled",
+    user_id: actorUserId,
+    created_at: new Date().toISOString(),
+  };
+  writeCollection(KEYS.deliveryOrders, [...getDeliveryOrders(), order]);
+  recordAudit({
+    tenant_id: DEMO_TENANT_ID,
+    user_id: actorUserId,
+    action: "delivery.schedule",
+    entity: "delivery_orders",
+    entity_id: order.id,
+    new_value: order,
+  });
+  return order;
+}
+
+const DELIVERY_STATUS_ORDER: DeliveryOrder["status"][] = [
+  "scheduled",
+  "out_for_delivery",
+  "delivered",
+];
+
+/** §133 rule 11 — delivery is a service tracked separately from the sale's value; this never
+ * touches `Sale` or its total. Forward-only state machine, no skipping stages. */
+export function advanceDeliveryStatus(
+  id: string,
+  nextStatus: DeliveryOrder["status"],
+  actorUserId: string | null,
+): DeliveryOrder {
+  const orders = getDeliveryOrders();
+  const order = orders.find((o) => o.id === id);
+  if (!order) throw new Error("طلب التوصيل غير موجود");
+  const currentIndex = DELIVERY_STATUS_ORDER.indexOf(order.status);
+  const nextIndex = DELIVERY_STATUS_ORDER.indexOf(nextStatus);
+  if (nextIndex !== currentIndex + 1) {
+    throw new Error("لا يمكن تخطي مراحل التوصيل");
+  }
+
+  const after: DeliveryOrder = {
+    ...order,
+    status: nextStatus,
+    ...(nextStatus === "delivered" && { delivered_at: new Date().toISOString() }),
+  };
+  writeCollection(
+    KEYS.deliveryOrders,
+    orders.map((o) => (o.id === id ? after : o)),
+  );
+  recordAudit({
+    tenant_id: DEMO_TENANT_ID,
+    user_id: actorUserId,
+    action: "delivery.advance",
+    entity: "delivery_orders",
+    entity_id: id,
+    old_value: order,
+    new_value: after,
+  });
+  return after;
+}
+
+/* ---------------- Warranty (§86) — read-only, derived, no stored entity ---------------- */
+
+export interface WarrantyInfo {
+  product_name: string;
+  serial_number: string;
+  customer_name: string;
+  sold_at: string;
+  warranty_months: number;
+  warranty_end: string;
+  active: boolean;
+}
+
+/** Looks across both cash sales and installment contracts for the unit that carries this
+ * serial — warranty coverage doesn't depend on how the customer paid. */
+export function getWarrantyInfo(serialNumberRaw: string): WarrantyInfo | null {
+  const serialNumber = serialNumberRaw.trim().toLowerCase();
+  if (!serialNumber) return null;
+
+  const serial = getProductSerials().find((s) => s.serial_number.toLowerCase() === serialNumber);
+  if (!serial) return null;
+  const product = getProducts().find((p) => p.id === serial.product_id);
+  if (!product || !product.warranty_months) return null;
+
+  const cashSale = getSales().find((s) => s.items.some((i) => i.serial_id === serial.id));
+  const contract = getInstallmentContracts().find((c) =>
+    c.items.some((i) => i.serial_id === serial.id),
+  );
+  const soldAt = cashSale?.created_at ?? contract?.created_at;
+  const customerName = cashSale?.customer_name ?? contract?.customer_name;
+  if (!soldAt || !customerName) return null;
+
+  const warrantyEnd = new Date(soldAt);
+  warrantyEnd.setMonth(warrantyEnd.getMonth() + product.warranty_months);
+
+  return {
+    product_name: product.name,
+    serial_number: serial.serial_number,
+    customer_name: customerName,
+    sold_at: soldAt,
+    warranty_months: product.warranty_months,
+    warranty_end: warrantyEnd.toISOString(),
+    active: new Date() <= warrantyEnd,
+  };
 }
 
 /* ----------------------------------------------------------------------------------------

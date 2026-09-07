@@ -15,6 +15,7 @@ import { Route as AuditRouteImport } from './routes/audit'
 import { Route as CollectionsRouteImport } from './routes/collections'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as DeliveriesRouteImport } from './routes/deliveries'
 import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ProductsRouteImport } from './routes/products'
@@ -23,8 +24,10 @@ import { Route as StockCountRouteImport } from './routes/stock-count'
 import { Route as SuppliersRouteImport } from './routes/suppliers'
 import { Route as TreasuryRouteImport } from './routes/treasury'
 import { Route as UsersRouteImport } from './routes/users'
+import { Route as WarrantyRouteImport } from './routes/warranty'
 import { Route as ContractsIdRouteImport } from './routes/contracts_.$id'
 import { Route as CustomersIdRouteImport } from './routes/customers_.$id'
+import { Route as ExchangesNewRouteImport } from './routes/exchanges.new'
 import { Route as ProductsIdRouteImport } from './routes/products_.$id'
 import { Route as PurchasesIdRouteImport } from './routes/purchases.$id'
 import { Route as PurchasesNewRouteImport } from './routes/purchases.new'
@@ -61,6 +64,11 @@ const CustomersRoute = CustomersRouteImport.update({
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeliveriesRoute = DeliveriesRouteImport.update({
+  id: '/deliveries',
+  path: '/deliveries',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ExpensesRoute = ExpensesRouteImport.update({
@@ -103,6 +111,11 @@ const UsersRoute = UsersRouteImport.update({
   path: '/users',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WarrantyRoute = WarrantyRouteImport.update({
+  id: '/warranty',
+  path: '/warranty',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ContractsIdRoute = ContractsIdRouteImport.update({
   id: '/contracts_/$id',
   path: '/contracts/$id',
@@ -111,6 +124,11 @@ const ContractsIdRoute = ContractsIdRouteImport.update({
 const CustomersIdRoute = CustomersIdRouteImport.update({
   id: '/customers_/$id',
   path: '/customers/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExchangesNewRoute = ExchangesNewRouteImport.update({
+  id: '/exchanges/new',
+  path: '/exchanges/new',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProductsIdRoute = ProductsIdRouteImport.update({
@@ -156,6 +174,7 @@ export interface FileRoutesByFullPath {
   '/collections': typeof CollectionsRoute
   '/customers': typeof CustomersRoute
   '/dashboard': typeof DashboardRoute
+  '/deliveries': typeof DeliveriesRoute
   '/expenses': typeof ExpensesRoute
   '/login': typeof LoginRoute
   '/products': typeof ProductsRoute
@@ -164,8 +183,10 @@ export interface FileRoutesByFullPath {
   '/suppliers': typeof SuppliersRoute
   '/treasury': typeof TreasuryRoute
   '/users': typeof UsersRoute
+  '/warranty': typeof WarrantyRoute
   '/contracts/$id': typeof ContractsIdRoute
   '/customers/$id': typeof CustomersIdRoute
+  '/exchanges/new': typeof ExchangesNewRoute
   '/products/$id': typeof ProductsIdRoute
   '/purchases/$id': typeof PurchasesIdRoute
   '/purchases/new': typeof PurchasesNewRoute
@@ -181,6 +202,7 @@ export interface FileRoutesByTo {
   '/collections': typeof CollectionsRoute
   '/customers': typeof CustomersRoute
   '/dashboard': typeof DashboardRoute
+  '/deliveries': typeof DeliveriesRoute
   '/expenses': typeof ExpensesRoute
   '/login': typeof LoginRoute
   '/products': typeof ProductsRoute
@@ -189,8 +211,10 @@ export interface FileRoutesByTo {
   '/suppliers': typeof SuppliersRoute
   '/treasury': typeof TreasuryRoute
   '/users': typeof UsersRoute
+  '/warranty': typeof WarrantyRoute
   '/contracts/$id': typeof ContractsIdRoute
   '/customers/$id': typeof CustomersIdRoute
+  '/exchanges/new': typeof ExchangesNewRoute
   '/products/$id': typeof ProductsIdRoute
   '/purchases/$id': typeof PurchasesIdRoute
   '/purchases/new': typeof PurchasesNewRoute
@@ -207,6 +231,7 @@ export interface FileRoutesById {
   '/collections': typeof CollectionsRoute
   '/customers': typeof CustomersRoute
   '/dashboard': typeof DashboardRoute
+  '/deliveries': typeof DeliveriesRoute
   '/expenses': typeof ExpensesRoute
   '/login': typeof LoginRoute
   '/products': typeof ProductsRoute
@@ -215,8 +240,10 @@ export interface FileRoutesById {
   '/suppliers': typeof SuppliersRoute
   '/treasury': typeof TreasuryRoute
   '/users': typeof UsersRoute
+  '/warranty': typeof WarrantyRoute
   '/contracts_/$id': typeof ContractsIdRoute
   '/customers_/$id': typeof CustomersIdRoute
+  '/exchanges/new': typeof ExchangesNewRoute
   '/products_/$id': typeof ProductsIdRoute
   '/purchases/$id': typeof PurchasesIdRoute
   '/purchases/new': typeof PurchasesNewRoute
@@ -234,6 +261,7 @@ export interface FileRouteTypes {
     | '/collections'
     | '/customers'
     | '/dashboard'
+    | '/deliveries'
     | '/expenses'
     | '/login'
     | '/products'
@@ -242,8 +270,10 @@ export interface FileRouteTypes {
     | '/suppliers'
     | '/treasury'
     | '/users'
+    | '/warranty'
     | '/contracts/$id'
     | '/customers/$id'
+    | '/exchanges/new'
     | '/products/$id'
     | '/purchases/$id'
     | '/purchases/new'
@@ -259,6 +289,7 @@ export interface FileRouteTypes {
     | '/collections'
     | '/customers'
     | '/dashboard'
+    | '/deliveries'
     | '/expenses'
     | '/login'
     | '/products'
@@ -267,8 +298,10 @@ export interface FileRouteTypes {
     | '/suppliers'
     | '/treasury'
     | '/users'
+    | '/warranty'
     | '/contracts/$id'
     | '/customers/$id'
+    | '/exchanges/new'
     | '/products/$id'
     | '/purchases/$id'
     | '/purchases/new'
@@ -284,6 +317,7 @@ export interface FileRouteTypes {
     | '/collections'
     | '/customers'
     | '/dashboard'
+    | '/deliveries'
     | '/expenses'
     | '/login'
     | '/products'
@@ -292,8 +326,10 @@ export interface FileRouteTypes {
     | '/suppliers'
     | '/treasury'
     | '/users'
+    | '/warranty'
     | '/contracts_/$id'
     | '/customers_/$id'
+    | '/exchanges/new'
     | '/products_/$id'
     | '/purchases/$id'
     | '/purchases/new'
@@ -310,6 +346,7 @@ export interface RootRouteChildren {
   CollectionsRoute: typeof CollectionsRoute
   CustomersRoute: typeof CustomersRoute
   DashboardRoute: typeof DashboardRoute
+  DeliveriesRoute: typeof DeliveriesRoute
   ExpensesRoute: typeof ExpensesRoute
   LoginRoute: typeof LoginRoute
   ProductsRoute: typeof ProductsRoute
@@ -318,8 +355,10 @@ export interface RootRouteChildren {
   SuppliersRoute: typeof SuppliersRoute
   TreasuryRoute: typeof TreasuryRoute
   UsersRoute: typeof UsersRoute
+  WarrantyRoute: typeof WarrantyRoute
   ContractsIdRoute: typeof ContractsIdRoute
   CustomersIdRoute: typeof CustomersIdRoute
+  ExchangesNewRoute: typeof ExchangesNewRoute
   ProductsIdRoute: typeof ProductsIdRoute
   PurchasesIdRoute: typeof PurchasesIdRoute
   PurchasesNewRoute: typeof PurchasesNewRoute
@@ -371,6 +410,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/deliveries': {
+      id: '/deliveries'
+      path: '/deliveries'
+      fullPath: '/deliveries'
+      preLoaderRoute: typeof DeliveriesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/expenses': {
@@ -429,6 +475,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UsersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/warranty': {
+      id: '/warranty'
+      path: '/warranty'
+      fullPath: '/warranty'
+      preLoaderRoute: typeof WarrantyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/contracts_/$id': {
       id: '/contracts_/$id'
       path: '/contracts/$id'
@@ -441,6 +494,13 @@ declare module '@tanstack/react-router' {
       path: '/customers/$id'
       fullPath: '/customers/$id'
       preLoaderRoute: typeof CustomersIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/exchanges/new': {
+      id: '/exchanges/new'
+      path: '/exchanges/new'
+      fullPath: '/exchanges/new'
+      preLoaderRoute: typeof ExchangesNewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/products_/$id': {
@@ -502,6 +562,7 @@ const rootRouteChildren: RootRouteChildren = {
   CollectionsRoute: CollectionsRoute,
   CustomersRoute: CustomersRoute,
   DashboardRoute: DashboardRoute,
+  DeliveriesRoute: DeliveriesRoute,
   ExpensesRoute: ExpensesRoute,
   LoginRoute: LoginRoute,
   ProductsRoute: ProductsRoute,
@@ -510,8 +571,10 @@ const rootRouteChildren: RootRouteChildren = {
   SuppliersRoute: SuppliersRoute,
   TreasuryRoute: TreasuryRoute,
   UsersRoute: UsersRoute,
+  WarrantyRoute: WarrantyRoute,
   ContractsIdRoute: ContractsIdRoute,
   CustomersIdRoute: CustomersIdRoute,
+  ExchangesNewRoute: ExchangesNewRoute,
   ProductsIdRoute: ProductsIdRoute,
   PurchasesIdRoute: PurchasesIdRoute,
   PurchasesNewRoute: PurchasesNewRoute,
