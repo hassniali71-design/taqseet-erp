@@ -89,18 +89,21 @@ bun run lint
   - **التوصيل (§84):** `scheduleDelivery`/`advanceDeliveryStatus` — حالة أحادية الاتجاه (`scheduled → out_for_delivery → delivered`، مفيش تخطي مراحل)، **خدمة منفصلة تمامًا عن قيمة البيع** (§133 قاعدة 11 — لا تلمس `Sale` نفسها أبدًا). `/deliveries` — جدولة + عرض + نقل للمرحلة التالية.
   - **الضمان (§86):** `getWarrantyInfo` — **بدون أي كيان مخزّن**، محسوب وقت الطلب فقط من `ProductSerial` + `Product.warranty_months` + تاريخ البيع (نقدي أو تقسيط، الضمان مش مقصور على طريقة الدفع). `/warranty` — بحث برقم سيريال، يعرض تاريخ الشراء/العميل/نهاية الضمان/سارٍ أو منتهٍ.
   - **Migration:** `0008_after_sales.sql` (sale_returns/exchange_transactions/delivery_orders) بـRLS كاملة، `sale_returns`/`exchange_transactions` بدون policy تعديل/حذف (Append-only).
-- **Migrations:** `0001_foundation.sql` (tenants/tenant_settings/users/roles/permissions/role_permissions/user_roles/audit_logs) + `0002_customers_products.sql` (customers بـcredit_limit، products) + `0003_inventory.sql` (product_serials، inventory_movements) + `0004_sales.sql` (guarantors، sales بـ`items jsonb`) + `0005_installments.sql` (تقسيط كامل) + `0006_purchasing.sql` (موردون/مشتريات/مدفوعات موردين) + `0007_finance.sql` (خزينة/ورديات/مصروفات/قيود) + `0008_after_sales.sql` (مرتجعات/استبدال/توصيل) — كلها بـRLS كاملة جاهزة، غير مُطبَّقة بعد.
+- **Phase 8 — Reports & Notifications (§92/§93 + Dashboard/Reports) — منفّذة بالكامل:**
+  - **لا كيانات جديدة في هذه الـPhase** — كل حاجة هنا مُشتقة (Computed) من الكيانات الموجودة بالفعل، فمفيش migration جديد.
+  - **`/dashboard` بأرقام حقيقية:** مبيعات اليوم، مستحق اليوم من التقسيط، متأخرات (مبلغ + عدد)، رصيد خزينة الكاشير، عملاء/عقود مفتوحة، أجهزة تحت الحد الأدنى، توصيلات جارية — كل رقم بيتحسب حيًّا من `getSales`/`getInstallmentContracts`/`getInstallments`/`getEffectiveInstallmentStatus`/`getAccountBalance`/`getProductStock` مباشرة، مفيش رقم مكتوب يدويًا (المشكلة الأصلية اللي كانت موجودة في نسخة Lovable الأولى — 764 عميل وهمي — خلصت من Phase 3). قسم "قرارات تحتاج انتباه" يظهر بس لو فيه فعلًا متأخرات/مخزون منخفض/مصروفات محتاجة اعتماد.
+  - **`/reports`:** 4 تبويبات — مبيعات (بفلتر تاريخ)، عقود تقسيط (كل عقد بحالته والمتبقي)، كشف حساب عميل (كل الفواتير+العقود+التحصيلات+المرتجعات لعميل واحد بترتيب زمني وصافي حركة)، أصناف بطيئة الحركة (الكمية المباعة نقدًا أو تقسيطًا خلال فترة، من الأقل للأكثر). كل شيء Read-only، بدون أي دالة data-store جديدة تكتب بيانات.
+  - **Notification Center (§92):** `getNotifications()` في `data-store.ts` — قسط مستحق اليوم/متأخر، وعد دفع فشل، مخزون منخفض، مصروف يحتاج اعتماد — كل عنصر محسوب وقت الطلب، **بدون تخزين وبدون حالة "مقروء"** (تبسيط متعمد لهذه المرحلة). `/notifications` — عرض القائمة بشارة لون حسب الخطورة (info/warning/danger).
+  - **§93 Feature Flag:** `TenantSettings.whatsapp_notifications_enabled` (Checkbox جديد في `/settings`) — **نقطة تجهيز معمارية بحتة**، تفعيله لا يرسل أي رسالة فعلية أبدًا (مفيش مزوّد واتساب/SMS متصل، ولن يكون في هذا الـMock).
+- **Migrations:** `0001_foundation.sql` (tenants/tenant_settings/users/roles/permissions/role_permissions/user_roles/audit_logs) + `0002_customers_products.sql` (customers بـcredit_limit، products) + `0003_inventory.sql` (product_serials، inventory_movements) + `0004_sales.sql` (guarantors، sales بـ`items jsonb`) + `0005_installments.sql` (تقسيط كامل) + `0006_purchasing.sql` (موردون/مشتريات/مدفوعات موردين) + `0007_finance.sql` (خزينة/ورديات/مصروفات/قيود) + `0008_after_sales.sql` (مرتجعات/استبدال/توصيل) — كلها بـRLS كاملة جاهزة، غير مُطبَّقة بعد. **لا migration جديد لـPhase 8** (كل حاجة مُشتقة).
 
 ### التالي مباشرة (بالترتيب — راجع خطة التنفيذ الكاملة أدناه لكل Phase بالتفصيل)
 
-**Phase 8 — Reports & Notifications** ← نحن هنا الآن (راجع تفاصيلها كاملة تحت).
+**Phase 9 — SaaS Control Center** ← نحن هنا الآن (راجع تفاصيلها كاملة تحت — آخر Phase في الخطة).
 
 ## خطة التنفيذ الكاملة (كل الـPhases 1→9 — المرجع الوحيد الدائم، الجلسة دي ممكن تنقطع فالملف ده اللي بيرجّعك بالظبط لمطرح ما وقفت)
 
 الترتيب مطابق لـ§131 في الـSpec. كل Phase فرعية = تعديل محدد → build/lint/tsc نظيفين → اختبار Playwright فعلي → لقطة شاشة لو فيها قيمة بصرية → تحديث قسم "الحالة الحالية" أعلاه → commit محدد + push. **مفيش وقفات للسؤال إلا عند Blocker حقيقي** (قرار مالي حساس الـSpec نفسها تقول "يحتاج تأكيد" — يتسجل كإعداد قابل للتفعيل بدل ما يُخترع).
-
-**Phase 8 — Reports & Notifications:**
-`/dashboard` بأرقام حقيقية كاملة (مبيعات اليوم/تحصيلات مستحقة/متأخرات/مخزون منخفض) · `/reports` (مبيعات، عقود، كشف حساب، بطيء الحركة) · Notification Center داخلي مُشتق (§92، بدون WhatsApp/SMS فعلي — Feature Flag متوقف، §93).
 
 **Phase 9 — SaaS Control Center:**
 `/platform` (دور Platform Owner) · إنشاء Tenant جديد فعليًا (أول استخدام حقيقي لتعدد الـTenants) + توليد Owner وكلمة سر (الصور المرفقة من المستخدم مرجع بصري لشكل بطاقة الـTenant/الـCredentials) · تفعيل/تعليق/تجديد اشتراك · Support Access مبسّط (عرض بيانات Tenant للدعم + Audit كامل، بدون Impersonation حرفي).

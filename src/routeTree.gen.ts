@@ -18,7 +18,9 @@ import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as DeliveriesRouteImport } from './routes/deliveries'
 import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as ProductsRouteImport } from './routes/products'
+import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as StockCountRouteImport } from './routes/stock-count'
 import { Route as SuppliersRouteImport } from './routes/suppliers'
@@ -81,9 +83,19 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const NotificationsRoute = NotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProductsRoute = ProductsRouteImport.update({
   id: '/products',
   path: '/products',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReportsRoute = ReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -177,7 +189,9 @@ export interface FileRoutesByFullPath {
   '/deliveries': typeof DeliveriesRoute
   '/expenses': typeof ExpensesRoute
   '/login': typeof LoginRoute
+  '/notifications': typeof NotificationsRoute
   '/products': typeof ProductsRoute
+  '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/stock-count': typeof StockCountRoute
   '/suppliers': typeof SuppliersRoute
@@ -205,7 +219,9 @@ export interface FileRoutesByTo {
   '/deliveries': typeof DeliveriesRoute
   '/expenses': typeof ExpensesRoute
   '/login': typeof LoginRoute
+  '/notifications': typeof NotificationsRoute
   '/products': typeof ProductsRoute
+  '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/stock-count': typeof StockCountRoute
   '/suppliers': typeof SuppliersRoute
@@ -234,7 +250,9 @@ export interface FileRoutesById {
   '/deliveries': typeof DeliveriesRoute
   '/expenses': typeof ExpensesRoute
   '/login': typeof LoginRoute
+  '/notifications': typeof NotificationsRoute
   '/products': typeof ProductsRoute
+  '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/stock-count': typeof StockCountRoute
   '/suppliers': typeof SuppliersRoute
@@ -264,7 +282,9 @@ export interface FileRouteTypes {
     | '/deliveries'
     | '/expenses'
     | '/login'
+    | '/notifications'
     | '/products'
+    | '/reports'
     | '/settings'
     | '/stock-count'
     | '/suppliers'
@@ -292,7 +312,9 @@ export interface FileRouteTypes {
     | '/deliveries'
     | '/expenses'
     | '/login'
+    | '/notifications'
     | '/products'
+    | '/reports'
     | '/settings'
     | '/stock-count'
     | '/suppliers'
@@ -320,7 +342,9 @@ export interface FileRouteTypes {
     | '/deliveries'
     | '/expenses'
     | '/login'
+    | '/notifications'
     | '/products'
+    | '/reports'
     | '/settings'
     | '/stock-count'
     | '/suppliers'
@@ -349,7 +373,9 @@ export interface RootRouteChildren {
   DeliveriesRoute: typeof DeliveriesRoute
   ExpensesRoute: typeof ExpensesRoute
   LoginRoute: typeof LoginRoute
+  NotificationsRoute: typeof NotificationsRoute
   ProductsRoute: typeof ProductsRoute
+  ReportsRoute: typeof ReportsRoute
   SettingsRoute: typeof SettingsRoute
   StockCountRoute: typeof StockCountRoute
   SuppliersRoute: typeof SuppliersRoute
@@ -433,11 +459,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/notifications': {
+      id: '/notifications'
+      path: '/notifications'
+      fullPath: '/notifications'
+      preLoaderRoute: typeof NotificationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/products': {
       id: '/products'
       path: '/products'
       fullPath: '/products'
       preLoaderRoute: typeof ProductsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reports': {
+      id: '/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof ReportsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -565,7 +605,9 @@ const rootRouteChildren: RootRouteChildren = {
   DeliveriesRoute: DeliveriesRoute,
   ExpensesRoute: ExpensesRoute,
   LoginRoute: LoginRoute,
+  NotificationsRoute: NotificationsRoute,
   ProductsRoute: ProductsRoute,
+  ReportsRoute: ReportsRoute,
   SettingsRoute: SettingsRoute,
   StockCountRoute: StockCountRoute,
   SuppliersRoute: SuppliersRoute,

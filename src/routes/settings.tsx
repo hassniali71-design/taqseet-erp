@@ -31,6 +31,7 @@ function toFormState(settings: TenantSettings): FormState {
     late_fee_enabled: String(settings.late_fee_enabled),
     return_period_days: String(settings.return_period_days),
     expense_approval_threshold: String(settings.expense_approval_threshold),
+    whatsapp_notifications_enabled: String(settings.whatsapp_notifications_enabled),
   };
 }
 
@@ -71,6 +72,7 @@ function SettingsPage() {
         late_fee_enabled: form.late_fee_enabled === "true",
         return_period_days: Number(form.return_period_days) || 0,
         expense_approval_threshold: Number(form.expense_approval_threshold) || 0,
+        whatsapp_notifications_enabled: form.whatsapp_notifications_enabled === "true",
       },
       actorUserId,
     );
@@ -224,6 +226,28 @@ function SettingsPage() {
                 />
               </Field>
             </div>
+          </section>
+
+          <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+            <h2 className="text-sm font-bold text-foreground">الإشعارات (Phase 8)</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              مركز الإشعارات الداخلي في `/notifications` مُشتق دائمًا من البيانات، بيشتغل بغض النظر
+              عن هذا الإعداد. المفتاح ده مجرد نقطة تجهيز معمارية لمزوّد واتساب/SMS حقيقي — تفعيله
+              لسه ما بيبعتش أي رسالة فعلية (§93).
+            </p>
+            <label className="mt-3 flex items-center gap-2 text-xs font-medium text-foreground">
+              <input
+                type="checkbox"
+                checked={form.whatsapp_notifications_enabled === "true"}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    whatsapp_notifications_enabled: String(e.target.checked),
+                  })
+                }
+              />
+              تفعيل إشعارات واتساب/SMS (Feature Flag — غير موصول بمزوّد حقيقي)
+            </label>
           </section>
 
           <div className="flex items-center gap-3">

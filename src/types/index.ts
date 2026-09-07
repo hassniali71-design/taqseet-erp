@@ -44,6 +44,11 @@ export interface TenantSettings {
    * Approval Engine (§105) that blocks them outright is deferred, same as every other override
    * in this project. */
   expense_approval_threshold: number;
+  /** §92/§93 — Notification Center is internal-only (derived, read from `/notifications`); this
+   * flag exists purely as an architecture placeholder for a real WhatsApp/SMS provider and stays
+   * off — no message is ever actually sent while it's false, nor is any sending code wired up
+   * yet even when true. */
+  whatsapp_notifications_enabled: boolean;
 }
 
 /** §9 — the 8 baseline roles named in the spec; tenants may add more (`is_system: false`). */

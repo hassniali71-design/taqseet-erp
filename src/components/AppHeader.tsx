@@ -5,6 +5,8 @@ import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { to: "/dashboard", label: "لوحة التحكم" },
+  { to: "/reports", label: "التقارير" },
+  { to: "/notifications", label: "الإشعارات" },
   { to: "/customers", label: "العملاء" },
   { to: "/products", label: "الأجهزة" },
   { to: "/sales/new", label: "بيع جديد" },
