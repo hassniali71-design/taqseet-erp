@@ -34,9 +34,15 @@ bun run lint
   - `/users` — عرض المستخدمين + إنشاء مستخدم بدور + تفعيل/تعطيل (لا حذف).
   - `/audit` — سجل عمليات للقراءة فقط، يعرض كل الـmutations المسجّلة عبر `recordAudit`.
   - Roles/Permissions موجودة في الـdata layer (`getRoles`/`getUserPermissionKeys`) لكن مفيش UI لتعديل صلاحيات كل Role بعد — هيتعمل مع أول Feature محتاجه فعليًا (تفادي شاشة بلا استخدام).
-- **شريحة Customers (§14) — subset مبسّط، مش Phase 3 كاملة:**
-  - `/customers` — list+add+edit، فيها `credit_limit` (تمهيدًا لـPhase 4)، لا حذف.
-  - الناقص عمدًا هنا: Guarantors، Customer 360/Risk Score — هيتضافوا مع Phase 3 الحقيقية أدناه.
+- **Phase 3 — Customers & Sales (تكملة فوق `/customers`) — منفّذة:**
+  - `/customers/$id` (الملف: `customers_.$id.tsx`) — Customer 360 مبسّطة: إجمالي مشتريات، عدد فواتير، حد ائتمان، **الضامنون** (§15، إضافة فقط) + **سجل المشتريات** (روابط لفواتير حقيقية).
+  - **POS/بيع نقدي فعلي (§32,§34):** `/sales/new` — عميل (أو عميل نقدي) → إضافة أصناف (منتج غير سيريال بكمية، أو منتج سيريال باختيار سيريال محدد — سطر واحد بالضبط لكل سيريال) → خصم % **محدود فعليًا بحد الموظف من الإعدادات** (تجاوزه مرفوض صراحة من `createSale`، مش "pending" وهمي — تجاوز الحد الفعلي بصلاحية مدير مؤجَّل لمحرك الاعتماد الحقيقي §105) → تأكيد.
+  - `createSale` (في `data-store.ts`): يتحقق من كل سطر قبل ما يكتب أي حاجة (منتج نشط، مخزون كافٍ، سيريال متاح فعلًا ومش مستخدم مرتين في نفس الفاتورة) → عند النجاح: يحوّل حالة السيريال لـ`sold`، ينشئ Inventory Movement (type=`sale`) لكل صنف، يولّد رقم فاتورة تسلسلي `INV-YYYY-NNNNNN` (§91)، يسجّل Audit.
+  - `/sales/$id` — إيصال الفاتورة (نمط طباعة بسيط)، الرابط من صفحة الـPOS بعد التأكيد ومن Customer 360.
+  - `Sale.items` **متداخلة داخل مستند البيع نفسه** (مش جدول `sale_items` منفصل) — تبسيط متعمد لمرحلة الـMock، موثّق في تعليق النوع بـ`types/index.ts`. أي قارئ يمر بـ`getSales()` واحدة، فترقية الشكل لاحقًا مع Supabase مش هتغيّر أي Call Site.
+  - Sale State Machine (§33) **مبسّطة لأقصى درجة الآن:** بيع نقدي يوصل لـ`completed` مباشرة — Draft/Pending Approval/Delivered هتظهر فعليًا مع محرك الاعتماد الحقيقي وPhase 7 (توصيل/تركيب).
+- **شريحة Customers (§14) — subset مبسّط:**
+  - `/customers` — list+add+edit، فيها `credit_limit` (تمهيدًا لـPhase 4)، لا حذف. Customer 360/Guarantors بقوا فعليين (فوق). الناقص عمدًا: Risk Score (§17، Phase 4 حقيقي).
 - **Phase 2 — Products & Inventory (تكملة فوق `/products`) — منفّذة:**
   - `/products` — list+add+edit + عمود مخزون حقيقي (`getProductStock`)، رابط لكل جهاز.
   - `/products/$id` (الملف: `products_.$id.tsx` — **لاحظ الـ`_` قبل النقطة**، انظر ملاحظة الراوتنج أدناه) — تفاصيل الجهاز، قائمة السيريالات بحالتها، زر "استلام كمية" (يطابق ما ستستدعيه Phase 5's Goods Receipt لاحقًا — نفس الدالة `receiveStock`، مش مسار موازٍ)، سجل حركة المخزون كامل.
@@ -49,18 +55,15 @@ bun run lint
   - `src/hooks/use-session.ts` — `useSession`/`useRequireSession` (نمط SSR-آمن لقراءة الجلسة).
   - نمط الصفحة القياسي: `useRequireSession()` → `if (!session) return null` → استخراج `actorUserId`/`tenantId` كمتغيرات منفصلة (تفادي مشكلة TS closure narrowing) → `<AppHeader session={session} />` + محتوى الصفحة.
   - **⚠️ ملاحظة راوتنج مهمة (باگ حقيقي اتصلح في Phase 2):** لو عندك صفحة قائمة `foo.tsx` ومحتاج صفحة تفاصيل ديناميكية `/foo/$id`، **لازم** تسمي الملف `foo_.$id.tsx` (شرطة تحتية `_` قبل النقطة) — مش `foo.$id.tsx`. من غيرها، TanStack Router بيعتبر `foo.tsx` Layout ضمني للـ`$id` (لازم `<Outlet/>` فيه)، فالـURL يتغير بس المحتوى يفضل صفحة القائمة (باگ صامت، اتسبب فيه ولاحظته بس بمتصفح فعلي). طبّق ده على `/customers/$id`، `/contracts/$id`، إلخ في الـPhases الجاية.
-- **Migrations:** `0001_foundation.sql` (tenants/tenant_settings/users/roles/permissions/role_permissions/user_roles/audit_logs) + `0002_customers_products.sql` (customers بـcredit_limit، products) + `0003_inventory.sql` (product_serials، inventory_movements) — كلها بـRLS كاملة جاهزة، غير مُطبَّقة بعد.
+- **Migrations:** `0001_foundation.sql` (tenants/tenant_settings/users/roles/permissions/role_permissions/user_roles/audit_logs) + `0002_customers_products.sql` (customers بـcredit_limit، products) + `0003_inventory.sql` (product_serials، inventory_movements) + `0004_sales.sql` (guarantors، sales بـ`items jsonb`) — كلها بـRLS كاملة جاهزة، غير مُطبَّقة بعد.
 
 ### التالي مباشرة (بالترتيب — راجع خطة التنفيذ الكاملة أدناه لكل Phase بالتفصيل)
 
-**Phase 3 — Customers & Sales** ← نحن هنا الآن.
+**Phase 4 — Installments** ← نحن هنا الآن (الأعقد، أهم فيتشر في المنتج — راجع تفاصيلها كاملة تحت).
 
 ## خطة التنفيذ الكاملة (كل الـPhases 1→9 — المرجع الوحيد الدائم، الجلسة دي ممكن تنقطع فالملف ده اللي بيرجّعك بالظبط لمطرح ما وقفت)
 
 الترتيب مطابق لـ§131 في الـSpec. كل Phase فرعية = تعديل محدد → build/lint/tsc نظيفين → اختبار Playwright فعلي → لقطة شاشة لو فيها قيمة بصرية → تحديث قسم "الحالة الحالية" أعلاه → commit محدد + push. **مفيش وقفات للسؤال إلا عند Blocker حقيقي** (قرار مالي حساس الـSpec نفسها تقول "يحتاج تأكيد" — يتسجل كإعداد قابل للتفعيل بدل ما يُخترع).
-
-**Phase 3 — Customers & Sales (تكملة فوق `/customers`):**
-Guarantors (§15) مرتبطين بعميل · Customer 360 مبسّطة `/customers/$id` (§14) · **POS/بيع نقدي فعلي** `/sales/new` (§32,§34: عميل→منتج/سيريال→خصم بحد الموظف→تأكيد→Sale+Inventory Movement+Audit+إيصال INV-YYYY-NNNNNN) · State machine مبسّطة (confirmed→completed للبيع النقدي، التوصيل/التركيب منفصلين في Phase 7).
 
 **Phase 4 — Installments (الأعقد، أهم فيتشر):**
 `/settings/installment-plans` · محرك تمويل كدالة نقية مُختبرة (`Finance = Principal × Rate`, Acceptance Test: 15,000@40%/12شهر=21,000/1,750×12) · بيع تقسيط فعلي `/sales/new-installment` (§35: Credit Check `Available Credit = credit_limit - exposure`→Snapshot النسبة وقت الإنشاء، **تغيير الخطة لاحقًا لا يمس عقودًا قديمة أبدًا**) · `/contracts/$id` · Collections Workbench `/collections` (§52، Oldest-Due-First) · Overdue/Credit Hold تلقائي · Promise to Pay · Early Settlement/Restructuring (Event جديد بدون حذف الجدول الأصلي).

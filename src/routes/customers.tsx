@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
@@ -203,7 +203,15 @@ function CustomersPage() {
                   <td className="px-4 py-3 text-muted-foreground" dir="ltr">
                     {customer.code}
                   </td>
-                  <td className="px-4 py-3 font-medium text-foreground">{customer.name}</td>
+                  <td className="px-4 py-3 font-medium text-foreground">
+                    <Link
+                      to="/customers/$id"
+                      params={{ id: customer.id }}
+                      className="hover:underline"
+                    >
+                      {customer.name}
+                    </Link>
+                  </td>
                   <td className="px-4 py-3 text-muted-foreground" dir="ltr">
                     {customer.phone}
                   </td>

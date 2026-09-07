@@ -106,10 +106,10 @@ export interface AuditLogEntry {
 }
 
 /**
- * §14 Customer Module — lean subset for this demo increment. Missing on purpose (real
- * Phase 3 work, not built yet): Documents, Signature, Guarantors (§15), Customer 360
- * (§14 aggregates), Credit Profile (§16), Risk Score (§17). §11 governance: no hard delete —
- * `status` is the only way a customer is retired.
+ * §14 Customer Module — lean subset for this demo increment. Missing on purpose: Documents,
+ * Signature, full Customer 360 aggregates (a simplified version — purchase history + totals —
+ * is Phase 3's `/customers/$id`), Risk Score (§17, real Phase 4 work). §11 governance: no hard
+ * delete — `status` is the only way a customer is retired.
  */
 export interface Customer {
   id: string;
@@ -124,6 +124,18 @@ export interface Customer {
    * current exposure`). 0 = no installment credit extended yet. */
   credit_limit: number;
   status: "active" | "inactive";
+  created_at: string;
+}
+
+/** §15 Guarantors — no hard delete (§11); a guarantor added by mistake is simply not used on
+ * any contract, nothing more is needed at this scale. */
+export interface Guarantor {
+  id: string;
+  tenant_id: string;
+  customer_id: string;
+  name: string;
+  phone: string;
+  relationship?: string;
   created_at: string;
 }
 
@@ -192,5 +204,44 @@ export interface InventoryMovement {
   user_id: string | null;
   reference?: string;
   reason?: string;
+  created_at: string;
+}
+
+/**
+ * §32/§34 Cash Sale — lean subset. A deliberate simplification for this Mock stage: line
+ * items live nested inside the Sale document rather than a separate `sale_items` table
+ * (§118 lists one) — real Phase-with-Supabase work can normalize this without changing any
+ * call site, since every reader goes through `getSales()`. `serial_id`/`serial_number` are
+ * only set for `serial_required` products (one unit per line — a serialized line can't have
+ * quantity > 1, matching how §21 tracks each physical unit individually).
+ *
+ * Missing on purpose: §33's full state machine (this Mock only reaches `completed` directly
+ * for cash sales — Draft/Pending Approval/Delivered stages arrive with Phase 7's
+ * Delivery/Installation and a real Approval Engine, §105), discount overrides beyond the
+ * employee limit (also §105 — deferred rather than faked as a dead-end "pending" state).
+ */
+export interface SaleItem {
+  product_id: string;
+  product_name: string;
+  serial_id?: string;
+  serial_number?: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+}
+
+export interface Sale {
+  id: string;
+  tenant_id: string;
+  invoice_number: string;
+  customer_id: string | null;
+  customer_name: string;
+  items: SaleItem[];
+  subtotal: number;
+  discount_pct: number;
+  discount_amount: number;
+  total: number;
+  user_id: string | null;
+  status: "completed" | "cancelled";
   created_at: string;
 }

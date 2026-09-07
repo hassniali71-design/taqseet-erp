@@ -1,12 +1,15 @@
 import type {
   AuditLogEntry,
   Customer,
+  Guarantor,
   InventoryMovement,
   Permission,
   Product,
   ProductSerial,
   Role,
   RolePermission,
+  Sale,
+  SaleItem,
   SystemRoleName,
   Tenant,
   TenantSettings,
@@ -44,6 +47,8 @@ const KEYS = {
   products: `${STORAGE_PREFIX}.products.v1`,
   productSerials: `${STORAGE_PREFIX}.product_serials.v1`,
   inventoryMovements: `${STORAGE_PREFIX}.inventory_movements.v1`,
+  guarantors: `${STORAGE_PREFIX}.guarantors.v1`,
+  sales: `${STORAGE_PREFIX}.sales.v1`,
 } as const;
 
 const listeners = new Set<() => void>();
@@ -444,6 +449,14 @@ export function getInventoryMovements(): InventoryMovement[] {
   return readCollection(KEYS.inventoryMovements, seedInventoryMovements);
 }
 
+export function getGuarantors(): Guarantor[] {
+  return readCollection(KEYS.guarantors, () => []);
+}
+
+export function getSales(): Sale[] {
+  return readCollection(KEYS.sales, () => []);
+}
+
 /**
  * §29 — the single source of truth for "how much of this do we have": serialized products
  * count their `available` serials; non-serialized products sum every movement's signed
@@ -827,6 +840,194 @@ export function adjustStock(
     reason,
   });
   return { before, after: actualQuantity, diff };
+}
+
+/* ---------------- Guarantors (§15) ---------------- */
+
+export function createGuarantor(
+  input: Omit<Guarantor, "id" | "tenant_id" | "created_at">,
+  actorUserId: string | null,
+): Guarantor {
+  const guarantor: Guarantor = {
+    ...input,
+    id: genId("guar"),
+    tenant_id: DEMO_TENANT_ID,
+    created_at: new Date().toISOString(),
+  };
+  writeCollection(KEYS.guarantors, [...getGuarantors(), guarantor]);
+  recordAudit({
+    tenant_id: guarantor.tenant_id,
+    user_id: actorUserId,
+    action: "guarantor.create",
+    entity: "guarantors",
+    entity_id: guarantor.id,
+    new_value: guarantor,
+  });
+  return guarantor;
+}
+
+/* ---------------- Sales / Cash Sale (§32, §34) ---------------- */
+
+function nextInvoiceNumber(): string {
+  const year = new Date().getFullYear();
+  const prefix = `INV-${year}-`;
+  const count = getSales().filter((s) => s.invoice_number.startsWith(prefix)).length;
+  return `${prefix}${String(count + 1).padStart(6, "0")}`;
+}
+
+export interface CreateSaleInput {
+  customer_id: string | null;
+  items: Array<{ product_id: string; serial_id?: string; quantity: number }>;
+  /** Percentage 0-100. Must not exceed `TenantSettings.employee_discount_limit_pct` — the
+   * spec's Approval Engine (§105) for overriding this is a later, real Phase, not faked here. */
+  discount_pct: number;
+}
+
+/**
+ * One atomic Mock "transaction": validates every line (stock/serial availability, employee
+ * discount cap), then applies every inventory effect (serial → sold, ledger movements) and
+ * writes the Sale itself. §102 wants this atomic against a real database — here that just
+ * means "validate everything before writing anything," which the loop below does.
+ */
+export function createSale(input: CreateSaleInput, actorUserId: string | null): Sale {
+  if (input.items.length === 0) throw new Error("لازم تضيف صنف واحد على الأقل");
+
+  const settings = getCurrentTenantSettings();
+  if (input.discount_pct < 0 || input.discount_pct > settings.employee_discount_limit_pct) {
+    throw new Error(
+      `أقصى خصم مسموح بدون اعتماد مدير هو ${settings.employee_discount_limit_pct}% (يمكن تعديله من الإعدادات)`,
+    );
+  }
+
+  const products = getProducts();
+  const allSerials = getProductSerials();
+  const customer = input.customer_id
+    ? getCustomers().find((c) => c.id === input.customer_id)
+    : null;
+  if (input.customer_id && !customer) throw new Error("العميل غير موجود");
+
+  const saleItems: SaleItem[] = [];
+  const soldSerialIds = new Set<string>();
+  const stockTracker = new Map<string, number>();
+  const movementDrafts: Array<{
+    product_id: string;
+    quantity: number;
+    before: number;
+    after: number;
+  }> = [];
+
+  for (const line of input.items) {
+    const product = products.find((p) => p.id === line.product_id);
+    if (!product) throw new Error("منتج غير موجود");
+    if (!product.active) throw new Error(`المنتج "${product.name}" غير نشط`);
+
+    const currentStock = stockTracker.get(product.id) ?? getProductStock(product.id, product);
+
+    if (product.serial_required) {
+      if (line.quantity !== 1) {
+        throw new Error(`المنتج "${product.name}" يُباع سيريال واحد لكل سطر`);
+      }
+      if (!line.serial_id) throw new Error(`اختر سيريال للمنتج "${product.name}"`);
+      if (soldSerialIds.has(line.serial_id)) {
+        throw new Error("لا يمكن بيع نفس السيريال مرتين في نفس الفاتورة");
+      }
+      const serial = allSerials.find((s) => s.id === line.serial_id && s.product_id === product.id);
+      if (!serial) throw new Error("السيريال غير موجود");
+      if (serial.status !== "available") {
+        throw new Error(`السيريال "${serial.serial_number}" غير متاح للبيع`);
+      }
+      soldSerialIds.add(serial.id);
+      saleItems.push({
+        product_id: product.id,
+        product_name: product.name,
+        serial_id: serial.id,
+        serial_number: serial.serial_number,
+        quantity: 1,
+        unit_price: product.cash_price,
+        line_total: product.cash_price,
+      });
+      stockTracker.set(product.id, currentStock - 1);
+      movementDrafts.push({
+        product_id: product.id,
+        quantity: -1,
+        before: currentStock,
+        after: currentStock - 1,
+      });
+    } else {
+      if (line.quantity <= 0) throw new Error(`كمية غير صحيحة للمنتج "${product.name}"`);
+      if (line.quantity > currentStock) {
+        throw new Error(`المخزون غير كافٍ للمنتج "${product.name}" (متاح ${currentStock})`);
+      }
+      saleItems.push({
+        product_id: product.id,
+        product_name: product.name,
+        quantity: line.quantity,
+        unit_price: product.cash_price,
+        line_total: product.cash_price * line.quantity,
+      });
+      stockTracker.set(product.id, currentStock - line.quantity);
+      movementDrafts.push({
+        product_id: product.id,
+        quantity: -line.quantity,
+        before: currentStock,
+        after: currentStock - line.quantity,
+      });
+    }
+  }
+
+  const subtotal = saleItems.reduce((sum, i) => sum + i.line_total, 0);
+  const discount_amount = Math.round(subtotal * (input.discount_pct / 100) * 100) / 100;
+  const total = Math.round((subtotal - discount_amount) * 100) / 100;
+
+  const sale: Sale = {
+    id: genId("sale"),
+    tenant_id: DEMO_TENANT_ID,
+    invoice_number: nextInvoiceNumber(),
+    customer_id: input.customer_id,
+    customer_name: customer?.name ?? "عميل نقدي",
+    items: saleItems,
+    subtotal,
+    discount_pct: input.discount_pct,
+    discount_amount,
+    total,
+    user_id: actorUserId,
+    status: "completed",
+    created_at: new Date().toISOString(),
+  };
+
+  if (soldSerialIds.size > 0) {
+    writeCollection(
+      KEYS.productSerials,
+      allSerials.map((s) => (soldSerialIds.has(s.id) ? { ...s, status: "sold" as const } : s)),
+    );
+  }
+
+  const now = new Date().toISOString();
+  const newMovements: InventoryMovement[] = movementDrafts.map((m) => ({
+    id: genId("mov"),
+    tenant_id: DEMO_TENANT_ID,
+    product_id: m.product_id,
+    type: "sale",
+    quantity: m.quantity,
+    before: m.before,
+    after: m.after,
+    user_id: actorUserId,
+    reference: sale.invoice_number,
+    created_at: now,
+  }));
+  writeCollection(KEYS.inventoryMovements, [...getInventoryMovements(), ...newMovements]);
+  writeCollection(KEYS.sales, [...getSales(), sale]);
+
+  recordAudit({
+    tenant_id: DEMO_TENANT_ID,
+    user_id: actorUserId,
+    action: "sale.create",
+    entity: "sales",
+    entity_id: sale.id,
+    new_value: sale,
+  });
+
+  return sale;
 }
 
 /* ----------------------------------------------------------------------------------------
