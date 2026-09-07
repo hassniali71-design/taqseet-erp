@@ -102,7 +102,20 @@ function seedTenants(): Tenant[] {
 }
 
 function seedTenantSettings(): TenantSettings[] {
-  return [{ tenant_id: DEMO_TENANT_ID, currency: "EGP", timezone: "Africa/Cairo" }];
+  return [
+    {
+      tenant_id: DEMO_TENANT_ID,
+      currency: "EGP",
+      timezone: "Africa/Cairo",
+      costing_method: "average",
+      employee_discount_limit_pct: 5,
+      min_down_payment_pct: 10,
+      grace_period_days: 3,
+      credit_hold_days: 7,
+      late_fee_enabled: false,
+      return_period_days: 14,
+    },
+  ];
 }
 
 /** §9 — the 8 baseline system roles. */
@@ -191,6 +204,7 @@ function seedCustomers(): Customer[] {
       name: "أحمد محمود",
       phone: "01012345678",
       address: "القاهرة",
+      credit_limit: 30000,
       status: "active",
       created_at: now,
     },
@@ -201,6 +215,7 @@ function seedCustomers(): Customer[] {
       name: "منى سعيد",
       phone: "01098765432",
       address: "الجيزة",
+      credit_limit: 20000,
       status: "active",
       created_at: now,
     },
@@ -267,6 +282,35 @@ export function getTenants(): Tenant[] {
 
 export function getTenantSettings(): TenantSettings[] {
   return readCollection(KEYS.tenantSettings, seedTenantSettings);
+}
+
+/** Single-tenant Mock convenience — the demo tenant always has exactly one settings row. */
+export function getCurrentTenantSettings(): TenantSettings {
+  const row = getTenantSettings().find((s) => s.tenant_id === DEMO_TENANT_ID);
+  if (!row) throw new Error("Tenant settings غير موجودة");
+  return row;
+}
+
+export function updateTenantSettings(
+  patch: Partial<Omit<TenantSettings, "tenant_id">>,
+  actorUserId: string | null,
+): void {
+  const settings = getTenantSettings();
+  const before = getCurrentTenantSettings();
+  const after: TenantSettings = { ...before, ...patch };
+  writeCollection(
+    KEYS.tenantSettings,
+    settings.map((s) => (s.tenant_id === DEMO_TENANT_ID ? after : s)),
+  );
+  recordAudit({
+    tenant_id: DEMO_TENANT_ID,
+    user_id: actorUserId,
+    action: "tenant_settings.update",
+    entity: "tenant_settings",
+    entity_id: DEMO_TENANT_ID,
+    old_value: before,
+    new_value: after,
+  });
 }
 
 export function getRoles(): Role[] {
@@ -411,6 +455,49 @@ export function assignUserRole(userId: string, roleId: string, actorUserId: stri
     entity: "user_roles",
     entity_id: userId,
     new_value: { user_id: userId, role_id: roleId },
+  });
+}
+
+/** Replaces a user's entire role set with a single role — the common "change this user's role"
+ * UI action. Kept separate from `assignUserRole` (which is additive) since most Mock-mode UI
+ * only ever needs one role per user at a time. */
+export function setUserRole(userId: string, roleId: string, actorUserId: string | null): void {
+  const existing = getUserRoles();
+  const before = existing.filter((ur) => ur.user_id === userId);
+  writeCollection(KEYS.userRoles, [
+    ...existing.filter((ur) => ur.user_id !== userId),
+    { user_id: userId, role_id: roleId },
+  ]);
+  const role = getRoles().find((r) => r.id === roleId);
+  recordAudit({
+    tenant_id: role?.tenant_id ?? DEMO_TENANT_ID,
+    user_id: actorUserId,
+    action: "user_role.set",
+    entity: "user_roles",
+    entity_id: userId,
+    old_value: before,
+    new_value: { user_id: userId, role_id: roleId },
+  });
+}
+
+/** §11 governance — no hard delete for users either; deactivation is the only retirement path. */
+export function setUserActive(userId: string, active: boolean, actorUserId: string | null): void {
+  const users = getUsers();
+  const before = users.find((u) => u.id === userId);
+  if (!before) throw new Error("المستخدم غير موجود");
+  const after: User = { ...before, active };
+  writeCollection(
+    KEYS.users,
+    users.map((u) => (u.id === userId ? after : u)),
+  );
+  recordAudit({
+    tenant_id: before.tenant_id,
+    user_id: actorUserId,
+    action: "user.status_change",
+    entity: "users",
+    entity_id: userId,
+    old_value: { active: before.active },
+    new_value: { active: after.active },
   });
 }
 

@@ -21,11 +21,25 @@ export interface Tenant {
   created_at: string;
 }
 
-/** §113 — grows with every phase (installment plans, numbering, treasury, return policy…). */
+/**
+ * §113 — Configuration. Fields below are the ones the approved implementation plan commits
+ * to needing in Phases 2-7; each is read by name from the phase that introduces it (Phase 2:
+ * costing_method §27; Phase 3: employee_discount_limit_pct §18; Phase 4: min_down_payment_pct
+ * §39, grace_period_days §41, credit_hold_days §49, late_fee_enabled §50; Phase 7:
+ * return_period_days §81). Adding them now avoids touching this type on every later phase.
+ */
 export interface TenantSettings {
   tenant_id: string;
   currency: string;
   timezone: string;
+  costing_method: "average" | "last_purchase" | "fifo";
+  employee_discount_limit_pct: number;
+  min_down_payment_pct: number;
+  grace_period_days: number;
+  credit_hold_days: number;
+  /** §50 — optional feature; no late fee is ever applied while this is false. */
+  late_fee_enabled: boolean;
+  return_period_days: number;
 }
 
 /** §9 — the 8 baseline roles named in the spec; tenants may add more (`is_system: false`). */
@@ -106,6 +120,9 @@ export interface Customer {
   alt_phone?: string;
   address?: string;
   notes?: string;
+  /** §16 Credit Profile — used by Phase 4's Credit Check (`Available Credit = credit_limit -
+   * current exposure`). 0 = no installment credit extended yet. */
+  credit_limit: number;
   status: "active" | "inactive";
   created_at: string;
 }

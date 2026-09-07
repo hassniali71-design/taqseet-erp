@@ -18,6 +18,8 @@ create table if not exists customers (
   alt_phone text,
   address text,
   notes text,
+  -- §16 Credit Profile, used by Phase 4's Credit Check.
+  credit_limit numeric(12, 2) not null default 0,
   status text not null default 'active' check (status in ('active', 'inactive')),
   created_at timestamptz not null default now(),
   unique (tenant_id, code)

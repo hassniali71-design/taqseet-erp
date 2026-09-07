@@ -7,6 +7,9 @@ const NAV_ITEMS = [
   { to: "/dashboard", label: "لوحة التحكم" },
   { to: "/customers", label: "العملاء" },
   { to: "/products", label: "الأجهزة" },
+  { to: "/users", label: "المستخدمون" },
+  { to: "/audit", label: "سجل العمليات" },
+  { to: "/settings", label: "الإعدادات" },
 ] as const;
 
 export function AppHeader({ session }: { session: Session }) {
@@ -17,10 +20,10 @@ export function AppHeader({ session }: { session: Session }) {
 
   return (
     <header className="border-b border-border bg-card">
-      <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-        <div className="flex items-center gap-6">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-6">
           <span className="text-sm font-bold text-foreground">{tenant?.name ?? "تقسيط"}</span>
-          <nav className="flex items-center gap-1">
+          <nav className="flex flex-wrap items-center gap-1">
             {NAV_ITEMS.map((item) => (
               <Link
                 key={item.to}

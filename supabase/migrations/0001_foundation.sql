@@ -28,10 +28,20 @@ create table if not exists tenants (
 
 create index if not exists idx_tenants_status on tenants (status);
 
+-- §113 Configuration. Field-by-field usage is documented on the matching TypeScript type
+-- (src/types/index.ts TenantSettings) — kept here in lockstep so Mock and Supabase never
+-- drift apart.
 create table if not exists tenant_settings (
   tenant_id uuid primary key references tenants (id) on delete cascade,
   currency text not null default 'EGP',
-  timezone text not null default 'Africa/Cairo'
+  timezone text not null default 'Africa/Cairo',
+  costing_method text not null default 'average' check (costing_method in ('average', 'last_purchase', 'fifo')),
+  employee_discount_limit_pct numeric(5, 2) not null default 5,
+  min_down_payment_pct numeric(5, 2) not null default 10,
+  grace_period_days integer not null default 3,
+  credit_hold_days integer not null default 7,
+  late_fee_enabled boolean not null default false,
+  return_period_days integer not null default 14
 );
 
 -- ---------------------------------------------------------------------------
