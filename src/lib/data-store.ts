@@ -2,10 +2,17 @@ import type {
   AuditLogEntry,
   Customer,
   Guarantor,
+  Installment,
+  InstallmentContract,
+  InstallmentPayment,
+  InstallmentPlan,
+  InstallmentStatus,
   InventoryMovement,
   Permission,
+  PromiseToPay,
   Product,
   ProductSerial,
+  RestructureEvent,
   Role,
   RolePermission,
   Sale,
@@ -16,6 +23,7 @@ import type {
   User,
   UserRoleAssignment,
 } from "@/types";
+import { calculateFinance, generateSchedule } from "@/lib/finance-engine";
 
 /**
  * Foundation Mock data layer — Phase 0.
@@ -49,6 +57,12 @@ const KEYS = {
   inventoryMovements: `${STORAGE_PREFIX}.inventory_movements.v1`,
   guarantors: `${STORAGE_PREFIX}.guarantors.v1`,
   sales: `${STORAGE_PREFIX}.sales.v1`,
+  installmentPlans: `${STORAGE_PREFIX}.installment_plans.v1`,
+  installmentContracts: `${STORAGE_PREFIX}.installment_contracts.v1`,
+  installments: `${STORAGE_PREFIX}.installments.v1`,
+  installmentPayments: `${STORAGE_PREFIX}.installment_payments.v1`,
+  promisesToPay: `${STORAGE_PREFIX}.promises_to_pay.v1`,
+  restructureEvents: `${STORAGE_PREFIX}.restructure_events.v1`,
 } as const;
 
 const listeners = new Set<() => void>();
@@ -300,6 +314,24 @@ function nextCode(prefix: string, count: number): string {
   return `${prefix}-${String(count + 1).padStart(4, "0")}`;
 }
 
+/** §38 — the exact example plans from the spec. */
+function seedInstallmentPlans(): InstallmentPlan[] {
+  const now = new Date().toISOString();
+  return [
+    { duration_months: 3, rate_pct: 10 },
+    { duration_months: 6, rate_pct: 20 },
+    { duration_months: 9, rate_pct: 30 },
+    { duration_months: 12, rate_pct: 40 },
+  ].map((p, i) => ({
+    id: `plan_demo_${i + 1}`,
+    tenant_id: DEMO_TENANT_ID,
+    duration_months: p.duration_months,
+    rate_pct: p.rate_pct,
+    active: true,
+    created_at: now,
+  }));
+}
+
 /** Seeds a few `available` serials per demo product, plus the matching receipt movements, so
  * the Products/inventory screens aren't empty on first run — mirrors what `receiveStock`
  * would produce for a real goods receipt. */
@@ -455,6 +487,96 @@ export function getGuarantors(): Guarantor[] {
 
 export function getSales(): Sale[] {
   return readCollection(KEYS.sales, () => []);
+}
+
+export function getInstallmentPlans(): InstallmentPlan[] {
+  return readCollection(KEYS.installmentPlans, seedInstallmentPlans);
+}
+
+export function getInstallmentContracts(): InstallmentContract[] {
+  return readCollection(KEYS.installmentContracts, () => []);
+}
+
+export function getInstallments(): Installment[] {
+  return readCollection(KEYS.installments, () => []);
+}
+
+export function getInstallmentPayments(): InstallmentPayment[] {
+  return readCollection(KEYS.installmentPayments, () => []);
+}
+
+export function getPromisesToPay(): PromiseToPay[] {
+  return readCollection(KEYS.promisesToPay, () => []);
+}
+
+export function getRestructureEvents(): RestructureEvent[] {
+  return readCollection(KEYS.restructureEvents, () => []);
+}
+
+/**
+ * §17-adjacent helper (full Risk Score is real Phase-with-Supabase work) — the customer's
+ * current outstanding balance across every contract that isn't fully settled, used by the
+ * Credit Check (§57: `Available Credit = credit_limit - Current Exposure`).
+ */
+export function getCustomerExposure(customerId: string): number {
+  const contracts = getInstallmentContracts().filter(
+    (c) => c.customer_id === customerId && c.status !== "settled" && c.status !== "settled_early",
+  );
+  const installments = getInstallments();
+  return contracts.reduce((sum, contract) => {
+    const outstanding = installments
+      .filter((i) => i.contract_id === contract.id && i.status !== "waived")
+      .reduce((s, i) => s + Math.max(0, i.amount - i.paid_amount), 0);
+    return sum + outstanding;
+  }, 0);
+}
+
+/**
+ * §49 Overdue — computed on read, never persisted, since "is this late" depends on today's
+ * date, not an event. `status` itself only ever gets written by real actions (a payment, a
+ * waive, a restructure) — see the state machine note on the `Installment` type.
+ */
+export function getEffectiveInstallmentStatus(
+  installment: Installment,
+  gracePeriodDays: number,
+): InstallmentStatus {
+  if (
+    installment.status === "paid" ||
+    installment.status === "waived" ||
+    installment.status === "rescheduled"
+  ) {
+    return installment.status;
+  }
+  const dueWithGrace = new Date(installment.due_date);
+  dueWithGrace.setDate(dueWithGrace.getDate() + gracePeriodDays);
+  const isPastGrace = new Date() > dueWithGrace;
+  if (installment.paid_amount > 0 && installment.paid_amount < installment.amount) {
+    return isPastGrace ? "overdue" : "partially_paid";
+  }
+  if (isPastGrace) return "overdue";
+  return new Date() >= new Date(installment.due_date) ? "due" : "scheduled";
+}
+
+export function getDaysOverdue(installment: Installment): number {
+  const diffMs = Date.now() - new Date(installment.due_date).getTime();
+  return Math.max(0, Math.floor(diffMs / (24 * 60 * 60 * 1000)));
+}
+
+/** §56 Credit Hold — blocks new contracts once a customer has an installment overdue by more
+ * than `credit_hold_days`. */
+export function isCustomerOnCreditHold(customerId: string, creditHoldDays: number): boolean {
+  const contractIds = new Set(
+    getInstallmentContracts()
+      .filter((c) => c.customer_id === customerId)
+      .map((c) => c.id),
+  );
+  return getInstallments().some(
+    (i) =>
+      contractIds.has(i.contract_id) &&
+      i.status !== "paid" &&
+      i.status !== "waived" &&
+      getDaysOverdue(i) > creditHoldDays,
+  );
 }
 
 /**
@@ -1028,6 +1150,276 @@ export function createSale(input: CreateSaleInput, actorUserId: string | null): 
   });
 
   return sale;
+}
+
+/* ---------------- Installment Plans (§38, Owner-managed) ---------------- */
+
+export function createInstallmentPlan(
+  input: Omit<InstallmentPlan, "id" | "tenant_id" | "active" | "created_at">,
+  actorUserId: string | null,
+): InstallmentPlan {
+  if (input.duration_months <= 0) throw new Error("مدة الخطة يجب أن تكون أكبر من صفر");
+  if (input.rate_pct < 0) throw new Error("نسبة التمويل لا يمكن أن تكون سالبة");
+  const plan: InstallmentPlan = {
+    ...input,
+    id: genId("plan"),
+    tenant_id: DEMO_TENANT_ID,
+    active: true,
+    created_at: new Date().toISOString(),
+  };
+  writeCollection(KEYS.installmentPlans, [...getInstallmentPlans(), plan]);
+  recordAudit({
+    tenant_id: plan.tenant_id,
+    user_id: actorUserId,
+    action: "installment_plan.create",
+    entity: "installment_plans",
+    entity_id: plan.id,
+    new_value: plan,
+  });
+  return plan;
+}
+
+/** §11/§114 governance — deactivating a plan never touches contracts already created from it
+ * (their rate/duration are frozen snapshots on the contract itself); it only hides the plan
+ * from new-contract pickers. No hard delete. */
+export function setInstallmentPlanActive(
+  id: string,
+  active: boolean,
+  actorUserId: string | null,
+): void {
+  const plans = getInstallmentPlans();
+  const before = plans.find((p) => p.id === id);
+  if (!before) throw new Error("خطة التقسيط غير موجودة");
+  const after: InstallmentPlan = { ...before, active };
+  writeCollection(
+    KEYS.installmentPlans,
+    plans.map((p) => (p.id === id ? after : p)),
+  );
+  recordAudit({
+    tenant_id: before.tenant_id,
+    user_id: actorUserId,
+    action: "installment_plan.set_active",
+    entity: "installment_plans",
+    entity_id: id,
+    old_value: { active: before.active },
+    new_value: { active: after.active },
+  });
+}
+
+/* ---------------- Installment Contracts (§35/§37/§41/§43) ---------------- */
+
+function nextContractNumber(): string {
+  const year = new Date().getFullYear();
+  const prefix = `CON-${year}-`;
+  const count = getInstallmentContracts().filter((c) =>
+    c.contract_number.startsWith(prefix),
+  ).length;
+  return `${prefix}${String(count + 1).padStart(6, "0")}`;
+}
+
+export interface CreateInstallmentContractInput {
+  customer_id: string;
+  items: Array<{ product_id: string; serial_id?: string; quantity: number }>;
+  down_payment: number;
+  plan_id: string;
+}
+
+/**
+ * The installment sale flow. Same "validate everything, then write everything" discipline as
+ * `createSale`, plus the checks unique to credit: active customer, active plan, Credit Hold
+ * (§56), minimum down payment (§39), and Credit Check (§57: `Available Credit = credit_limit -
+ * Current Exposure`). Pricing uses `product.installment_price`, never `cash_price` (§25).
+ *
+ * The plan's `rate_pct`/`duration_months` are snapshotted onto the contract right here (§114)
+ * — `calculateFinance`/`generateSchedule` (verified against the spec's own acceptance test in
+ * scripts/verify-finance-engine.ts) never get called again for this contract after this
+ * function returns, so a later edit to the plan can never change it.
+ */
+export function createInstallmentContract(
+  input: CreateInstallmentContractInput,
+  actorUserId: string | null,
+): InstallmentContract {
+  if (input.items.length === 0) throw new Error("لازم تضيف صنف واحد على الأقل");
+
+  const customer = getCustomers().find((c) => c.id === input.customer_id);
+  if (!customer) throw new Error("العميل غير موجود");
+  if (customer.status !== "active") throw new Error("العميل غير نشط");
+
+  const plan = getInstallmentPlans().find((p) => p.id === input.plan_id);
+  if (!plan) throw new Error("خطة التقسيط غير موجودة");
+  if (!plan.active) throw new Error("خطة التقسيط غير مفعّلة");
+
+  const settings = getCurrentTenantSettings();
+  if (isCustomerOnCreditHold(customer.id, settings.credit_hold_days)) {
+    throw new Error("العميل موقوف عن التقسيط لتأخره في السداد (Credit Hold) — راجع صفحة العميل");
+  }
+
+  const products = getProducts();
+  const allSerials = getProductSerials();
+
+  const saleItems: SaleItem[] = [];
+  const soldSerialIds = new Set<string>();
+  const stockTracker = new Map<string, number>();
+  const movementDrafts: Array<{
+    product_id: string;
+    quantity: number;
+    before: number;
+    after: number;
+  }> = [];
+
+  for (const line of input.items) {
+    const product = products.find((p) => p.id === line.product_id);
+    if (!product) throw new Error("منتج غير موجود");
+    if (!product.active) throw new Error(`المنتج "${product.name}" غير نشط`);
+
+    const currentStock = stockTracker.get(product.id) ?? getProductStock(product.id, product);
+
+    if (product.serial_required) {
+      if (line.quantity !== 1) {
+        throw new Error(`المنتج "${product.name}" يُباع سيريال واحد لكل سطر`);
+      }
+      if (!line.serial_id) throw new Error(`اختر سيريال للمنتج "${product.name}"`);
+      if (soldSerialIds.has(line.serial_id)) {
+        throw new Error("لا يمكن بيع نفس السيريال مرتين في نفس العقد");
+      }
+      const serial = allSerials.find((s) => s.id === line.serial_id && s.product_id === product.id);
+      if (!serial) throw new Error("السيريال غير موجود");
+      if (serial.status !== "available") {
+        throw new Error(`السيريال "${serial.serial_number}" غير متاح للبيع`);
+      }
+      soldSerialIds.add(serial.id);
+      saleItems.push({
+        product_id: product.id,
+        product_name: product.name,
+        serial_id: serial.id,
+        serial_number: serial.serial_number,
+        quantity: 1,
+        unit_price: product.installment_price,
+        line_total: product.installment_price,
+      });
+      stockTracker.set(product.id, currentStock - 1);
+      movementDrafts.push({
+        product_id: product.id,
+        quantity: -1,
+        before: currentStock,
+        after: currentStock - 1,
+      });
+    } else {
+      if (line.quantity <= 0) throw new Error(`كمية غير صحيحة للمنتج "${product.name}"`);
+      if (line.quantity > currentStock) {
+        throw new Error(`المخزون غير كافٍ للمنتج "${product.name}" (متاح ${currentStock})`);
+      }
+      saleItems.push({
+        product_id: product.id,
+        product_name: product.name,
+        quantity: line.quantity,
+        unit_price: product.installment_price,
+        line_total: product.installment_price * line.quantity,
+      });
+      stockTracker.set(product.id, currentStock - line.quantity);
+      movementDrafts.push({
+        product_id: product.id,
+        quantity: -line.quantity,
+        before: currentStock,
+        after: currentStock - line.quantity,
+      });
+    }
+  }
+
+  const cash_subtotal = saleItems.reduce((sum, i) => sum + i.line_total, 0);
+
+  if (input.down_payment < 0) throw new Error("المقدّم لا يمكن أن يكون سالبًا");
+  const minDownPayment =
+    Math.round(cash_subtotal * (settings.min_down_payment_pct / 100) * 100) / 100;
+  if (input.down_payment < minDownPayment) {
+    throw new Error(
+      `الحد الأدنى للمقدّم ${minDownPayment} ج.م (${settings.min_down_payment_pct}% من قيمة البضاعة)`,
+    );
+  }
+  if (input.down_payment >= cash_subtotal) {
+    throw new Error("المقدّم يغطي كامل القيمة — استخدم البيع النقدي بدلاً من التقسيط");
+  }
+
+  const principal = Math.round((cash_subtotal - input.down_payment) * 100) / 100;
+  const { financeAmount, totalAmount } = calculateFinance(principal, plan.rate_pct);
+
+  const exposure = getCustomerExposure(customer.id);
+  const availableCredit = customer.credit_limit - exposure;
+  if (totalAmount > availableCredit) {
+    throw new Error(
+      `تجاوز حد الائتمان: المتاح ${availableCredit} ج.م، والعقد يحتاج ${totalAmount} ج.م (الحد الكلي ${customer.credit_limit} ج.م، المستحق حاليًا ${exposure} ج.م)`,
+    );
+  }
+
+  const schedule = generateSchedule(totalAmount, plan.duration_months);
+  const created_at = new Date().toISOString();
+
+  const contract: InstallmentContract = {
+    id: genId("contract"),
+    tenant_id: DEMO_TENANT_ID,
+    contract_number: nextContractNumber(),
+    customer_id: customer.id,
+    customer_name: customer.name,
+    items: saleItems,
+    cash_subtotal,
+    down_payment: input.down_payment,
+    principal,
+    plan_id: plan.id,
+    plan_duration_months: plan.duration_months,
+    plan_rate_pct: plan.rate_pct,
+    finance_amount: financeAmount,
+    total_amount: totalAmount,
+    installment_amount: schedule[0]?.amount ?? 0,
+    status: "active",
+    user_id: actorUserId,
+    created_at,
+  };
+
+  const installments: Installment[] = schedule.map((line) => ({
+    id: genId("inst"),
+    tenant_id: DEMO_TENANT_ID,
+    contract_id: contract.id,
+    seq: line.seq,
+    due_date: line.due_date,
+    amount: line.amount,
+    paid_amount: 0,
+    status: "scheduled",
+    created_at,
+  }));
+
+  if (soldSerialIds.size > 0) {
+    writeCollection(
+      KEYS.productSerials,
+      allSerials.map((s) => (soldSerialIds.has(s.id) ? { ...s, status: "sold" as const } : s)),
+    );
+  }
+
+  const newMovements: InventoryMovement[] = movementDrafts.map((m) => ({
+    id: genId("mov"),
+    tenant_id: DEMO_TENANT_ID,
+    product_id: m.product_id,
+    type: "sale",
+    quantity: m.quantity,
+    before: m.before,
+    after: m.after,
+    user_id: actorUserId,
+    reference: contract.contract_number,
+    created_at,
+  }));
+  writeCollection(KEYS.inventoryMovements, [...getInventoryMovements(), ...newMovements]);
+  writeCollection(KEYS.installmentContracts, [...getInstallmentContracts(), contract]);
+  writeCollection(KEYS.installments, [...getInstallments(), ...installments]);
+
+  recordAudit({
+    tenant_id: DEMO_TENANT_ID,
+    user_id: actorUserId,
+    action: "installment_contract.create",
+    entity: "installment_contracts",
+    entity_id: contract.id,
+    new_value: contract,
+  });
+
+  return contract;
 }
 
 /* ----------------------------------------------------------------------------------------

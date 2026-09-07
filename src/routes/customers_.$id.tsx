@@ -4,8 +4,10 @@ import { useEffect, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import {
   createGuarantor,
+  getCustomerExposure,
   getCustomers,
   getGuarantors,
+  getInstallmentContracts,
   getSales,
   subscribeData,
 } from "@/lib/data-store";
@@ -49,6 +51,10 @@ function CustomerDetailPage() {
     .filter((s) => s.customer_id === id)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const totalPurchases = sales.reduce((sum, s) => sum + s.total, 0);
+  const contracts = getInstallmentContracts()
+    .filter((c) => c.customer_id === id)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const exposure = getCustomerExposure(id);
 
   function handleAddGuarantor(event: FormEvent) {
     event.preventDefault();
@@ -107,7 +113,9 @@ function CustomerDetailPage() {
             </p>
           </div>
           <div className="rounded-xl border border-border bg-card p-4">
-            <p className="text-xs text-muted-foreground">حد الائتمان</p>
+            <p className="text-xs text-muted-foreground">
+              حد الائتمان (المستحق حاليًا {exposure.toLocaleString("ar-EG")})
+            </p>
             <p className="mt-1 text-2xl font-bold text-foreground" dir="ltr">
               {customer.credit_limit.toLocaleString("ar-EG")} ج.م
             </p>
@@ -202,6 +210,52 @@ function CustomerDetailPage() {
                   <tr>
                     <td colSpan={3} className="px-4 py-6 text-center text-muted-foreground">
                       لا يوجد ضامنون بعد.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="mt-8">
+          <h2 className="text-lg font-bold text-foreground">عقود التقسيط</h2>
+          <div className="mt-3 overflow-x-auto rounded-xl border border-border bg-card">
+            <table className="w-full text-right text-sm">
+              <thead className="border-b border-border text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3 font-medium">رقم العقد</th>
+                  <th className="px-4 py-3 font-medium">الإجمالي</th>
+                  <th className="px-4 py-3 font-medium">الحالة</th>
+                  <th className="px-4 py-3 font-medium">التاريخ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {contracts.map((contract) => (
+                  <tr key={contract.id} className="border-b border-border last:border-0">
+                    <td className="px-4 py-3 font-medium text-foreground">
+                      <Link
+                        to="/contracts/$id"
+                        params={{ id: contract.id }}
+                        className="text-primary hover:underline"
+                        dir="ltr"
+                      >
+                        {contract.contract_number}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
+                      {contract.total_amount.toLocaleString("ar-EG")} ج.م
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">{contract.status}</td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
+                      {new Date(contract.created_at).toLocaleString("ar-EG")}
+                    </td>
+                  </tr>
+                ))}
+                {contracts.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">
+                      لا يوجد عقود تقسيط بعد.
                     </td>
                   </tr>
                 )}

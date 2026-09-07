@@ -2,7 +2,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
-import { getCurrentTenantSettings, subscribeData, updateTenantSettings } from "@/lib/data-store";
+import {
+  createInstallmentPlan,
+  getCurrentTenantSettings,
+  getInstallmentPlans,
+  setInstallmentPlanActive,
+  subscribeData,
+  updateTenantSettings,
+} from "@/lib/data-store";
 import { useRequireSession } from "@/hooks/use-session";
 import type { TenantSettings } from "@/types";
 
@@ -30,6 +37,9 @@ function SettingsPage() {
   const session = useRequireSession();
   const [, forceRerender] = useState(0);
   const [saved, setSaved] = useState(false);
+  const [showPlanForm, setShowPlanForm] = useState(false);
+  const [planDuration, setPlanDuration] = useState("6");
+  const [planRate, setPlanRate] = useState("20");
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -64,6 +74,19 @@ function SettingsPage() {
     );
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  }
+
+  const plans = getInstallmentPlans();
+
+  function handleAddPlan(event: FormEvent) {
+    event.preventDefault();
+    createInstallmentPlan(
+      { duration_months: Number(planDuration) || 0, rate_pct: Number(planRate) || 0 },
+      actorUserId,
+    );
+    setPlanDuration("6");
+    setPlanRate("20");
+    setShowPlanForm(false);
   }
 
   return (
@@ -195,6 +218,115 @@ function SettingsPage() {
             {saved && <span className="text-sm text-success">تم الحفظ ✓</span>}
           </div>
         </form>
+
+        <section className="mt-8 rounded-xl border border-border bg-card p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-foreground">خطط التقسيط (§38)</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                تعديل أو إيقاف خطة هنا لا يغيّر عقودًا أنشئت بها من قبل — النسبة والمدة تُحفظان داخل
+                كل عقد وقت إنشائه (§114).
+              </p>
+            </div>
+            {!showPlanForm && (
+              <button
+                onClick={() => setShowPlanForm(true)}
+                className="text-xs font-medium text-primary hover:underline"
+              >
+                + خطة جديدة
+              </button>
+            )}
+          </div>
+
+          {showPlanForm && (
+            <form
+              onSubmit={handleAddPlan}
+              className="mt-3 flex flex-wrap items-end gap-3 rounded-md border border-border p-3"
+            >
+              <label className="block space-y-1">
+                <span className="text-xs font-medium text-foreground">المدة (بالشهور)</span>
+                <input
+                  type="number"
+                  min="1"
+                  required
+                  value={planDuration}
+                  onChange={(e) => setPlanDuration(e.target.value)}
+                  className="form-input"
+                  dir="ltr"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs font-medium text-foreground">نسبة التمويل %</span>
+                <input
+                  type="number"
+                  min="0"
+                  required
+                  value={planRate}
+                  onChange={(e) => setPlanRate(e.target.value)}
+                  className="form-input"
+                  dir="ltr"
+                />
+              </label>
+              <button
+                type="submit"
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                حفظ
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowPlanForm(false)}
+                className="rounded-md border border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
+              >
+                إلغاء
+              </button>
+            </form>
+          )}
+
+          <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+            <table className="w-full text-right text-sm">
+              <thead className="border-b border-border text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3 font-medium">المدة</th>
+                  <th className="px-4 py-3 font-medium">نسبة التمويل</th>
+                  <th className="px-4 py-3 font-medium">الحالة</th>
+                  <th className="px-4 py-3 font-medium"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {plans.map((plan) => (
+                  <tr key={plan.id} className="border-b border-border last:border-0">
+                    <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
+                      {plan.duration_months} شهر
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground" dir="ltr">
+                      {plan.rate_pct}%
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={
+                          plan.active
+                            ? "rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success"
+                            : "rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
+                        }
+                      >
+                        {plan.active ? "مفعّلة" : "متوقفة"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-left">
+                      <button
+                        onClick={() => setInstallmentPlanActive(plan.id, !plan.active, actorUserId)}
+                        className="text-xs font-medium text-primary hover:underline"
+                      >
+                        {plan.active ? "إيقاف" : "تفعيل"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </main>
     </div>
   );

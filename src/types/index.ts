@@ -245,3 +245,119 @@ export interface Sale {
   status: "completed" | "cancelled";
   created_at: string;
 }
+
+/**
+ * §38 Installment Plans — Owner-managed. §114 Historical Snapshot rule: a plan's
+ * `rate_pct`/`duration_months` get copied into every contract that uses them at creation
+ * time (`InstallmentContract.plan_rate_pct`/`plan_duration_months`) — editing or deactivating
+ * a plan here must never change an existing contract. §11 governance: no hard delete, `active`
+ * only.
+ */
+export interface InstallmentPlan {
+  id: string;
+  tenant_id: string;
+  duration_months: number;
+  rate_pct: number;
+  active: boolean;
+  created_at: string;
+}
+
+/** §44 Installment state machine. */
+export type InstallmentStatus =
+  "scheduled" | "due" | "partially_paid" | "paid" | "overdue" | "waived" | "rescheduled";
+
+export interface Installment {
+  id: string;
+  tenant_id: string;
+  contract_id: string;
+  seq: number;
+  due_date: string;
+  amount: number;
+  paid_amount: number;
+  status: InstallmentStatus;
+  created_at: string;
+}
+
+/**
+ * §35/§42 Installment Contract — lean subset. `items` nested for the same reason as `Sale`
+ * (see its comment). Pricing uses `Product.installment_price`, not `cash_price` (§25 keeps
+ * these separate on purpose). §37 finance formula, computed once and frozen here:
+ *
+ *   principal        = cash_subtotal - down_payment      (the financed base)
+ *   finance_amount    = principal × plan_rate_pct / 100    (once, not compounded)
+ *   total_amount      = principal + finance_amount         (what the schedule totals)
+ *
+ * §43 state machine is simplified for this Mock stage: contracts go straight to `active`
+ * (no Draft/Pending Approval — that needs a real Approval Engine, §105, not built yet).
+ */
+export interface InstallmentContract {
+  id: string;
+  tenant_id: string;
+  contract_number: string;
+  customer_id: string;
+  customer_name: string;
+  items: SaleItem[];
+  cash_subtotal: number;
+  down_payment: number;
+  principal: number;
+  plan_id: string;
+  /** Snapshots of the plan at creation time — §114, never re-read from the live plan. */
+  plan_duration_months: number;
+  plan_rate_pct: number;
+  finance_amount: number;
+  total_amount: number;
+  installment_amount: number;
+  status: "active" | "partially_paid" | "overdue" | "restructured" | "settled" | "settled_early";
+  user_id: string | null;
+  created_at: string;
+}
+
+/**
+ * §54/§55 Collection Receipt — one payment can cover more than one installment (§46 Oldest
+ * Due First is the default allocation), so `allocations` records exactly how this receipt's
+ * amount was split. `receipt_number` is sequential/unique/immutable per §55 — no function
+ * exposes a way to edit or delete one, matching "Employee cannot edit, cannot be deleted."
+ */
+export interface InstallmentPayment {
+  id: string;
+  tenant_id: string;
+  contract_id: string;
+  receipt_number: string;
+  amount: number;
+  allocations: Array<{ installment_id: string; amount: number }>;
+  user_id: string | null;
+  created_at: string;
+}
+
+/** §51 Promise to Pay. `status` starts `pending`; becomes `kept` if a payment lands on/before
+ * `promise_date`, or `failed` if the date passes unpaid — Collections Workbench (§52)
+ * surfaces failed promises. */
+export interface PromiseToPay {
+  id: string;
+  tenant_id: string;
+  contract_id: string;
+  promise_date: string;
+  expected_amount: number;
+  notes?: string;
+  user_id: string | null;
+  status: "pending" | "kept" | "failed";
+  created_at: string;
+}
+
+/**
+ * §48 Restructuring — never mutates or deletes the original schedule. Its outstanding
+ * installments get `status: "rescheduled"` (kept, immutable history) and new `Installment`
+ * rows are appended to the same contract for the remaining balance over the new term. This
+ * record is the audit trail linking old → new.
+ */
+export interface RestructureEvent {
+  id: string;
+  tenant_id: string;
+  contract_id: string;
+  old_installment_ids: string[];
+  remaining_amount: number;
+  new_duration_months: number;
+  reason: string;
+  user_id: string | null;
+  created_at: string;
+}
