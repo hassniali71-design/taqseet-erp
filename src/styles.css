@@ -130,6 +130,22 @@
   --input: oklch(1 0 0 / 15%);
 }
 
+@utility form-input {
+  width: 100%;
+  border-radius: var(--radius-md);
+  border-width: 1px;
+  border-color: var(--color-input);
+  background-color: var(--color-background);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  color: var(--color-foreground);
+  outline: none;
+
+  &:focus {
+    box-shadow: 0 0 0 2px var(--color-ring);
+  }
+}
+
 @layer base {
   * {
     border-color: var(--color-border);

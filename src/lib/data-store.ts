@@ -1,6 +1,8 @@
 import type {
   AuditLogEntry,
+  Customer,
   Permission,
+  Product,
   Role,
   RolePermission,
   SystemRoleName,
@@ -36,6 +38,8 @@ const KEYS = {
   userRoles: `${STORAGE_PREFIX}.user_roles.v1`,
   auditLogs: `${STORAGE_PREFIX}.audit_logs.v1`,
   session: `${STORAGE_PREFIX}.session.v1`,
+  customers: `${STORAGE_PREFIX}.customers.v1`,
+  products: `${STORAGE_PREFIX}.products.v1`,
 } as const;
 
 const listeners = new Set<() => void>();
@@ -176,6 +180,85 @@ function seedUserRoles(): UserRoleAssignment[] {
   return [{ user_id: "user_demo_owner", role_id: "role_owner" }];
 }
 
+/** §14 — a couple of demo rows so the Customers page isn't empty on first run. */
+function seedCustomers(): Customer[] {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: "cust_demo_1",
+      tenant_id: DEMO_TENANT_ID,
+      code: "CUST-0001",
+      name: "أحمد محمود",
+      phone: "01012345678",
+      address: "القاهرة",
+      status: "active",
+      created_at: now,
+    },
+    {
+      id: "cust_demo_2",
+      tenant_id: DEMO_TENANT_ID,
+      code: "CUST-0002",
+      name: "منى سعيد",
+      phone: "01098765432",
+      address: "الجيزة",
+      status: "active",
+      created_at: now,
+    },
+  ];
+}
+
+/** §19 — a couple of demo appliances so the Products page isn't empty on first run. */
+function seedProducts(): Product[] {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: "prod_demo_1",
+      tenant_id: DEMO_TENANT_ID,
+      code: "PRD-0001",
+      name: "ثلاجة توشيبا 16 قدم",
+      brand: "Toshiba",
+      model: "GR-EF37",
+      category: "ثلاجات",
+      unit: "قطعة",
+      cost_price: 12000,
+      cash_price: 15000,
+      installment_price: 16500,
+      min_stock: 2,
+      max_stock: 20,
+      warranty_months: 12,
+      serial_required: true,
+      active: true,
+      created_at: now,
+    },
+    {
+      id: "prod_demo_2",
+      tenant_id: DEMO_TENANT_ID,
+      code: "PRD-0002",
+      name: "غسالة سامسونج 8 كيلو",
+      brand: "Samsung",
+      model: "WW80",
+      category: "غسالات",
+      unit: "قطعة",
+      cost_price: 9000,
+      cash_price: 11500,
+      installment_price: 12800,
+      min_stock: 3,
+      max_stock: 25,
+      warranty_months: 24,
+      serial_required: true,
+      active: true,
+      created_at: now,
+    },
+  ];
+}
+
+/** Sequential human-friendly codes (e.g. `CUST-0003`) from the current row count — fine for a
+ * single-tenant Mock demo; a real Phase 2/3 numbering scheme (§91) is tenant-wide and
+ * server-generated. */
+function nextCode(prefix: string, count: number): string {
+  return `${prefix}-${String(count + 1).padStart(4, "0")}`;
+}
+
 /* ---------------- Reads ---------------- */
 
 export function getTenants(): Tenant[] {
@@ -208,6 +291,14 @@ export function getUserRoles(): UserRoleAssignment[] {
 
 export function getAuditLogs(): AuditLogEntry[] {
   return readCollection(KEYS.auditLogs, () => []);
+}
+
+export function getCustomers(): Customer[] {
+  return readCollection(KEYS.customers, seedCustomers);
+}
+
+export function getProducts(): Product[] {
+  return readCollection(KEYS.products, seedProducts);
 }
 
 /** Permission keys currently granted to a user, across all of their assigned roles. */
@@ -320,6 +411,108 @@ export function assignUserRole(userId: string, roleId: string, actorUserId: stri
     entity: "user_roles",
     entity_id: userId,
     new_value: { user_id: userId, role_id: roleId },
+  });
+}
+
+/* ---------------- Customers (§14 — lean subset, see src/types/index.ts) ---------------- */
+
+export function createCustomer(
+  input: Omit<Customer, "id" | "tenant_id" | "code" | "status" | "created_at">,
+  actorUserId: string | null,
+): Customer {
+  const existing = getCustomers();
+  const customer: Customer = {
+    ...input,
+    id: genId("cust"),
+    tenant_id: DEMO_TENANT_ID,
+    code: nextCode("CUST", existing.length),
+    status: "active",
+    created_at: new Date().toISOString(),
+  };
+  writeCollection(KEYS.customers, [...existing, customer]);
+  recordAudit({
+    tenant_id: customer.tenant_id,
+    user_id: actorUserId,
+    action: "customer.create",
+    entity: "customers",
+    entity_id: customer.id,
+    new_value: customer,
+  });
+  return customer;
+}
+
+export function updateCustomer(
+  id: string,
+  patch: Partial<Omit<Customer, "id" | "tenant_id" | "code" | "created_at">>,
+  actorUserId: string | null,
+): void {
+  const customers = getCustomers();
+  const before = customers.find((c) => c.id === id);
+  if (!before) throw new Error("العميل غير موجود");
+  const after: Customer = { ...before, ...patch };
+  writeCollection(
+    KEYS.customers,
+    customers.map((c) => (c.id === id ? after : c)),
+  );
+  recordAudit({
+    tenant_id: before.tenant_id,
+    user_id: actorUserId,
+    action: "customer.update",
+    entity: "customers",
+    entity_id: id,
+    old_value: before,
+    new_value: after,
+  });
+}
+
+/* ---------------- Products (§19 — lean subset, see src/types/index.ts) ---------------- */
+
+export function createProduct(
+  input: Omit<Product, "id" | "tenant_id" | "code" | "active" | "created_at">,
+  actorUserId: string | null,
+): Product {
+  const existing = getProducts();
+  const product: Product = {
+    ...input,
+    id: genId("prod"),
+    tenant_id: DEMO_TENANT_ID,
+    code: nextCode("PRD", existing.length),
+    active: true,
+    created_at: new Date().toISOString(),
+  };
+  writeCollection(KEYS.products, [...existing, product]);
+  recordAudit({
+    tenant_id: product.tenant_id,
+    user_id: actorUserId,
+    action: "product.create",
+    entity: "products",
+    entity_id: product.id,
+    new_value: product,
+  });
+  return product;
+}
+
+export function updateProduct(
+  id: string,
+  patch: Partial<Omit<Product, "id" | "tenant_id" | "code" | "created_at">>,
+  actorUserId: string | null,
+): void {
+  const products = getProducts();
+  const before = products.find((p) => p.id === id);
+  if (!before) throw new Error("المنتج غير موجود");
+  const after: Product = { ...before, ...patch };
+  writeCollection(
+    KEYS.products,
+    products.map((p) => (p.id === id ? after : p)),
+  );
+  recordAudit({
+    tenant_id: before.tenant_id,
+    user_id: actorUserId,
+    action: "product.update",
+    entity: "products",
+    entity_id: id,
+    old_value: before,
+    new_value: after,
   });
 }
 

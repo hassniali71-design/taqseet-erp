@@ -1,60 +1,55 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
 
-import {
-  getSession,
-  getTenants,
-  getUsers,
-  signOut,
-  subscribeData,
-  type Session,
-} from "@/lib/data-store";
+import { AppHeader } from "@/components/AppHeader";
+import { getCustomers, getProducts, getTenants } from "@/lib/data-store";
+import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/dashboard")({
   component: DashboardPage,
 });
 
 function DashboardPage() {
-  const navigate = useNavigate();
-  // Starts undefined on both server and client render so the first paint matches exactly
-  // (getSession() reads localStorage, which only exists client-side — reading it directly
-  // during render would desync SSR/CSR output and trigger a hydration mismatch).
-  const [session, setSession] = useState<Session | null | undefined>(undefined);
-
-  useEffect(() => {
-    setSession(getSession());
-    return subscribeData(() => setSession(getSession()));
-  }, []);
-
-  useEffect(() => {
-    if (session === null) void navigate({ to: "/login" });
-  }, [session, navigate]);
-
+  const session = useRequireSession();
   if (!session) return null;
 
-  const user = getUsers().find((u) => u.id === session.user_id);
   const tenant = getTenants().find((t) => t.id === session.tenant_id);
+  const customers = getCustomers();
+  const products = getProducts();
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background px-4 text-center">
-      <h1 className="text-2xl font-bold text-foreground">لوحة التحكم (Placeholder)</h1>
-      <p className="text-sm text-muted-foreground">
-        مسجّل دخول باسم <span className="font-medium text-foreground">{user?.full_name}</span> —
-        المحل: <span className="font-medium text-foreground">{tenant?.name}</span>
-      </p>
-      <p className="max-w-md text-xs text-muted-foreground">
-        هذه صفحة Placeholder فقط للتأكد من تدفق الدخول الوهمي (Mock). الشاشات الحقيقية للوحة التحكم
-        تُبنى في المراحل القادمة (Phase 1 وما بعدها).
-      </p>
-      <button
-        onClick={() => {
-          signOut();
-          void navigate({ to: "/login" });
-        }}
-        className="rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
-      >
-        تسجيل خروج
-      </button>
+    <div className="min-h-screen bg-background">
+      <AppHeader session={session} />
+      <main className="mx-auto max-w-5xl px-4 py-8">
+        <h1 className="text-2xl font-bold text-foreground">لوحة التحكم</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          محل: {tenant?.name} — حالة الاشتراك: {tenant?.status}
+        </p>
+
+        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Link
+            to="/customers"
+            className="rounded-xl border border-border bg-card p-5 shadow-sm transition-colors hover:bg-accent"
+          >
+            <p className="text-sm text-muted-foreground">العملاء</p>
+            <p className="mt-1 text-3xl font-bold text-foreground">{customers.length}</p>
+            <p className="mt-2 text-xs text-primary">إدارة العملاء ←</p>
+          </Link>
+
+          <Link
+            to="/products"
+            className="rounded-xl border border-border bg-card p-5 shadow-sm transition-colors hover:bg-accent"
+          >
+            <p className="text-sm text-muted-foreground">الأجهزة (المنتجات)</p>
+            <p className="mt-1 text-3xl font-bold text-foreground">{products.length}</p>
+            <p className="mt-2 text-xs text-primary">إدارة الأجهزة ←</p>
+          </Link>
+        </div>
+
+        <p className="mt-8 max-w-xl text-xs text-muted-foreground">
+          هذه بيانات Mock مخزّنة محليًا (localStorage) لأغراض التجربة فقط — لا يوجد بعد بيع نقدي أو
+          تقسيط أو مخزون حقيقي (Phase 3/4 القادمة). راجع CLAUDE.md لتفاصيل الحالة الفعلية للمشروع.
+        </p>
+      </main>
     </div>
   );
 }

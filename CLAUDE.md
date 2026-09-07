@@ -26,7 +26,9 @@ bun run lint
 - **قاعدة البيانات: Mock مؤقت فقط.** لا يوجد اتصال Supabase حقيقي حتى الآن — بانتظار بيانات اعتماد المستخدم (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` في `.env`، انظر `.env.example`). كل ما هو مبني الآن مصمَّم عمدًا ليكون **drop-in replaceable**: نفس أسماء الجداول/الحقول المستخدمة في `docs/ERP_SaaS_Requirements.md §118` تُستخدم في المخزن الوهمي، ونفس التوقيعات ستُستخدم عند الاتصال بـSupabase الحقيقي.
 - **⚠️ تنبيه صريح لأي جلسة قادمة:** طالما البيانات Mock، لا تعتبر أي Phase "منتهية" أو "جاهزة للإنتاج" بمعايير §134 (Definition of Done) — RLS الحقيقية وTenant isolation الحقيقي شرطان أساسيان غير قابلين للتفاوض (§133) ولا يتحققان إلا بعد ربط Supabase فعليًا وتفعيل RLS policies من `supabase/migrations/`.
 - طبقة البيانات المركزية: `src/lib/data-store.ts` (localStorage + subscribe/emit، نمط ثابت — لا تخترع نمطًا موازيًا).
-- Migration SQL أولية جاهزة (غير مُطبَّقة بعد) في `supabase/migrations/` تغطي: tenants, tenant_settings, users, roles, permissions, role_permissions, user_roles, audit_logs.
+- Migration SQL أولية جاهزة (غير مُطبَّقة بعد) في `supabase/migrations/` تغطي: tenants, tenant_settings, users, roles, permissions, role_permissions, user_roles, audit_logs (`0001_foundation.sql`)، وcustomers/products (`0002_customers_products.sql`).
+- **إضافة: شريحة تجريبية من Customers (§14) وProducts (§19)** — `/customers` و`/products` (list+add+edit، لا Hard Delete، Audit على كل mutation)، مبذورة بعملاء وأجهزة تجريبية. **هذا Subset مبسّط وليس Phase 2/3 كاملة** — الناقص عمدًا: Serial Number lifecycle الفعلي، Categories/Brands ككيانات منفصلة، Guarantors، Customer 360/Credit Profile/Risk Score، Multiple Units، تسعير خاص بعميل. لا تدّعِ اكتمال Phase 2 أو 3 بسبب وجود هاتين الصفحتين.
+- Nav مشتركة: `src/components/AppHeader.tsx` (لوحة تحكم/عملاء/أجهزة + تسجيل خروج) + `src/hooks/use-session.ts` (`useSession`/`useRequireSession` — نمط SSR-آمن لقراءة الجلسة، استخدمه لأي صفحة محمية جديدة بدل تكرار منطق dashboard.tsx القديم).
 
 ## ترتيب العمل (§131 في المواصفة — التزم به بالحرف)
 

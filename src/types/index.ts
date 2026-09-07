@@ -90,3 +90,50 @@ export interface AuditLogEntry {
   reason?: string;
   created_at: string;
 }
+
+/**
+ * §14 Customer Module — lean subset for this demo increment. Missing on purpose (real
+ * Phase 3 work, not built yet): Documents, Signature, Guarantors (§15), Customer 360
+ * (§14 aggregates), Credit Profile (§16), Risk Score (§17). §11 governance: no hard delete —
+ * `status` is the only way a customer is retired.
+ */
+export interface Customer {
+  id: string;
+  tenant_id: string;
+  code: string;
+  name: string;
+  phone: string;
+  alt_phone?: string;
+  address?: string;
+  notes?: string;
+  status: "active" | "inactive";
+  created_at: string;
+}
+
+/**
+ * §19 Product Master — lean subset for this demo increment. `brand`/`model`/`category` are
+ * plain text here, not the normalized `brands`/`product_categories` tables §118 lists — real
+ * Phase 2 work will promote them once Supabase is connected. Missing on purpose: Serial
+ * Number Management (§21, `serial_required` is just a flag here with no lifecycle yet),
+ * Multiple Units (§23), customer-specific pricing (§25). §20 governance: no hard delete —
+ * `active` is the only way a product is retired.
+ */
+export interface Product {
+  id: string;
+  tenant_id: string;
+  code: string;
+  name: string;
+  brand?: string;
+  model?: string;
+  category?: string;
+  unit: string;
+  cost_price: number;
+  cash_price: number;
+  installment_price: number;
+  min_stock: number;
+  max_stock: number;
+  warranty_months?: number;
+  serial_required: boolean;
+  active: boolean;
+  created_at: string;
+}
