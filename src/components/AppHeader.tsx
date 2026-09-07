@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: "/products", label: "الأجهزة" },
   { to: "/sales/new", label: "بيع جديد" },
   { to: "/sales/new-installment", label: "بيع تقسيط" },
+  { to: "/collections", label: "التحصيل" },
   { to: "/stock-count", label: "جرد المخزون" },
   { to: "/users", label: "المستخدمون" },
   { to: "/audit", label: "سجل العمليات" },

@@ -3,10 +3,12 @@ import { useEffect, useState } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
 import {
+  collectPayment,
   getCurrentTenantSettings,
   getDaysOverdue,
   getEffectiveInstallmentStatus,
   getInstallmentContracts,
+  getInstallmentPayments,
   getInstallments,
   subscribeData,
 } from "@/lib/data-store";
@@ -41,10 +43,14 @@ function ContractDetailPage() {
   const session = useRequireSession();
   const { id } = Route.useParams();
   const [, forceRerender] = useState(0);
+  const [payAmount, setPayAmount] = useState("");
+  const [payError, setPayError] = useState<string | null>(null);
+  const [paySuccess, setPaySuccess] = useState(false);
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
   if (!session) return null;
+  const actorUserId = session.user_id;
 
   const contract = getInstallmentContracts().find((c) => c.id === id);
 
@@ -62,13 +68,34 @@ function ContractDetailPage() {
     );
   }
 
+  const contractId = contract.id;
   const settings = getCurrentTenantSettings();
   const installments = getInstallments()
-    .filter((i) => i.contract_id === contract.id)
+    .filter((i) => i.contract_id === contractId)
     .sort((a, b) => a.seq - b.seq);
 
   const totalPaid = installments.reduce((sum, i) => sum + i.paid_amount, 0);
   const remaining = Math.max(0, contract.total_amount - totalPaid);
+  const payments = getInstallmentPayments()
+    .filter((p) => p.contract_id === contractId)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+  function handleCollect() {
+    setPayError(null);
+    const amount = Number(payAmount);
+    if (!payAmount || amount <= 0) {
+      setPayError("أدخل مبلغ صحيح");
+      return;
+    }
+    try {
+      collectPayment(contractId, amount, actorUserId);
+      setPayAmount("");
+      setPaySuccess(true);
+      setTimeout(() => setPaySuccess(false), 2000);
+    } catch (e) {
+      setPayError(e instanceof Error ? e.message : "حدث خطأ");
+    }
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -150,6 +177,68 @@ function ContractDetailPage() {
             </table>
           </div>
         </section>
+
+        {remaining > 0 && (
+          <section className="mt-8 rounded-xl border border-border bg-card p-5 shadow-sm">
+            <h2 className="text-sm font-bold text-foreground">تسجيل دفعة (§46 أقدم قسط أولًا)</h2>
+            <div className="mt-3 flex flex-wrap items-end gap-3">
+              <label className="block space-y-1">
+                <span className="text-xs font-medium text-foreground">
+                  المبلغ (المتبقي {remaining.toLocaleString("ar-EG")} ج.م)
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  max={remaining}
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(e.target.value)}
+                  className="form-input"
+                  dir="ltr"
+                />
+              </label>
+              <button
+                onClick={handleCollect}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                تحصيل
+              </button>
+              {paySuccess && <span className="text-sm text-success">تم التحصيل ✓</span>}
+            </div>
+            {payError && <p className="mt-2 text-sm text-destructive">{payError}</p>}
+          </section>
+        )}
+
+        {payments.length > 0 && (
+          <section className="mt-8">
+            <h2 className="text-lg font-bold text-foreground">سجل التحصيلات</h2>
+            <div className="mt-3 overflow-x-auto rounded-xl border border-border bg-card">
+              <table className="w-full text-right text-sm">
+                <thead className="border-b border-border text-xs text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">رقم الإيصال</th>
+                    <th className="px-4 py-3 font-medium">المبلغ</th>
+                    <th className="px-4 py-3 font-medium">التاريخ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {payments.map((payment) => (
+                    <tr key={payment.id} className="border-b border-border last:border-0">
+                      <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
+                        {payment.receipt_number}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground" dir="ltr">
+                        {payment.amount.toLocaleString("ar-EG")} ج.م
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
+                        {new Date(payment.created_at).toLocaleString("ar-EG")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
 
         <section className="mt-8">
           <h2 className="text-lg font-bold text-foreground">جدول الأقساط</h2>

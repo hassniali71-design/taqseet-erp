@@ -1422,6 +1422,114 @@ export function createInstallmentContract(
   return contract;
 }
 
+/* ---------------- Collections (§46, §52, §54/§55) ---------------- */
+
+function nextReceiptNumber(): string {
+  const year = new Date().getFullYear();
+  const prefix = `REC-${year}-`;
+  const count = getInstallmentPayments().filter((p) => p.receipt_number.startsWith(prefix)).length;
+  return `${prefix}${String(count + 1).padStart(6, "0")}`;
+}
+
+/**
+ * §46 Oldest-Due-First allocation. Validates the whole payment against the contract's total
+ * outstanding balance before writing anything (reject rather than silently cap), then splits it
+ * across installments in `seq` order. Receipt numbers are sequential/unique/immutable (§55) —
+ * no function here or anywhere else ever edits or deletes an `InstallmentPayment`.
+ */
+export function collectPayment(
+  contractId: string,
+  amount: number,
+  actorUserId: string | null,
+): InstallmentPayment {
+  if (amount <= 0) throw new Error("المبلغ يجب أن يكون أكبر من صفر");
+
+  const contract = getInstallmentContracts().find((c) => c.id === contractId);
+  if (!contract) throw new Error("العقد غير موجود");
+
+  const allInstallments = getInstallments();
+  const contractInstallments = allInstallments
+    .filter(
+      (i) => i.contract_id === contractId && i.status !== "waived" && i.status !== "rescheduled",
+    )
+    .sort((a, b) => a.seq - b.seq);
+
+  const totalOwed =
+    Math.round(
+      contractInstallments.reduce((sum, i) => sum + Math.max(0, i.amount - i.paid_amount), 0) * 100,
+    ) / 100;
+  if (totalOwed <= 0) throw new Error("لا يوجد أقساط مستحقة على هذا العقد");
+  if (amount > totalOwed) {
+    throw new Error(`المبلغ (${amount}) أكبر من إجمالي المتبقي على العقد (${totalOwed} ج.م)`);
+  }
+
+  let remaining = amount;
+  const allocations: Array<{ installment_id: string; amount: number }> = [];
+  const updatedById = new Map<string, Installment>();
+
+  for (const inst of contractInstallments) {
+    if (remaining <= 0) break;
+    const owed = Math.round((inst.amount - inst.paid_amount) * 100) / 100;
+    if (owed <= 0) continue;
+    const apply = Math.min(owed, remaining);
+    allocations.push({ installment_id: inst.id, amount: apply });
+    const newPaid = Math.round((inst.paid_amount + apply) * 100) / 100;
+    updatedById.set(inst.id, {
+      ...inst,
+      paid_amount: newPaid,
+      status: newPaid >= inst.amount ? "paid" : "partially_paid",
+    });
+    remaining = Math.round((remaining - apply) * 100) / 100;
+  }
+
+  const payment: InstallmentPayment = {
+    id: genId("pay"),
+    tenant_id: DEMO_TENANT_ID,
+    contract_id: contractId,
+    receipt_number: nextReceiptNumber(),
+    amount,
+    allocations,
+    user_id: actorUserId,
+    created_at: new Date().toISOString(),
+  };
+
+  writeCollection(
+    KEYS.installments,
+    allInstallments.map((i) => updatedById.get(i.id) ?? i),
+  );
+  writeCollection(KEYS.installmentPayments, [...getInstallmentPayments(), payment]);
+
+  const refreshed = getInstallments().filter(
+    (i) => i.contract_id === contractId && i.status !== "waived" && i.status !== "rescheduled",
+  );
+  const allPaid = refreshed.every((i) => i.status === "paid");
+  const anyPaid = refreshed.some((i) => i.paid_amount > 0);
+  const nextStatus: InstallmentContract["status"] = allPaid
+    ? "settled"
+    : anyPaid
+      ? "partially_paid"
+      : contract.status;
+  if (nextStatus !== contract.status) {
+    writeCollection(
+      KEYS.installmentContracts,
+      getInstallmentContracts().map((c) =>
+        c.id === contractId ? { ...c, status: nextStatus } : c,
+      ),
+    );
+  }
+
+  recordAudit({
+    tenant_id: DEMO_TENANT_ID,
+    user_id: actorUserId,
+    action: "installment_payment.collect",
+    entity: "installment_payments",
+    entity_id: payment.id,
+    new_value: payment,
+  });
+
+  return payment;
+}
+
 /* ----------------------------------------------------------------------------------------
  * Session (Mock — dev-testing aid only)
  *
