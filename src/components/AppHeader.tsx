@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { to: "/dashboard", label: "لوحة التحكم" },
   { to: "/customers", label: "العملاء" },
   { to: "/products", label: "الأجهزة" },
+  { to: "/stock-count", label: "جرد المخزون" },
   { to: "/users", label: "المستخدمون" },
   { to: "/audit", label: "سجل العمليات" },
   { to: "/settings", label: "الإعدادات" },

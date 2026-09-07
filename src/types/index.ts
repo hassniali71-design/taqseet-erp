@@ -129,11 +129,15 @@ export interface Customer {
 
 /**
  * §19 Product Master — lean subset for this demo increment. `brand`/`model`/`category` are
- * plain text here, not the normalized `brands`/`product_categories` tables §118 lists — real
- * Phase 2 work will promote them once Supabase is connected. Missing on purpose: Serial
- * Number Management (§21, `serial_required` is just a flag here with no lifecycle yet),
- * Multiple Units (§23), customer-specific pricing (§25). §20 governance: no hard delete —
- * `active` is the only way a product is retired.
+ * plain text (with a `<datalist>` of previously-used values in the UI as the "simple
+ * addable list" §19/§118 asks for, deliberately not a normalized `brands`/
+ * `product_categories` table — that promotion is real Supabase-connected work, not worth it
+ * over Mock). Missing on purpose: Multiple Units (§23), customer-specific pricing (§25).
+ * §20 governance: no hard delete — `active` is the only way a product is retired.
+ *
+ * Serial Number Management (§21) and Inventory Ledger (§29) are real as of Phase 2 — see
+ * `ProductSerial` and `InventoryMovement` below, and `receiveStock`/`getProductStock` in
+ * data-store.ts.
  */
 export interface Product {
   id: string;
@@ -152,5 +156,41 @@ export interface Product {
   warranty_months?: number;
   serial_required: boolean;
   active: boolean;
+  created_at: string;
+}
+
+/** §21 Serial Number lifecycle. `customer_id`/`sale_id` are added by Phase 3 (sale) and
+ * Phase 7 (return) without changing this shape — Omit-based mutation signatures already
+ * tolerate that. */
+export type SerialStatus = "available" | "sold" | "returned" | "inspection" | "damaged";
+
+export interface ProductSerial {
+  id: string;
+  tenant_id: string;
+  product_id: string;
+  serial_number: string;
+  status: SerialStatus;
+  created_at: string;
+}
+
+/**
+ * §29 Inventory Ledger — every quantity change is a Movement; a product's stock is always
+ * derived by summing these, never a number that moves on its own. `type` values line up with
+ * the operations that will produce them: `receipt` (this phase's manual stock-in, later
+ * Phase 5 Goods Receipt), `sale` (Phase 3), `return` (Phase 7), `adjustment` (Stock Count,
+ * this phase).
+ */
+export interface InventoryMovement {
+  id: string;
+  tenant_id: string;
+  product_id: string;
+  type: "receipt" | "sale" | "return" | "adjustment";
+  /** Signed — positive increases stock, negative decreases it. */
+  quantity: number;
+  before: number;
+  after: number;
+  user_id: string | null;
+  reference?: string;
+  reason?: string;
   created_at: string;
 }

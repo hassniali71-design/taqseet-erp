@@ -1,8 +1,14 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
-import { createProduct, getProducts, subscribeData, updateProduct } from "@/lib/data-store";
+import {
+  createProduct,
+  getProductStock,
+  getProducts,
+  subscribeData,
+  updateProduct,
+} from "@/lib/data-store";
 import { useRequireSession } from "@/hooks/use-session";
 import type { Product } from "@/types";
 
@@ -268,6 +274,7 @@ function ProductsPage() {
                 <th className="px-4 py-3 font-medium">الكود</th>
                 <th className="px-4 py-3 font-medium">الاسم</th>
                 <th className="px-4 py-3 font-medium">الماركة/الموديل</th>
+                <th className="px-4 py-3 font-medium">المخزون</th>
                 <th className="px-4 py-3 font-medium">السعر النقدي</th>
                 <th className="px-4 py-3 font-medium">سعر التقسيط</th>
                 <th className="px-4 py-3 font-medium">الحالة</th>
@@ -280,9 +287,20 @@ function ProductsPage() {
                   <td className="px-4 py-3 text-muted-foreground" dir="ltr">
                     {product.code}
                   </td>
-                  <td className="px-4 py-3 font-medium text-foreground">{product.name}</td>
+                  <td className="px-4 py-3 font-medium text-foreground">
+                    <Link
+                      to="/products/$id"
+                      params={{ id: product.id }}
+                      className="hover:underline"
+                    >
+                      {product.name}
+                    </Link>
+                  </td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {[product.brand, product.model].filter(Boolean).join(" / ") || "—"}
+                  </td>
+                  <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
+                    {getProductStock(product.id, product)}
                   </td>
                   <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
                     {product.cash_price.toLocaleString("ar-EG")} ج.م
@@ -319,7 +337,7 @@ function ProductsPage() {
               ))}
               {products.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">
+                  <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">
                     لا يوجد أجهزة بعد.
                   </td>
                 </tr>

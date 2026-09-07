@@ -34,26 +34,30 @@ bun run lint
   - `/users` — عرض المستخدمين + إنشاء مستخدم بدور + تفعيل/تعطيل (لا حذف).
   - `/audit` — سجل عمليات للقراءة فقط، يعرض كل الـmutations المسجّلة عبر `recordAudit`.
   - Roles/Permissions موجودة في الـdata layer (`getRoles`/`getUserPermissionKeys`) لكن مفيش UI لتعديل صلاحيات كل Role بعد — هيتعمل مع أول Feature محتاجه فعليًا (تفادي شاشة بلا استخدام).
-- **شريحة Customers (§14) وProducts (§19) — subset مبسّط، مش Phase 2/3 كاملة:**
-  - `/customers` — list+add+edit، فيها الآن `credit_limit` (تمهيدًا لـPhase 4)، لا حذف.
-  - `/products` — list+add+edit، `serial_required` مجرد Flag بدون Lifecycle فعلي بعد.
-  - الناقص عمدًا هنا: Serial lifecycle فعلي، Categories/Brands ككيانات، Guarantors، Customer 360/Risk Score، Multiple Units، تسعير خاص بعميل — هيتضافوا مع Phase 2/3 الحقيقية أدناه.
+- **شريحة Customers (§14) — subset مبسّط، مش Phase 3 كاملة:**
+  - `/customers` — list+add+edit، فيها `credit_limit` (تمهيدًا لـPhase 4)، لا حذف.
+  - الناقص عمدًا هنا: Guarantors، Customer 360/Risk Score — هيتضافوا مع Phase 3 الحقيقية أدناه.
+- **Phase 2 — Products & Inventory (تكملة فوق `/products`) — منفّذة:**
+  - `/products` — list+add+edit + عمود مخزون حقيقي (`getProductStock`)، رابط لكل جهاز.
+  - `/products/$id` (الملف: `products_.$id.tsx` — **لاحظ الـ`_` قبل النقطة**، انظر ملاحظة الراوتنج أدناه) — تفاصيل الجهاز، قائمة السيريالات بحالتها، زر "استلام كمية" (يطابق ما ستستدعيه Phase 5's Goods Receipt لاحقًا — نفس الدالة `receiveStock`، مش مسار موازٍ)، سجل حركة المخزون كامل.
+  - `/stock-count` (§30) — جرد للمنتجات غير المرتبطة بسيريال فقط (منتجات السيريال دقتها من قائمة السيريالات نفسها، مش رقم عدّ).
+  - **Serial lifecycle فعلي (§21):** `ProductSerial` بحالة `available/sold/returned/inspection/damaged`، منع تسجيل نفس السيريال مرتين (`receiveStock` يتحقق فعليًا). حالة `sold` ستُستخدم أول مرة في Phase 3 (البيع).
+  - **Inventory Ledger فعلي (§29):** `InventoryMovement`، `getProductStock` هو المصدر الوحيد للكمية (سيريال: عدّ `available`؛ غير سيريال: مجموع الحركات) — **لا يوجد حقل كمية منفصل في أي مكان، لا تضِف واحدًا**.
+  - الناقص عمدًا: Categories/Brands ككيانات منفصلة (استُبدلت بحقول نص حر بسيطة — قرار تبسيط متعمد، مذكور في تعليق `Product` بـ`types/index.ts`)، Multiple Units، تسعير خاص بعميل.
 - **بنية مشتركة يُعاد استخدامها في كل صفحة محمية جديدة (لا تخترع نمطًا موازيًا):**
   - `src/components/AppHeader.tsx` — Nav + Sign out.
   - `src/hooks/use-session.ts` — `useSession`/`useRequireSession` (نمط SSR-آمن لقراءة الجلسة).
   - نمط الصفحة القياسي: `useRequireSession()` → `if (!session) return null` → استخراج `actorUserId`/`tenantId` كمتغيرات منفصلة (تفادي مشكلة TS closure narrowing) → `<AppHeader session={session} />` + محتوى الصفحة.
-- **Migrations:** `0001_foundation.sql` (tenants/tenant_settings/users/roles/permissions/role_permissions/user_roles/audit_logs) + `0002_customers_products.sql` (customers بـcredit_limit، products) — كلاهما بـRLS كاملة جاهزة، غير مُطبَّقين بعد.
+  - **⚠️ ملاحظة راوتنج مهمة (باگ حقيقي اتصلح في Phase 2):** لو عندك صفحة قائمة `foo.tsx` ومحتاج صفحة تفاصيل ديناميكية `/foo/$id`، **لازم** تسمي الملف `foo_.$id.tsx` (شرطة تحتية `_` قبل النقطة) — مش `foo.$id.tsx`. من غيرها، TanStack Router بيعتبر `foo.tsx` Layout ضمني للـ`$id` (لازم `<Outlet/>` فيه)، فالـURL يتغير بس المحتوى يفضل صفحة القائمة (باگ صامت، اتسبب فيه ولاحظته بس بمتصفح فعلي). طبّق ده على `/customers/$id`، `/contracts/$id`، إلخ في الـPhases الجاية.
+- **Migrations:** `0001_foundation.sql` (tenants/tenant_settings/users/roles/permissions/role_permissions/user_roles/audit_logs) + `0002_customers_products.sql` (customers بـcredit_limit، products) + `0003_inventory.sql` (product_serials، inventory_movements) — كلها بـRLS كاملة جاهزة، غير مُطبَّقة بعد.
 
 ### التالي مباشرة (بالترتيب — راجع خطة التنفيذ الكاملة أدناه لكل Phase بالتفصيل)
 
-**Phase 2 — Products & Inventory (تكملة)** ← نحن هنا الآن.
+**Phase 3 — Customers & Sales** ← نحن هنا الآن.
 
 ## خطة التنفيذ الكاملة (كل الـPhases 1→9 — المرجع الوحيد الدائم، الجلسة دي ممكن تنقطع فالملف ده اللي بيرجّعك بالظبط لمطرح ما وقفت)
 
 الترتيب مطابق لـ§131 في الـSpec. كل Phase فرعية = تعديل محدد → build/lint/tsc نظيفين → اختبار Playwright فعلي → لقطة شاشة لو فيها قيمة بصرية → تحديث قسم "الحالة الحالية" أعلاه → commit محدد + push. **مفيش وقفات للسؤال إلا عند Blocker حقيقي** (قرار مالي حساس الـSpec نفسها تقول "يحتاج تأكيد" — يتسجل كإعداد قابل للتفعيل بدل ما يُخترع).
-
-**Phase 2 — Products & Inventory (تكملة فوق `/products`):**
-Categories/Brands كـcollections بسيطة قابلة للإضافة (مش full entities) · Serial Number lifecycle فعلي (§21: Available→Sold→...، منع بيع نفس السيريال مرتين) · `inventory_movements` ledger فعلي (§29: أي تغيير كمية = Movement، الكمية = مجموع الـMovements) · شاشة Stock Count مبسطة (§30).
 
 **Phase 3 — Customers & Sales (تكملة فوق `/customers`):**
 Guarantors (§15) مرتبطين بعميل · Customer 360 مبسّطة `/customers/$id` (§14) · **POS/بيع نقدي فعلي** `/sales/new` (§32,§34: عميل→منتج/سيريال→خصم بحد الموظف→تأكيد→Sale+Inventory Movement+Audit+إيصال INV-YYYY-NNNNNN) · State machine مبسّطة (confirmed→completed للبيع النقدي، التوصيل/التركيب منفصلين في Phase 7).

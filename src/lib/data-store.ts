@@ -1,8 +1,10 @@
 import type {
   AuditLogEntry,
   Customer,
+  InventoryMovement,
   Permission,
   Product,
+  ProductSerial,
   Role,
   RolePermission,
   SystemRoleName,
@@ -40,6 +42,8 @@ const KEYS = {
   session: `${STORAGE_PREFIX}.session.v1`,
   customers: `${STORAGE_PREFIX}.customers.v1`,
   products: `${STORAGE_PREFIX}.products.v1`,
+  productSerials: `${STORAGE_PREFIX}.product_serials.v1`,
+  inventoryMovements: `${STORAGE_PREFIX}.inventory_movements.v1`,
 } as const;
 
 const listeners = new Set<() => void>();
@@ -264,6 +268,23 @@ function seedProducts(): Product[] {
       active: true,
       created_at: now,
     },
+    {
+      id: "prod_demo_3",
+      tenant_id: DEMO_TENANT_ID,
+      code: "PRD-0003",
+      name: "كابل توصيل كهرباء",
+      brand: "Generic",
+      category: "إكسسوارات",
+      unit: "قطعة",
+      cost_price: 30,
+      cash_price: 50,
+      installment_price: 55,
+      min_stock: 10,
+      max_stock: 200,
+      serial_required: false,
+      active: true,
+      created_at: now,
+    },
   ];
 }
 
@@ -272,6 +293,76 @@ function seedProducts(): Product[] {
  * server-generated. */
 function nextCode(prefix: string, count: number): string {
   return `${prefix}-${String(count + 1).padStart(4, "0")}`;
+}
+
+/** Seeds a few `available` serials per demo product, plus the matching receipt movements, so
+ * the Products/inventory screens aren't empty on first run — mirrors what `receiveStock`
+ * would produce for a real goods receipt. */
+function seedProductSerials(): ProductSerial[] {
+  const now = new Date().toISOString();
+  const serials: ProductSerial[] = [];
+  const demoSerials: Record<string, string[]> = {
+    prod_demo_1: ["TSH-0001", "TSH-0002", "TSH-0003"],
+    prod_demo_2: ["SAM-0001", "SAM-0002", "SAM-0003", "SAM-0004", "SAM-0005"],
+  };
+  for (const [productId, numbers] of Object.entries(demoSerials)) {
+    for (const serial_number of numbers) {
+      serials.push({
+        id: genId("serial"),
+        tenant_id: DEMO_TENANT_ID,
+        product_id: productId,
+        serial_number,
+        status: "available",
+        created_at: now,
+      });
+    }
+  }
+  return serials;
+}
+
+function seedInventoryMovements(): InventoryMovement[] {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: genId("mov"),
+      tenant_id: DEMO_TENANT_ID,
+      product_id: "prod_demo_1",
+      type: "receipt",
+      quantity: 3,
+      before: 0,
+      after: 3,
+      user_id: null,
+      reference: "Seed",
+      reason: "رصيد افتتاحي تجريبي",
+      created_at: now,
+    },
+    {
+      id: genId("mov"),
+      tenant_id: DEMO_TENANT_ID,
+      product_id: "prod_demo_2",
+      type: "receipt",
+      quantity: 5,
+      before: 0,
+      after: 5,
+      user_id: null,
+      reference: "Seed",
+      reason: "رصيد افتتاحي تجريبي",
+      created_at: now,
+    },
+    {
+      id: genId("mov"),
+      tenant_id: DEMO_TENANT_ID,
+      product_id: "prod_demo_3",
+      type: "receipt",
+      quantity: 40,
+      before: 0,
+      after: 40,
+      user_id: null,
+      reference: "Seed",
+      reason: "رصيد افتتاحي تجريبي",
+      created_at: now,
+    },
+  ];
 }
 
 /* ---------------- Reads ---------------- */
@@ -343,6 +434,31 @@ export function getCustomers(): Customer[] {
 
 export function getProducts(): Product[] {
   return readCollection(KEYS.products, seedProducts);
+}
+
+export function getProductSerials(): ProductSerial[] {
+  return readCollection(KEYS.productSerials, seedProductSerials);
+}
+
+export function getInventoryMovements(): InventoryMovement[] {
+  return readCollection(KEYS.inventoryMovements, seedInventoryMovements);
+}
+
+/**
+ * §29 — the single source of truth for "how much of this do we have": serialized products
+ * count their `available` serials; non-serialized products sum every movement's signed
+ * quantity. Never read/write a standalone stock-quantity field.
+ */
+export function getProductStock(productId: string, product?: Product): number {
+  const isSerialRequired =
+    product?.serial_required ?? getProducts().find((p) => p.id === productId)?.serial_required;
+  if (isSerialRequired) {
+    return getProductSerials().filter((s) => s.product_id === productId && s.status === "available")
+      .length;
+  }
+  return getInventoryMovements()
+    .filter((m) => m.product_id === productId)
+    .reduce((sum, m) => sum + m.quantity, 0);
 }
 
 /** Permission keys currently granted to a user, across all of their assigned roles. */
@@ -601,6 +717,116 @@ export function updateProduct(
     old_value: before,
     new_value: after,
   });
+}
+
+/* ---------------- Inventory (§21 Serial lifecycle, §29 Movement ledger, §30 Stock Count) ---------------- */
+
+/**
+ * The one place stock ever increases. For a `serial_required` product, `serialNumbers` must
+ * have exactly `quantity` entries (one physical unit per serial) — each becomes a new
+ * `available` ProductSerial. Non-serialized products just need the quantity. This is what
+ * Phase 5's Goods Receipt will call too — not a parallel "purchasing" code path.
+ */
+export function receiveStock(
+  productId: string,
+  quantity: number,
+  serialNumbers: string[] | undefined,
+  actorUserId: string | null,
+  reference?: string,
+): void {
+  const product = getProducts().find((p) => p.id === productId);
+  if (!product) throw new Error("المنتج غير موجود");
+  if (quantity <= 0) throw new Error("الكمية يجب أن تكون أكبر من صفر");
+  if (product.serial_required) {
+    const numbers = (serialNumbers ?? []).map((s) => s.trim()).filter(Boolean);
+    if (numbers.length !== quantity) {
+      throw new Error(`أدخل ${quantity} سيريال بالظبط (تم إدخال ${numbers.length})`);
+    }
+    const existing = getProductSerials();
+    const duplicate = numbers.find((n) =>
+      existing.some((s) => s.serial_number.toLowerCase() === n.toLowerCase()),
+    );
+    if (duplicate) throw new Error(`السيريال "${duplicate}" مسجّل بالفعل`);
+    const now = new Date().toISOString();
+    const newSerials: ProductSerial[] = numbers.map((serial_number) => ({
+      id: genId("serial"),
+      tenant_id: product.tenant_id,
+      product_id: productId,
+      serial_number,
+      status: "available",
+      created_at: now,
+    }));
+    writeCollection(KEYS.productSerials, [...existing, ...newSerials]);
+  }
+
+  const before = getProductStock(productId, product);
+  const after = before + quantity;
+  const movement: InventoryMovement = {
+    id: genId("mov"),
+    tenant_id: product.tenant_id,
+    product_id: productId,
+    type: "receipt",
+    quantity,
+    before,
+    after,
+    user_id: actorUserId,
+    ...(reference ? { reference } : {}),
+    created_at: new Date().toISOString(),
+  };
+  writeCollection(KEYS.inventoryMovements, [...getInventoryMovements(), movement]);
+  recordAudit({
+    tenant_id: product.tenant_id,
+    user_id: actorUserId,
+    action: "inventory.receive",
+    entity: "inventory_movements",
+    entity_id: movement.id,
+    new_value: movement,
+  });
+}
+
+/**
+ * §30 Stock Count. Serialized products are deliberately excluded here — their accuracy comes
+ * from the serial list itself (§21), not a count number; counting them is a future "verify
+ * each serial is physically present" flow, not this simple adjustment.
+ */
+export function adjustStock(
+  productId: string,
+  actualQuantity: number,
+  reason: string,
+  actorUserId: string | null,
+): { before: number; after: number; diff: number } {
+  const product = getProducts().find((p) => p.id === productId);
+  if (!product) throw new Error("المنتج غير موجود");
+  if (product.serial_required) {
+    throw new Error("منتجات السيريال لا تُجرد بهذه الطريقة");
+  }
+  const before = getProductStock(productId, product);
+  const diff = actualQuantity - before;
+  if (diff === 0) return { before, after: before, diff: 0 };
+
+  const movement: InventoryMovement = {
+    id: genId("mov"),
+    tenant_id: product.tenant_id,
+    product_id: productId,
+    type: "adjustment",
+    quantity: diff,
+    before,
+    after: actualQuantity,
+    user_id: actorUserId,
+    reason,
+    created_at: new Date().toISOString(),
+  };
+  writeCollection(KEYS.inventoryMovements, [...getInventoryMovements(), movement]);
+  recordAudit({
+    tenant_id: product.tenant_id,
+    user_id: actorUserId,
+    action: "inventory.adjust",
+    entity: "inventory_movements",
+    entity_id: movement.id,
+    new_value: movement,
+    reason,
+  });
+  return { before, after: actualQuantity, diff };
 }
 
 /* ----------------------------------------------------------------------------------------
