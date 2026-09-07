@@ -1518,6 +1518,26 @@ export function collectPayment(
     );
   }
 
+  // §51 — a payment landing on/before its due date keeps the promise; a promise whose date has
+  // already passed unpaid is left "pending" here and reported as "failed" by
+  // `getEffectivePromiseStatus` (computed on read, same pattern as installment overdue).
+  const keepablePromiseIds = getPromisesToPay()
+    .filter(
+      (p) =>
+        p.contract_id === contractId &&
+        p.status === "pending" &&
+        new Date() <= new Date(p.promise_date),
+    )
+    .map((p) => p.id);
+  if (keepablePromiseIds.length > 0) {
+    writeCollection(
+      KEYS.promisesToPay,
+      getPromisesToPay().map((p) =>
+        keepablePromiseIds.includes(p.id) ? { ...p, status: "kept" as const } : p,
+      ),
+    );
+  }
+
   recordAudit({
     tenant_id: DEMO_TENANT_ID,
     user_id: actorUserId,
@@ -1528,6 +1548,185 @@ export function collectPayment(
   });
 
   return payment;
+}
+
+/* ---------------- Promise to Pay (§51) ---------------- */
+
+export function recordPromise(
+  contractId: string,
+  promiseDate: string,
+  expectedAmount: number,
+  notes: string | undefined,
+  actorUserId: string | null,
+): PromiseToPay {
+  const contract = getInstallmentContracts().find((c) => c.id === contractId);
+  if (!contract) throw new Error("العقد غير موجود");
+  if (expectedAmount <= 0) throw new Error("المبلغ المتوقع يجب أن يكون أكبر من صفر");
+
+  const promise: PromiseToPay = {
+    id: genId("promise"),
+    tenant_id: DEMO_TENANT_ID,
+    contract_id: contractId,
+    promise_date: promiseDate,
+    expected_amount: expectedAmount,
+    ...(notes?.trim() && { notes: notes.trim() }),
+    user_id: actorUserId,
+    status: "pending",
+    created_at: new Date().toISOString(),
+  };
+  writeCollection(KEYS.promisesToPay, [...getPromisesToPay(), promise]);
+  recordAudit({
+    tenant_id: DEMO_TENANT_ID,
+    user_id: actorUserId,
+    action: "promise_to_pay.record",
+    entity: "promises_to_pay",
+    entity_id: promise.id,
+    new_value: promise,
+  });
+  return promise;
+}
+
+/** Computed on read, same pattern as `getEffectiveInstallmentStatus` — a "pending" promise past
+ * its date reads as "failed" without ever being persisted that way, so a later payment before
+ * anyone looked at it can still legitimately flip it to "kept" in `collectPayment`. */
+export function getEffectivePromiseStatus(promise: PromiseToPay): PromiseToPay["status"] {
+  if (promise.status !== "pending") return promise.status;
+  return new Date() > new Date(promise.promise_date) ? "failed" : "pending";
+}
+
+/* ---------------- Early Settlement (§47) / Restructuring (§48) ---------------- */
+
+/**
+ * Pays off every remaining installment in one go via the same `collectPayment` allocation path
+ * (so the receipt/audit trail looks identical to a normal payment), then marks the contract
+ * `settled_early` — distinct from the `settled` a normal last-installment payment would set —
+ * so reporting can tell a customer paid off ahead of schedule apart from one who just finished
+ * on time.
+ */
+export function earlySettleContract(
+  contractId: string,
+  actorUserId: string | null,
+): InstallmentPayment {
+  const contract = getInstallmentContracts().find((c) => c.id === contractId);
+  if (!contract) throw new Error("العقد غير موجود");
+  if (contract.status === "settled" || contract.status === "settled_early") {
+    throw new Error("العقد مسدد بالكامل بالفعل");
+  }
+
+  const outstanding = getInstallments().filter(
+    (i) => i.contract_id === contractId && i.status !== "waived" && i.status !== "rescheduled",
+  );
+  const remaining =
+    Math.round(
+      outstanding.reduce((sum, i) => sum + Math.max(0, i.amount - i.paid_amount), 0) * 100,
+    ) / 100;
+  if (remaining <= 0) throw new Error("لا يوجد مبلغ متبقي لتسويته");
+
+  const payment = collectPayment(contractId, remaining, actorUserId);
+
+  writeCollection(
+    KEYS.installmentContracts,
+    getInstallmentContracts().map((c) =>
+      c.id === contractId ? { ...c, status: "settled_early" as const } : c,
+    ),
+  );
+  recordAudit({
+    tenant_id: DEMO_TENANT_ID,
+    user_id: actorUserId,
+    action: "installment_contract.settle_early",
+    entity: "installment_contracts",
+    entity_id: contractId,
+    new_value: { remaining, payment_id: payment.id },
+  });
+
+  return payment;
+}
+
+/**
+ * Never mutates or deletes the original schedule (§48/§11 governance): every currently-
+ * outstanding installment gets `status: "rescheduled"` (kept forever as history) and brand-new
+ * `Installment` rows are appended for the remaining balance spread evenly over
+ * `newDurationMonths` (no additional finance is applied on top — restructuring extends the term
+ * of what's already owed, it isn't a new loan). A `RestructureEvent` links old → new.
+ */
+export function restructureContract(
+  contractId: string,
+  newDurationMonths: number,
+  reason: string,
+  actorUserId: string | null,
+): RestructureEvent {
+  if (newDurationMonths <= 0) throw new Error("مدة إعادة الهيكلة يجب أن تكون أكبر من صفر");
+  if (!reason.trim()) throw new Error("سبب إعادة الهيكلة مطلوب");
+
+  const contract = getInstallmentContracts().find((c) => c.id === contractId);
+  if (!contract) throw new Error("العقد غير موجود");
+  if (contract.status === "settled" || contract.status === "settled_early") {
+    throw new Error("العقد مسدد بالكامل، لا يمكن إعادة هيكلته");
+  }
+
+  const allInstallments = getInstallments();
+  const contractInstallments = allInstallments.filter((i) => i.contract_id === contractId);
+  const outstanding = contractInstallments.filter(
+    (i) => i.status !== "waived" && i.status !== "rescheduled" && i.amount > i.paid_amount,
+  );
+  if (outstanding.length === 0) throw new Error("لا يوجد أقساط متبقية لإعادة هيكلتها");
+
+  const remaining =
+    Math.round(outstanding.reduce((sum, i) => sum + (i.amount - i.paid_amount), 0) * 100) / 100;
+  const oldInstallmentIds = outstanding.map((i) => i.id);
+
+  const schedule = generateSchedule(remaining, newDurationMonths);
+  const maxSeq = Math.max(0, ...contractInstallments.map((i) => i.seq));
+  const created_at = new Date().toISOString();
+  const newInstallments: Installment[] = schedule.map((line, index) => ({
+    id: genId("inst"),
+    tenant_id: DEMO_TENANT_ID,
+    contract_id: contractId,
+    seq: maxSeq + index + 1,
+    due_date: line.due_date,
+    amount: line.amount,
+    paid_amount: 0,
+    status: "scheduled",
+    created_at,
+  }));
+
+  writeCollection(KEYS.installments, [
+    ...allInstallments.map((i) =>
+      oldInstallmentIds.includes(i.id) ? { ...i, status: "rescheduled" as const } : i,
+    ),
+    ...newInstallments,
+  ]);
+
+  const event: RestructureEvent = {
+    id: genId("restruct"),
+    tenant_id: DEMO_TENANT_ID,
+    contract_id: contractId,
+    old_installment_ids: oldInstallmentIds,
+    remaining_amount: remaining,
+    new_duration_months: newDurationMonths,
+    reason: reason.trim(),
+    user_id: actorUserId,
+    created_at,
+  };
+  writeCollection(KEYS.restructureEvents, [...getRestructureEvents(), event]);
+  writeCollection(
+    KEYS.installmentContracts,
+    getInstallmentContracts().map((c) =>
+      c.id === contractId ? { ...c, status: "restructured" as const } : c,
+    ),
+  );
+
+  recordAudit({
+    tenant_id: DEMO_TENANT_ID,
+    user_id: actorUserId,
+    action: "installment_contract.restructure",
+    entity: "installment_contracts",
+    entity_id: contractId,
+    new_value: event,
+    reason: reason.trim(),
+  });
+
+  return event;
 }
 
 /* ----------------------------------------------------------------------------------------
