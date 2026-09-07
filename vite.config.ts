@@ -12,4 +12,10 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
+  // This container has no IPv6 stack at all, so the plugin's sandbox-detected `::` (dual-stack
+  // any) bind fails with EAFNOSUPPORT. Force an IPv4-only host for local dev here; harmless
+  // elsewhere since it's just an explicit bind address, not a duplicate plugin.
+  vite: {
+    server: { host: "0.0.0.0" },
+  },
 });

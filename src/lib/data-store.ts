@@ -35,6 +35,7 @@ const KEYS = {
   rolePermissions: `${STORAGE_PREFIX}.role_permissions.v1`,
   userRoles: `${STORAGE_PREFIX}.user_roles.v1`,
   auditLogs: `${STORAGE_PREFIX}.audit_logs.v1`,
+  session: `${STORAGE_PREFIX}.session.v1`,
 } as const;
 
 const listeners = new Set<() => void>();
@@ -320,6 +321,57 @@ export function assignUserRole(userId: string, roleId: string, actorUserId: stri
     entity_id: userId,
     new_value: { user_id: userId, role_id: roleId },
   });
+}
+
+/* ----------------------------------------------------------------------------------------
+ * Session (Mock — dev-testing aid only)
+ *
+ * ⚠️ This is NOT Supabase Auth and never will be — it is a throwaway local-testing shim so
+ * `/login` has something real to check against before Phase 1 wires up real Supabase Auth +
+ * JWT (§8). No hashing, no server-side verification, no RLS. Do not build any real feature
+ * on top of this beyond letting a developer click through the app locally.
+ * -------------------------------------------------------------------------------------- */
+
+export interface Session {
+  user_id: string;
+  tenant_id: string;
+}
+
+function readSession(): Session | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(KEYS.session);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as Session;
+  } catch {
+    return null;
+  }
+}
+
+export function getSession(): Session | null {
+  return readSession();
+}
+
+export type SignInResult = { ok: true; session: Session } | { ok: false; error: string };
+
+export function signIn(email: string, password: string): SignInResult {
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = getUsers().find((u) => u.email.toLowerCase() === normalizedEmail);
+  if (!user || !user.active || user.password !== password) {
+    return { ok: false, error: "البريد الإلكتروني أو كلمة السر غير صحيحة" };
+  }
+  const session: Session = { user_id: user.id, tenant_id: user.tenant_id };
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(KEYS.session, JSON.stringify(session));
+  }
+  emit();
+  return { ok: true, session };
+}
+
+export function signOut(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(KEYS.session);
+  emit();
 }
 
 /** Dev-only escape hatch — never exposed to Phase-1+ UI; useful for local testing/reset only. */

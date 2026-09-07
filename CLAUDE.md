@@ -22,6 +22,7 @@ bun run lint
 ## الحالة الحالية (حدّث هذا القسم بعد كل Phase)
 
 - **Phase 0 (تأسيس) — منفّذة جزئيًا:** سكافولد تقني كامل (نفس بنية مشروع شقيق يستخدم نفس الستاك)، بدون أي منطق تجاري بعد.
+- **إضافة: تدفق دخول Mock للتجربة المحلية** (`src/routes/login.tsx` + `src/routes/dashboard.tsx` + `signIn`/`getSession`/`signOut` في `data-store.ts`). بيانات تجريبية: `owner@demo.local` / `owner123`. **هذا ليس Supabase Auth ولن يصبح كذلك** — Phase 1 الحقيقية ستستبدله بالكامل (Supabase Auth + JWT + RLS)، وهذه الشاشة موجودة فقط عشان يبقى فيه حاجة "تتفتح" أثناء التطوير المحلي قبل ربط Supabase.
 - **قاعدة البيانات: Mock مؤقت فقط.** لا يوجد اتصال Supabase حقيقي حتى الآن — بانتظار بيانات اعتماد المستخدم (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` في `.env`، انظر `.env.example`). كل ما هو مبني الآن مصمَّم عمدًا ليكون **drop-in replaceable**: نفس أسماء الجداول/الحقول المستخدمة في `docs/ERP_SaaS_Requirements.md §118` تُستخدم في المخزن الوهمي، ونفس التوقيعات ستُستخدم عند الاتصال بـSupabase الحقيقي.
 - **⚠️ تنبيه صريح لأي جلسة قادمة:** طالما البيانات Mock، لا تعتبر أي Phase "منتهية" أو "جاهزة للإنتاج" بمعايير §134 (Definition of Done) — RLS الحقيقية وTenant isolation الحقيقي شرطان أساسيان غير قابلين للتفاوض (§133) ولا يتحققان إلا بعد ربط Supabase فعليًا وتفعيل RLS policies من `supabase/migrations/`.
 - طبقة البيانات المركزية: `src/lib/data-store.ts` (localStorage + subscribe/emit، نمط ثابت — لا تخترع نمطًا موازيًا).
