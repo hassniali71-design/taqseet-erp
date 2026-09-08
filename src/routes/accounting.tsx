@@ -28,7 +28,9 @@ function AccountingPage() {
 
   if (!session) return null;
 
-  const entries = getJournalEntries().sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const entries = getJournalEntries(session.tenant_id).sort((a, b) =>
+    b.created_at.localeCompare(a.created_at),
+  );
 
   return (
     <div className="flex min-h-screen bg-background">

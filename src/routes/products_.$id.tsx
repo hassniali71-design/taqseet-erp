@@ -16,6 +16,9 @@ import type { SerialStatus } from "@/types";
 export const Route = createFileRoute("/products_/$id")({
   component: ProductDetailPage,
   loader: ({ params }) => {
+    // Router loader — runs outside React/session context, so this is only an existence check
+    // (unfiltered by design). The component below re-looks-up the product scoped to the
+    // signed-in session's tenant and renders its own "not found" state for a foreign-tenant id.
     const product = getProducts().find((p) => p.id === params.id);
     if (!product) throw notFound();
     return null;
@@ -59,7 +62,7 @@ function ProductDetailPage() {
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const product = getProducts().find((p) => p.id === id);
+  const product = getProducts(session.tenant_id).find((p) => p.id === id);
   if (!product) {
     return (
       <div className="flex min-h-screen bg-background">
@@ -76,10 +79,10 @@ function ProductDetailPage() {
 
   const serialRequired = product.serial_required;
   const stock = getProductStock(id, product);
-  const serials = getProductSerials()
+  const serials = getProductSerials(session.tenant_id)
     .filter((s) => s.product_id === id)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const movements = getInventoryMovements()
+  const movements = getInventoryMovements(session.tenant_id)
     .filter((m) => m.product_id === id)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
 

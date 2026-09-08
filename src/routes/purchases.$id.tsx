@@ -18,7 +18,7 @@ function PurchaseReceiptPage() {
 
   if (!session) return null;
 
-  const purchase = getPurchases().find((p) => p.id === id);
+  const purchase = getPurchases(session.tenant_id).find((p) => p.id === id);
   const tenant = getTenants().find((t) => t.id === session.tenant_id);
 
   if (!purchase) {

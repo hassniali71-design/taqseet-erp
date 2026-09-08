@@ -16,9 +16,10 @@ function WarrantyPage() {
   const [result, setResult] = useState<WarrantyInfo | null | undefined>(undefined);
 
   if (!session) return null;
+  const tenantId = session.tenant_id;
 
   function handleSearch() {
-    setResult(getWarrantyInfo(query));
+    setResult(getWarrantyInfo(query, tenantId));
   }
 
   return (

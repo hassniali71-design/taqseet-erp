@@ -50,14 +50,14 @@ function NewInstallmentSalePage() {
   const actorUserId = session.user_id;
 
   const settings = getCurrentTenantSettings();
-  const customers = getCustomers().filter((c) => c.status === "active");
-  const products = getProducts().filter((p) => p.active);
-  const plans = getInstallmentPlans().filter((p) => p.active);
+  const customers = getCustomers(session.tenant_id).filter((c) => c.status === "active");
+  const products = getProducts(session.tenant_id).filter((p) => p.active);
+  const plans = getInstallmentPlans(session.tenant_id).filter((p) => p.active);
   const customer = customers.find((c) => c.id === customerId);
 
   const selectedProduct = products.find((p) => p.id === selectedProductId);
   const availableSerials = selectedProduct?.serial_required
-    ? getProductSerials().filter(
+    ? getProductSerials(session.tenant_id).filter(
         (s) => s.product_id === selectedProduct.id && s.status === "available",
       )
     : [];

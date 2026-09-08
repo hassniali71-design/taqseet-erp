@@ -140,6 +140,22 @@ const DEMO_TENANT_ID = "tenant_demo";
  * this codebase's sibling projects. */
 const PLATFORM_TENANT_ID = "platform";
 
+/**
+ * §133 tenant isolation — the tenant every mutation should tag new rows with, and every getter
+ * should filter to when a route file asks for "my" data. Resolved from the signed-in session
+ * (not a parameter threaded through 90 mutation functions) specifically so this stays a
+ * low-risk, mechanical change: every mutation function already ran exactly this logic before,
+ * just with the literal `DEMO_TENANT_ID` hardcoded — swapping that literal for a call to this
+ * function changes what tenant a write is tagged with, never how the write itself works.
+ * Falls back to `DEMO_TENANT_ID` (never null) for the SSR/pre-hydration render, where
+ * `getSession()` can't read `localStorage` yet — every page already gates real rendering behind
+ * `if (!session) return null`, so by the time this fallback would matter for real data, the
+ * page hasn't rendered anything that reads it yet.
+ */
+function getCurrentTenantId(): string {
+  return getSession()?.tenant_id ?? DEMO_TENANT_ID;
+}
+
 function seedTenants(): Tenant[] {
   const now = new Date().toISOString();
   return [
@@ -563,9 +579,10 @@ export function getTenantSettings(): TenantSettings[] {
   return readCollection(KEYS.tenantSettings, seedTenantSettings);
 }
 
-/** Single-tenant Mock convenience — the demo tenant always has exactly one settings row. */
+/** Returns the signed-in user's own tenant's settings — never another tenant's. */
 export function getCurrentTenantSettings(): TenantSettings {
-  const row = getTenantSettings().find((s) => s.tenant_id === DEMO_TENANT_ID);
+  const tenantId = getCurrentTenantId();
+  const row = getTenantSettings().find((s) => s.tenant_id === tenantId);
   if (!row) throw new Error("Tenant settings غير موجودة");
   return row;
 }
@@ -574,26 +591,39 @@ export function updateTenantSettings(
   patch: Partial<Omit<TenantSettings, "tenant_id">>,
   actorUserId: string | null,
 ): void {
+  const tenantId = getCurrentTenantId();
   const settings = getTenantSettings();
   const before = getCurrentTenantSettings();
   const after: TenantSettings = { ...before, ...patch };
   writeCollection(
     KEYS.tenantSettings,
-    settings.map((s) => (s.tenant_id === DEMO_TENANT_ID ? after : s)),
+    settings.map((s) => (s.tenant_id === tenantId ? after : s)),
   );
   recordAudit({
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: tenantId,
     user_id: actorUserId,
     action: "tenant_settings.update",
     entity: "tenant_settings",
-    entity_id: DEMO_TENANT_ID,
+    entity_id: tenantId,
     old_value: before,
     new_value: after,
   });
 }
 
-export function getRoles(): Role[] {
-  return readCollection(KEYS.roles, seedRoles);
+/**
+ * §133 tenant isolation — every getter below takes an optional `tenantId`. Called with none (as
+ * every internal mutation function's own read-before-write does, unchanged), it returns the full
+ * unfiltered collection — this is deliberate: a mutation's `writeCollection(KEY, [...getX(),
+ * newRow])` pattern must never silently drop other tenants' rows just because a getter started
+ * filtering. Route files displaying data to a signed-in user pass `session.tenant_id` (or just
+ * call the `getMy*` convenience wrappers further down) to see only their own tenant's rows.
+ */
+function scopeToTenant<T extends { tenant_id: string }>(rows: T[], tenantId?: string): T[] {
+  return tenantId ? rows.filter((r) => r.tenant_id === tenantId) : rows;
+}
+
+export function getRoles(tenantId?: string): Role[] {
+  return scopeToTenant(readCollection(KEYS.roles, seedRoles), tenantId);
 }
 
 export function getPermissions(): Permission[] {
@@ -604,64 +634,88 @@ export function getRolePermissions(): RolePermission[] {
   return readCollection(KEYS.rolePermissions, seedRolePermissions);
 }
 
-export function getUsers(): User[] {
-  return readCollection(KEYS.users, seedUsers);
+export function getUsers(tenantId?: string): User[] {
+  return scopeToTenant(readCollection(KEYS.users, seedUsers), tenantId);
 }
 
 export function getUserRoles(): UserRoleAssignment[] {
   return readCollection(KEYS.userRoles, seedUserRoles);
 }
 
-export function getAuditLogs(): AuditLogEntry[] {
-  return readCollection(KEYS.auditLogs, () => []);
+export function getAuditLogs(tenantId?: string): AuditLogEntry[] {
+  return scopeToTenant(
+    readCollection(KEYS.auditLogs, () => []),
+    tenantId,
+  );
 }
 
-export function getCustomers(): Customer[] {
-  return readCollection(KEYS.customers, seedCustomers);
+export function getCustomers(tenantId?: string): Customer[] {
+  return scopeToTenant(readCollection(KEYS.customers, seedCustomers), tenantId);
 }
 
-export function getProducts(): Product[] {
-  return readCollection(KEYS.products, seedProducts);
+export function getProducts(tenantId?: string): Product[] {
+  return scopeToTenant(readCollection(KEYS.products, seedProducts), tenantId);
 }
 
-export function getProductSerials(): ProductSerial[] {
-  return readCollection(KEYS.productSerials, seedProductSerials);
+export function getProductSerials(tenantId?: string): ProductSerial[] {
+  return scopeToTenant(readCollection(KEYS.productSerials, seedProductSerials), tenantId);
 }
 
-export function getInventoryMovements(): InventoryMovement[] {
-  return readCollection(KEYS.inventoryMovements, seedInventoryMovements);
+export function getInventoryMovements(tenantId?: string): InventoryMovement[] {
+  return scopeToTenant(readCollection(KEYS.inventoryMovements, seedInventoryMovements), tenantId);
 }
 
-export function getGuarantors(): Guarantor[] {
-  return readCollection(KEYS.guarantors, () => []);
+export function getGuarantors(tenantId?: string): Guarantor[] {
+  return scopeToTenant(
+    readCollection(KEYS.guarantors, () => []),
+    tenantId,
+  );
 }
 
-export function getSales(): Sale[] {
-  return readCollection(KEYS.sales, () => []);
+export function getSales(tenantId?: string): Sale[] {
+  return scopeToTenant(
+    readCollection(KEYS.sales, () => []),
+    tenantId,
+  );
 }
 
-export function getSaleReturns(): SaleReturn[] {
-  return readCollection(KEYS.saleReturns, () => []);
+export function getSaleReturns(tenantId?: string): SaleReturn[] {
+  return scopeToTenant(
+    readCollection(KEYS.saleReturns, () => []),
+    tenantId,
+  );
 }
 
-export function getExchangeTransactions(): ExchangeTransaction[] {
-  return readCollection(KEYS.exchangeTransactions, () => []);
+export function getExchangeTransactions(tenantId?: string): ExchangeTransaction[] {
+  return scopeToTenant(
+    readCollection(KEYS.exchangeTransactions, () => []),
+    tenantId,
+  );
 }
 
-export function getDeliveryOrders(): DeliveryOrder[] {
-  return readCollection(KEYS.deliveryOrders, () => []);
+export function getDeliveryOrders(tenantId?: string): DeliveryOrder[] {
+  return scopeToTenant(
+    readCollection(KEYS.deliveryOrders, () => []),
+    tenantId,
+  );
 }
 
-export function getSuppliers(): Supplier[] {
-  return readCollection(KEYS.suppliers, seedSuppliers);
+export function getSuppliers(tenantId?: string): Supplier[] {
+  return scopeToTenant(readCollection(KEYS.suppliers, seedSuppliers), tenantId);
 }
 
-export function getPurchases(): Purchase[] {
-  return readCollection(KEYS.purchases, () => []);
+export function getPurchases(tenantId?: string): Purchase[] {
+  return scopeToTenant(
+    readCollection(KEYS.purchases, () => []),
+    tenantId,
+  );
 }
 
-export function getSupplierPayments(): SupplierPayment[] {
-  return readCollection(KEYS.supplierPayments, () => []);
+export function getSupplierPayments(tenantId?: string): SupplierPayment[] {
+  return scopeToTenant(
+    readCollection(KEYS.supplierPayments, () => []),
+    tenantId,
+  );
 }
 
 /** §65 — running balance owed to a supplier: total purchased minus total paid. No due-date
@@ -676,24 +730,33 @@ export function getSupplierBalance(supplierId: string): number {
   return Math.round((totalPurchased - totalPaid) * 100) / 100;
 }
 
-export function getTreasuryAccounts(): TreasuryAccount[] {
-  return readCollection(KEYS.treasuryAccounts, seedTreasuryAccounts);
+export function getTreasuryAccounts(tenantId?: string): TreasuryAccount[] {
+  return scopeToTenant(readCollection(KEYS.treasuryAccounts, seedTreasuryAccounts), tenantId);
 }
 
-export function getTreasuryMovements(): TreasuryMovement[] {
-  return readCollection(KEYS.treasuryMovements, seedTreasuryMovements);
+export function getTreasuryMovements(tenantId?: string): TreasuryMovement[] {
+  return scopeToTenant(readCollection(KEYS.treasuryMovements, seedTreasuryMovements), tenantId);
 }
 
-export function getShifts(): Shift[] {
-  return readCollection(KEYS.shifts, () => []);
+export function getShifts(tenantId?: string): Shift[] {
+  return scopeToTenant(
+    readCollection(KEYS.shifts, () => []),
+    tenantId,
+  );
 }
 
-export function getExpenses(): Expense[] {
-  return readCollection(KEYS.expenses, () => []);
+export function getExpenses(tenantId?: string): Expense[] {
+  return scopeToTenant(
+    readCollection(KEYS.expenses, () => []),
+    tenantId,
+  );
 }
 
-export function getJournalEntries(): JournalEntry[] {
-  return readCollection(KEYS.journalEntries, () => []);
+export function getJournalEntries(tenantId?: string): JournalEntry[] {
+  return scopeToTenant(
+    readCollection(KEYS.journalEntries, () => []),
+    tenantId,
+  );
 }
 
 /** §68 — the single source of truth for "how much is in this account": sum of every signed
@@ -708,28 +771,43 @@ export function getAccountBalance(accountId: string): number {
   );
 }
 
-export function getInstallmentPlans(): InstallmentPlan[] {
-  return readCollection(KEYS.installmentPlans, seedInstallmentPlans);
+export function getInstallmentPlans(tenantId?: string): InstallmentPlan[] {
+  return scopeToTenant(readCollection(KEYS.installmentPlans, seedInstallmentPlans), tenantId);
 }
 
-export function getInstallmentContracts(): InstallmentContract[] {
-  return readCollection(KEYS.installmentContracts, () => []);
+export function getInstallmentContracts(tenantId?: string): InstallmentContract[] {
+  return scopeToTenant(
+    readCollection(KEYS.installmentContracts, () => []),
+    tenantId,
+  );
 }
 
-export function getInstallments(): Installment[] {
-  return readCollection(KEYS.installments, () => []);
+export function getInstallments(tenantId?: string): Installment[] {
+  return scopeToTenant(
+    readCollection(KEYS.installments, () => []),
+    tenantId,
+  );
 }
 
-export function getInstallmentPayments(): InstallmentPayment[] {
-  return readCollection(KEYS.installmentPayments, () => []);
+export function getInstallmentPayments(tenantId?: string): InstallmentPayment[] {
+  return scopeToTenant(
+    readCollection(KEYS.installmentPayments, () => []),
+    tenantId,
+  );
 }
 
-export function getPromisesToPay(): PromiseToPay[] {
-  return readCollection(KEYS.promisesToPay, () => []);
+export function getPromisesToPay(tenantId?: string): PromiseToPay[] {
+  return scopeToTenant(
+    readCollection(KEYS.promisesToPay, () => []),
+    tenantId,
+  );
 }
 
-export function getRestructureEvents(): RestructureEvent[] {
-  return readCollection(KEYS.restructureEvents, () => []);
+export function getRestructureEvents(tenantId?: string): RestructureEvent[] {
+  return scopeToTenant(
+    readCollection(KEYS.restructureEvents, () => []),
+    tenantId,
+  );
 }
 
 /**
@@ -1039,12 +1117,9 @@ export interface ProvisionTenantResult {
  * uses, which is a stable literal that would collide across tenants) + links the new tenant's
  * "owner" role to every existing Permission + a starter Owner user with a generated password.
  *
- * Scope honesty: this makes account-level entities (Tenant/TenantSettings/Roles/Users) genuinely
- * per-tenant and safe. It does NOT retrofit the ~40 other `get*()` readers across the app that
- * still resolve business data (customers/sales/products/etc.) — those remain hardcoded to
- * `DEMO_TENANT_ID` today. A user created for a new tenant here can sign in, but the rest of the
- * app will not yet show that tenant's own isolated business data — that is a separate, larger
- * follow-up (see CLAUDE.md §"الهوية البصرية"/Phase 9 notes) and is not silently claimed as done. */
+ * Every business-data getter in this file (customers/sales/products/etc.) also filters by the
+ * signed-in session's tenant now — see `getCurrentTenantId()` above — so a user created here
+ * genuinely only ever sees and writes their own tenant's data, not the demo tenant's. */
 export function provisionTenant(
   input: ProvisionTenantInput,
   actorUserId: string | null,
@@ -1143,7 +1218,7 @@ export function assignUserRole(userId: string, roleId: string, actorUserId: stri
   const role = getRoles().find((r) => r.id === roleId);
   writeCollection(KEYS.userRoles, [...existing, { user_id: userId, role_id: roleId }]);
   recordAudit({
-    tenant_id: role?.tenant_id ?? DEMO_TENANT_ID,
+    tenant_id: role?.tenant_id ?? getCurrentTenantId(),
     user_id: actorUserId,
     action: "user_role.assign",
     entity: "user_roles",
@@ -1164,7 +1239,7 @@ export function setUserRole(userId: string, roleId: string, actorUserId: string 
   ]);
   const role = getRoles().find((r) => r.id === roleId);
   recordAudit({
-    tenant_id: role?.tenant_id ?? DEMO_TENANT_ID,
+    tenant_id: role?.tenant_id ?? getCurrentTenantId(),
     user_id: actorUserId,
     action: "user_role.set",
     entity: "user_roles",
@@ -1205,7 +1280,7 @@ export function createCustomer(
   const customer: Customer = {
     ...input,
     id: genId("cust"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     code: nextCode("CUST", existing.length),
     status: "active",
     created_at: new Date().toISOString(),
@@ -1256,7 +1331,7 @@ export function createProduct(
   const product: Product = {
     ...input,
     id: genId("prod"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     code: nextCode("PRD", existing.length),
     active: true,
     created_at: new Date().toISOString(),
@@ -1416,7 +1491,7 @@ export function createGuarantor(
   const guarantor: Guarantor = {
     ...input,
     id: genId("guar"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     created_at: new Date().toISOString(),
   };
   writeCollection(KEYS.guarantors, [...getGuarantors(), guarantor]);
@@ -1546,7 +1621,7 @@ export function createSale(input: CreateSaleInput, actorUserId: string | null): 
 
   const sale: Sale = {
     id: genId("sale"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     invoice_number: nextInvoiceNumber(),
     customer_id: input.customer_id,
     customer_name: customer?.name ?? "عميل نقدي",
@@ -1570,7 +1645,7 @@ export function createSale(input: CreateSaleInput, actorUserId: string | null): 
   const now = new Date().toISOString();
   const newMovements: InventoryMovement[] = movementDrafts.map((m) => ({
     id: genId("mov"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     product_id: m.product_id,
     type: "sale",
     quantity: m.quantity,
@@ -1584,7 +1659,7 @@ export function createSale(input: CreateSaleInput, actorUserId: string | null): 
   writeCollection(KEYS.sales, [...getSales(), sale]);
 
   recordAudit({
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     user_id: actorUserId,
     action: "sale.create",
     entity: "sales",
@@ -1617,7 +1692,7 @@ export function createInstallmentPlan(
   const plan: InstallmentPlan = {
     ...input,
     id: genId("plan"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     active: true,
     created_at: new Date().toISOString(),
   };
@@ -1810,7 +1885,7 @@ export function createInstallmentContract(
 
   const contract: InstallmentContract = {
     id: genId("contract"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     contract_number: nextContractNumber(),
     customer_id: customer.id,
     customer_name: customer.name,
@@ -1831,7 +1906,7 @@ export function createInstallmentContract(
 
   const installments: Installment[] = schedule.map((line) => ({
     id: genId("inst"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     contract_id: contract.id,
     seq: line.seq,
     due_date: line.due_date,
@@ -1850,7 +1925,7 @@ export function createInstallmentContract(
 
   const newMovements: InventoryMovement[] = movementDrafts.map((m) => ({
     id: genId("mov"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     product_id: m.product_id,
     type: "sale",
     quantity: m.quantity,
@@ -1865,7 +1940,7 @@ export function createInstallmentContract(
   writeCollection(KEYS.installments, [...getInstallments(), ...installments]);
 
   recordAudit({
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     user_id: actorUserId,
     action: "installment_contract.create",
     entity: "installment_contracts",
@@ -1989,7 +2064,7 @@ export function collectPayment(
 
   const payment: InstallmentPayment = {
     id: genId("pay"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     contract_id: contractId,
     receipt_number: nextReceiptNumber(),
     amount,
@@ -2044,7 +2119,7 @@ export function collectPayment(
   }
 
   recordAudit({
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     user_id: actorUserId,
     action: "installment_payment.collect",
     entity: "installment_payments",
@@ -2087,7 +2162,7 @@ export function recordPromise(
 
   const promise: PromiseToPay = {
     id: genId("promise"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     contract_id: contractId,
     promise_date: promiseDate,
     expected_amount: expectedAmount,
@@ -2098,7 +2173,7 @@ export function recordPromise(
   };
   writeCollection(KEYS.promisesToPay, [...getPromisesToPay(), promise]);
   recordAudit({
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     user_id: actorUserId,
     action: "promise_to_pay.record",
     entity: "promises_to_pay",
@@ -2153,7 +2228,7 @@ export function earlySettleContract(
     ),
   );
   recordAudit({
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     user_id: actorUserId,
     action: "installment_contract.settle_early",
     entity: "installment_contracts",
@@ -2202,7 +2277,7 @@ export function restructureContract(
   const created_at = new Date().toISOString();
   const newInstallments: Installment[] = schedule.map((line, index) => ({
     id: genId("inst"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     contract_id: contractId,
     seq: maxSeq + index + 1,
     due_date: line.due_date,
@@ -2221,7 +2296,7 @@ export function restructureContract(
 
   const event: RestructureEvent = {
     id: genId("restruct"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     contract_id: contractId,
     old_installment_ids: oldInstallmentIds,
     remaining_amount: remaining,
@@ -2239,7 +2314,7 @@ export function restructureContract(
   );
 
   recordAudit({
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     user_id: actorUserId,
     action: "installment_contract.restructure",
     entity: "installment_contracts",
@@ -2261,7 +2336,7 @@ export function createSupplier(
   const supplier: Supplier = {
     ...input,
     id: genId("supplier"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     code: nextCode("SUP", existing.length),
     active: true,
     created_at: new Date().toISOString(),
@@ -2408,7 +2483,7 @@ export function createPurchase(input: CreatePurchaseInput, actorUserId: string |
   const total = Math.round(purchaseItems.reduce((sum, i) => sum + i.line_total, 0) * 100) / 100;
   const purchase: Purchase = {
     id: genId("purchase"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     purchase_number,
     supplier_id: supplier.id,
     supplier_name: supplier.name,
@@ -2420,7 +2495,7 @@ export function createPurchase(input: CreatePurchaseInput, actorUserId: string |
   writeCollection(KEYS.purchases, [...getPurchases(), purchase]);
 
   recordAudit({
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     user_id: actorUserId,
     action: "purchase.create",
     entity: "purchases",
@@ -2460,7 +2535,7 @@ export function recordSupplierPayment(
 
   const payment: SupplierPayment = {
     id: genId("suppay"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     supplier_id: supplierId,
     amount,
     user_id: actorUserId,
@@ -2468,7 +2543,7 @@ export function recordSupplierPayment(
   };
   writeCollection(KEYS.supplierPayments, [...getSupplierPayments(), payment]);
   recordAudit({
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     user_id: actorUserId,
     action: "supplier_payment.record",
     entity: "supplier_payments",
@@ -2511,7 +2586,7 @@ function postTreasuryMovement(
   const after = Math.round((before + amount) * 100) / 100;
   const movement: TreasuryMovement = {
     id: genId("tmov"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     account_id: accountId,
     type,
     amount,
@@ -2542,7 +2617,7 @@ export function openShift(
 
   const shift: Shift = {
     id: genId("shift"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     account_id: accountId,
     opening_balance: openingBalance,
     opened_by: actorUserId,
@@ -2551,7 +2626,7 @@ export function openShift(
   };
   writeCollection(KEYS.shifts, [...getShifts(), shift]);
   recordAudit({
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     user_id: actorUserId,
     action: "shift.open",
     entity: "shifts",
@@ -2601,7 +2676,7 @@ export function closeShift(
     shifts.map((s) => (s.id === shiftId ? after : s)),
   );
   recordAudit({
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     user_id: actorUserId,
     action: "shift.close",
     entity: "shifts",
@@ -2631,7 +2706,7 @@ export function recordExpense(
   const settings = getCurrentTenantSettings();
   const expense: Expense = {
     id: genId("expense"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     account_id: accountId,
     category: category.trim(),
     amount,
@@ -2642,7 +2717,7 @@ export function recordExpense(
   };
   writeCollection(KEYS.expenses, [...getExpenses(), expense]);
   recordAudit({
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     user_id: actorUserId,
     action: "expense.record",
     entity: "expenses",
@@ -2742,7 +2817,7 @@ function postJournalEntry(
   }
   const entry: JournalEntry = {
     id: genId("je"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     entry_number: nextJournalEntryNumber(),
     lines,
     description,
@@ -2875,7 +2950,7 @@ export function createReturn(input: CreateReturnInput, actorUserId: string | nul
       const before = getProductStock(i.product_id, product);
       return {
         id: genId("mov"),
-        tenant_id: DEMO_TENANT_ID,
+        tenant_id: getCurrentTenantId(),
         product_id: i.product_id,
         type: "return" as const,
         quantity: i.quantity,
@@ -2892,7 +2967,7 @@ export function createReturn(input: CreateReturnInput, actorUserId: string | nul
 
   const saleReturn: SaleReturn = {
     id: genId("return"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     return_number,
     sale_id: sale.id,
     customer_id: sale.customer_id,
@@ -2906,7 +2981,7 @@ export function createReturn(input: CreateReturnInput, actorUserId: string | nul
   writeCollection(KEYS.saleReturns, [...getSaleReturns(), saleReturn]);
 
   recordAudit({
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     user_id: actorUserId,
     action: "sale_return.create",
     entity: "sale_returns",
@@ -3107,7 +3182,7 @@ export function createExchange(
         const before = getProductStock(i.product_id, product);
         return {
           id: genId("mov"),
-          tenant_id: DEMO_TENANT_ID,
+          tenant_id: getCurrentTenantId(),
           product_id: i.product_id,
           type: "return" as const,
           quantity: i.quantity,
@@ -3120,7 +3195,7 @@ export function createExchange(
       }),
     ...movementDrafts.map((m) => ({
       id: genId("mov"),
-      tenant_id: DEMO_TENANT_ID,
+      tenant_id: getCurrentTenantId(),
       product_id: m.product_id,
       type: "sale" as const,
       quantity: m.quantity,
@@ -3135,7 +3210,7 @@ export function createExchange(
 
   const exchange: ExchangeTransaction = {
     id: genId("exchange"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     exchange_number,
     original_sale_id: sale.id,
     returned_items: returnedItems,
@@ -3148,7 +3223,7 @@ export function createExchange(
   writeCollection(KEYS.exchangeTransactions, [...getExchangeTransactions(), exchange]);
 
   recordAudit({
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     user_id: actorUserId,
     action: "exchange.create",
     entity: "exchange_transactions",
@@ -3218,7 +3293,7 @@ export function scheduleDelivery(
 
   const order: DeliveryOrder = {
     id: genId("delivery"),
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     sale_id: saleId,
     customer_name: sale.customer_name,
     address: address.trim(),
@@ -3229,7 +3304,7 @@ export function scheduleDelivery(
   };
   writeCollection(KEYS.deliveryOrders, [...getDeliveryOrders(), order]);
   recordAudit({
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     user_id: actorUserId,
     action: "delivery.schedule",
     entity: "delivery_orders",
@@ -3271,7 +3346,7 @@ export function advanceDeliveryStatus(
     orders.map((o) => (o.id === id ? after : o)),
   );
   recordAudit({
-    tenant_id: DEMO_TENANT_ID,
+    tenant_id: getCurrentTenantId(),
     user_id: actorUserId,
     action: "delivery.advance",
     entity: "delivery_orders",
@@ -3296,17 +3371,23 @@ export interface WarrantyInfo {
 
 /** Looks across both cash sales and installment contracts for the unit that carries this
  * serial — warranty coverage doesn't depend on how the customer paid. */
-export function getWarrantyInfo(serialNumberRaw: string): WarrantyInfo | null {
+/** `tenantId` is required (not optional like the list getters) — this is a free-text serial
+ * search, so without it a signed-in user could type any serial and see another tenant's
+ * customer name/sale info; every other "by id" helper in this file is safe unfiltered only
+ * because callers already pass in an id they can't have guessed cross-tenant. */
+export function getWarrantyInfo(serialNumberRaw: string, tenantId: string): WarrantyInfo | null {
   const serialNumber = serialNumberRaw.trim().toLowerCase();
   if (!serialNumber) return null;
 
-  const serial = getProductSerials().find((s) => s.serial_number.toLowerCase() === serialNumber);
+  const serial = getProductSerials(tenantId).find(
+    (s) => s.serial_number.toLowerCase() === serialNumber,
+  );
   if (!serial) return null;
-  const product = getProducts().find((p) => p.id === serial.product_id);
+  const product = getProducts(tenantId).find((p) => p.id === serial.product_id);
   if (!product || !product.warranty_months) return null;
 
-  const cashSale = getSales().find((s) => s.items.some((i) => i.serial_id === serial.id));
-  const contract = getInstallmentContracts().find((c) =>
+  const cashSale = getSales(tenantId).find((s) => s.items.some((i) => i.serial_id === serial.id));
+  const contract = getInstallmentContracts(tenantId).find((c) =>
     c.items.some((i) => i.serial_id === serial.id),
   );
   const soldAt = cashSale?.created_at ?? contract?.created_at;
@@ -3382,12 +3463,13 @@ export function markAllNotificationsRead(ids: string[]): void {
 export function getNotifications(): AppNotification[] {
   const readIds = new Set(getReadNotificationIds());
   const settings = getCurrentTenantSettings();
+  const tenantId = getCurrentTenantId();
   const notifications: Array<Omit<AppNotification, "read">> = [];
 
-  const contracts = getInstallmentContracts().filter(
+  const contracts = getInstallmentContracts(tenantId).filter(
     (c) => c.status !== "settled" && c.status !== "settled_early",
   );
-  const allInstallments = getInstallments();
+  const allInstallments = getInstallments(tenantId);
   for (const contract of contracts) {
     const lines = allInstallments.filter(
       (i) => i.contract_id === contract.id && i.status !== "waived" && i.status !== "rescheduled",
@@ -3414,8 +3496,8 @@ export function getNotifications(): AppNotification[] {
     }
   }
 
-  const allContracts = getInstallmentContracts();
-  for (const promise of getPromisesToPay()) {
+  const allContracts = getInstallmentContracts(tenantId);
+  for (const promise of getPromisesToPay(tenantId)) {
     if (getEffectivePromiseStatus(promise) === "failed") {
       const contract = allContracts.find((c) => c.id === promise.contract_id);
       notifications.push({
@@ -3427,7 +3509,7 @@ export function getNotifications(): AppNotification[] {
     }
   }
 
-  for (const product of getProducts()) {
+  for (const product of getProducts(tenantId)) {
     if (!product.active || product.serial_required) continue;
     const stock = getProductStock(product.id, product);
     if (stock < product.min_stock) {
@@ -3440,7 +3522,7 @@ export function getNotifications(): AppNotification[] {
     }
   }
 
-  for (const expense of getExpenses()) {
+  for (const expense of getExpenses(tenantId)) {
     if (expense.needs_approval) {
       notifications.push({
         id: `expense_${expense.id}`,

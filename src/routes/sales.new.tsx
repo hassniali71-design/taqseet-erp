@@ -45,11 +45,11 @@ function NewSalePage() {
   const actorUserId = session.user_id;
 
   const settings = getCurrentTenantSettings();
-  const customers = getCustomers().filter((c) => c.status === "active");
-  const products = getProducts().filter((p) => p.active);
+  const customers = getCustomers(session.tenant_id).filter((c) => c.status === "active");
+  const products = getProducts(session.tenant_id).filter((p) => p.active);
   const selectedProduct = products.find((p) => p.id === selectedProductId);
   const availableSerials = selectedProduct?.serial_required
-    ? getProductSerials().filter(
+    ? getProductSerials(session.tenant_id).filter(
         (s) => s.product_id === selectedProduct.id && s.status === "available",
       )
     : [];

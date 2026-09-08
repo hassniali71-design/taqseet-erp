@@ -29,7 +29,7 @@ function SupplierDetailPage() {
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const supplier = getSuppliers().find((s) => s.id === id);
+  const supplier = getSuppliers(session.tenant_id).find((s) => s.id === id);
   if (!supplier) {
     return (
       <div className="flex min-h-screen bg-background">
@@ -45,10 +45,10 @@ function SupplierDetailPage() {
   }
 
   const supplierId = supplier.id;
-  const purchases = getPurchases()
+  const purchases = getPurchases(session.tenant_id)
     .filter((p) => p.supplier_id === supplierId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const payments = getSupplierPayments()
+  const payments = getSupplierPayments(session.tenant_id)
     .filter((p) => p.supplier_id === supplierId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const totalPurchased = purchases.reduce((sum, p) => sum + p.total, 0);

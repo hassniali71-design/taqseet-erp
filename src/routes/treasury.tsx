@@ -51,16 +51,20 @@ function TreasuryPage() {
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const accounts = getTreasuryAccounts().filter((a) => a.active);
+  const accounts = getTreasuryAccounts(session.tenant_id).filter((a) => a.active);
   const cashierAccount = accounts.find((a) => a.kind === "cashier");
   const openShiftRow = cashierAccount
-    ? getShifts().find((s) => s.account_id === cashierAccount.id && s.status === "open")
+    ? getShifts(session.tenant_id).find(
+        (s) => s.account_id === cashierAccount.id && s.status === "open",
+      )
     : undefined;
-  const closedShifts = getShifts()
+  const closedShifts = getShifts(session.tenant_id)
     .filter((s) => s.status === "closed")
     .sort((a, b) => (b.closed_at ?? "").localeCompare(a.closed_at ?? ""));
 
-  const movements = getTreasuryMovements().sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const movements = getTreasuryMovements(session.tenant_id).sort((a, b) =>
+    b.created_at.localeCompare(a.created_at),
+  );
   const todayMovements = movements.filter((m) => isToday(m.created_at));
   const todaySales = todayMovements
     .filter((m) => m.type === "sale")

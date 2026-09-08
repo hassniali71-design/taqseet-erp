@@ -58,9 +58,9 @@ function DashboardPage() {
   if (!session) return null;
 
   const tenant = getTenants().find((t) => t.id === session.tenant_id);
-  const customers = getCustomers();
-  const products = getProducts();
-  const sales = getSales().filter((s) => s.status === "completed");
+  const customers = getCustomers(session.tenant_id);
+  const products = getProducts(session.tenant_id);
+  const sales = getSales(session.tenant_id).filter((s) => s.status === "completed");
   const settings = getCurrentTenantSettings();
 
   const today = new Date();
@@ -77,10 +77,10 @@ function DashboardPage() {
     return { label: WEEKDAY_LABELS_AR[day.getDay()] ?? "", value: total };
   });
 
-  const contracts = getInstallmentContracts().filter(
+  const contracts = getInstallmentContracts(session.tenant_id).filter(
     (c) => c.status !== "settled" && c.status !== "settled_early",
   );
-  const allInstallments = getInstallments();
+  const allInstallments = getInstallments(session.tenant_id);
   let dueTodayAmount = 0;
   let overdueAmount = 0;
   let overdueCount = 0;
@@ -104,9 +104,11 @@ function DashboardPage() {
     (p) => p.active && !p.serial_required && getProductStock(p.id, p) < p.min_stock,
   );
 
-  const pendingDeliveries = getDeliveryOrders().filter((d) => d.status !== "delivered").length;
-  const pendingExpenses = getExpenses().filter((e) => e.needs_approval).length;
-  const cashierAccount = getTreasuryAccounts().find((a) => a.kind === "cashier");
+  const pendingDeliveries = getDeliveryOrders(session.tenant_id).filter(
+    (d) => d.status !== "delivered",
+  ).length;
+  const pendingExpenses = getExpenses(session.tenant_id).filter((e) => e.needs_approval).length;
+  const cashierAccount = getTreasuryAccounts(session.tenant_id).find((a) => a.kind === "cashier");
   const cashierBalance = cashierAccount ? getAccountBalance(cashierAccount.id) : 0;
 
   return (

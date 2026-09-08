@@ -62,10 +62,10 @@ function CollectionsWorkbenchPage() {
   const actorUserId = session.user_id;
 
   const settings = getCurrentTenantSettings();
-  const contracts = getInstallmentContracts().filter(
+  const contracts = getInstallmentContracts(session.tenant_id).filter(
     (c) => c.status !== "settled" && c.status !== "settled_early",
   );
-  const allInstallments = getInstallments();
+  const allInstallments = getInstallments(session.tenant_id);
 
   const rows: Row[] = [];
   for (const contract of contracts) {

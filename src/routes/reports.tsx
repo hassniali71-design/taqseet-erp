@@ -95,22 +95,25 @@ function ReportsPage() {
           </div>
         )}
 
-        {tab === "sales" && <SalesReport from={from} to={to} />}
-        {tab === "contracts" && <ContractsReport />}
+        {tab === "sales" && <SalesReport from={from} to={to} tenantId={session.tenant_id} />}
+        {tab === "contracts" && <ContractsReport tenantId={session.tenant_id} />}
         {tab === "statement" && (
           <StatementReport
             customerId={statementCustomerId}
             onCustomerChange={setStatementCustomerId}
+            tenantId={session.tenant_id}
           />
         )}
-        {tab === "slow-moving" && <SlowMovingReport from={from} to={to} />}
+        {tab === "slow-moving" && (
+          <SlowMovingReport from={from} to={to} tenantId={session.tenant_id} />
+        )}
       </main>
     </div>
   );
 }
 
-function SalesReport({ from, to }: { from: number; to: number }) {
-  const sales = getSales()
+function SalesReport({ from, to, tenantId }: { from: number; to: number; tenantId: string }) {
+  const sales = getSales(tenantId)
     .filter((s) => {
       const t = new Date(s.created_at).getTime();
       return t >= from && t <= to && s.status === "completed";
@@ -165,11 +168,11 @@ function SalesReport({ from, to }: { from: number; to: number }) {
   );
 }
 
-function ContractsReport() {
-  const contracts = getInstallmentContracts().sort((a, b) =>
+function ContractsReport({ tenantId }: { tenantId: string }) {
+  const contracts = getInstallmentContracts(tenantId).sort((a, b) =>
     b.created_at.localeCompare(a.created_at),
   );
-  const allInstallments = getInstallments();
+  const allInstallments = getInstallments(tenantId);
 
   return (
     <section className="mt-6">
@@ -222,20 +225,24 @@ function ContractsReport() {
 function StatementReport({
   customerId,
   onCustomerChange,
+  tenantId,
 }: {
   customerId: string;
   onCustomerChange: (id: string) => void;
+  tenantId: string;
 }) {
-  const customers = getCustomers();
+  const customers = getCustomers(tenantId);
   const customer = customers.find((c) => c.id === customerId);
 
-  const sales = customer ? getSales().filter((s) => s.customer_id === customer.id) : [];
+  const sales = customer ? getSales(tenantId).filter((s) => s.customer_id === customer.id) : [];
   const contracts = customer
-    ? getInstallmentContracts().filter((c) => c.customer_id === customer.id)
+    ? getInstallmentContracts(tenantId).filter((c) => c.customer_id === customer.id)
     : [];
   const contractIds = new Set(contracts.map((c) => c.id));
-  const payments = getInstallmentPayments().filter((p) => contractIds.has(p.contract_id));
-  const returns = customer ? getSaleReturns().filter((r) => r.customer_id === customer.id) : [];
+  const payments = getInstallmentPayments(tenantId).filter((p) => contractIds.has(p.contract_id));
+  const returns = customer
+    ? getSaleReturns(tenantId).filter((r) => r.customer_id === customer.id)
+    : [];
 
   type Row = { date: string; label: string; amount: number };
   const rows: Row[] = [
@@ -330,13 +337,13 @@ function StatementReport({
   );
 }
 
-function SlowMovingReport({ from, to }: { from: number; to: number }) {
-  const products = getProducts().filter((p) => p.active);
-  const sales = getSales().filter((s) => {
+function SlowMovingReport({ from, to, tenantId }: { from: number; to: number; tenantId: string }) {
+  const products = getProducts(tenantId).filter((p) => p.active);
+  const sales = getSales(tenantId).filter((s) => {
     const t = new Date(s.created_at).getTime();
     return t >= from && t <= to;
   });
-  const contracts = getInstallmentContracts().filter((c) => {
+  const contracts = getInstallmentContracts(tenantId).filter((c) => {
     const t = new Date(c.created_at).getTime();
     return t >= from && t <= to;
   });

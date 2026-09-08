@@ -47,8 +47,10 @@ function DeliveriesPage() {
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const sales = getSales();
-  const orders = getDeliveryOrders().sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const sales = getSales(session.tenant_id);
+  const orders = getDeliveryOrders(session.tenant_id).sort((a, b) =>
+    b.created_at.localeCompare(a.created_at),
+  );
 
   function handleSchedule() {
     setError(null);

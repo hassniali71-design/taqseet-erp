@@ -31,8 +31,8 @@ function NewPurchasePage() {
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const suppliers = getSuppliers().filter((s) => s.active);
-  const products = getProducts().filter((p) => p.active);
+  const suppliers = getSuppliers(session.tenant_id).filter((s) => s.active);
+  const products = getProducts(session.tenant_id).filter((p) => p.active);
   const selectedProduct = products.find((p) => p.id === selectedProductId);
 
   function onQuantityChange(value: string) {

@@ -32,9 +32,11 @@ function ExpensesPage() {
   const actorUserId = session.user_id;
 
   const settings = getCurrentTenantSettings();
-  const accounts = getTreasuryAccounts().filter((a) => a.active);
-  const expenses = getExpenses().sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const users = getUsers();
+  const accounts = getTreasuryAccounts(session.tenant_id).filter((a) => a.active);
+  const expenses = getExpenses(session.tenant_id).sort((a, b) =>
+    b.created_at.localeCompare(a.created_at),
+  );
+  const users = getUsers(session.tenant_id);
 
   function handleApprove(expenseId: string) {
     const note = window.prompt("ملاحظة الاعتماد (اختياري):", "");

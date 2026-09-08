@@ -22,7 +22,7 @@ function StockCountPage() {
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const products = getProducts().filter((p) => p.active && !p.serial_required);
+  const products = getProducts(session.tenant_id).filter((p) => p.active && !p.serial_required);
 
   function submitRow(productId: string) {
     setError(null);

@@ -81,7 +81,7 @@ function ContractDetailPage() {
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const contract = getInstallmentContracts().find((c) => c.id === id);
+  const contract = getInstallmentContracts(session.tenant_id).find((c) => c.id === id);
 
   if (!contract) {
     return (
@@ -99,19 +99,19 @@ function ContractDetailPage() {
 
   const contractId = contract.id;
   const settings = getCurrentTenantSettings();
-  const installments = getInstallments()
+  const installments = getInstallments(session.tenant_id)
     .filter((i) => i.contract_id === contractId)
     .sort((a, b) => a.seq - b.seq);
 
   const totalPaid = installments.reduce((sum, i) => sum + i.paid_amount, 0);
   const remaining = Math.max(0, contract.total_amount - totalPaid);
-  const payments = getInstallmentPayments()
+  const payments = getInstallmentPayments(session.tenant_id)
     .filter((p) => p.contract_id === contractId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const promises = getPromisesToPay()
+  const promises = getPromisesToPay(session.tenant_id)
     .filter((p) => p.contract_id === contractId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const restructureEvents = getRestructureEvents()
+  const restructureEvents = getRestructureEvents(session.tenant_id)
     .filter((r) => r.contract_id === contractId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const canAct = contract.status !== "settled" && contract.status !== "settled_early";

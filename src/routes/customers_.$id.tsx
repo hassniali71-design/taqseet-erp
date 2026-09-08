@@ -33,7 +33,7 @@ function CustomerDetailPage() {
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const customer = getCustomers().find((c) => c.id === id);
+  const customer = getCustomers(session.tenant_id).find((c) => c.id === id);
   if (!customer) {
     return (
       <div className="flex min-h-screen bg-background">
@@ -48,12 +48,12 @@ function CustomerDetailPage() {
     );
   }
 
-  const guarantors = getGuarantors().filter((g) => g.customer_id === id);
-  const sales = getSales()
+  const guarantors = getGuarantors(session.tenant_id).filter((g) => g.customer_id === id);
+  const sales = getSales(session.tenant_id)
     .filter((s) => s.customer_id === id)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const totalPurchases = sales.reduce((sum, s) => sum + s.total, 0);
-  const contracts = getInstallmentContracts()
+  const contracts = getInstallmentContracts(session.tenant_id)
     .filter((c) => c.customer_id === id)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const exposure = getCustomerExposure(id);

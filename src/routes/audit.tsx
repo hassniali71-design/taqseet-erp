@@ -31,8 +31,10 @@ function AuditPage() {
 
   if (!session) return null;
 
-  const users = getUsers();
-  const logs = [...getAuditLogs()].sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const users = getUsers(session.tenant_id);
+  const logs = [...getAuditLogs(session.tenant_id)].sort((a, b) =>
+    b.created_at.localeCompare(a.created_at),
+  );
 
   function userName(userId: string | null): string {
     if (!userId) return "النظام";

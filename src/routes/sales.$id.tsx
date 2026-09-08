@@ -30,7 +30,7 @@ function SaleReceiptPage() {
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const sale = getSales().find((s) => s.id === id);
+  const sale = getSales(session.tenant_id).find((s) => s.id === id);
   const tenant = getTenants().find((t) => t.id === session.tenant_id);
 
   if (!sale) {
@@ -49,7 +49,7 @@ function SaleReceiptPage() {
 
   const saleId = sale.id;
   const saleItems = sale.items;
-  const returns = getSaleReturns()
+  const returns = getSaleReturns(session.tenant_id)
     .filter((r) => r.sale_id === saleId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
 

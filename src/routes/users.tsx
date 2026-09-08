@@ -39,8 +39,8 @@ function UsersPage() {
   const actorUserId = session.user_id;
   const tenantId = session.tenant_id;
 
-  const roles = getRoles();
-  const users = getUsers();
+  const roles = getRoles(session.tenant_id);
+  const users = getUsers(session.tenant_id);
   const userRoles = getUserRoles();
 
   function roleLabel(userId: string): string {

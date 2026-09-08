@@ -48,7 +48,7 @@ function CustomersPage() {
   // TypeScript falls back to for a captured outer variable inside a function body.
   const actorUserId = session.user_id;
 
-  const customers = getCustomers();
+  const customers = getCustomers(session.tenant_id);
 
   function startCreate() {
     setForm(EMPTY_FORM);

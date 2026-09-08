@@ -80,7 +80,7 @@ function SettingsPage() {
     setTimeout(() => setSaved(false), 2000);
   }
 
-  const plans = getInstallmentPlans();
+  const plans = getInstallmentPlans(session.tenant_id);
 
   function handleAddPlan(event: FormEvent) {
     event.preventDefault();

@@ -41,7 +41,7 @@ function SuppliersPage() {
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const suppliers = getSuppliers();
+  const suppliers = getSuppliers(session.tenant_id);
 
   function startCreate() {
     setForm(EMPTY_FORM);

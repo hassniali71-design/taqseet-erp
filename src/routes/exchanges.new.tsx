@@ -45,15 +45,17 @@ function NewExchangePage() {
   const actorUserId = session.user_id;
 
   const matchingSales = invoiceQuery.trim()
-    ? getSales().filter((s) =>
+    ? getSales(session.tenant_id).filter((s) =>
         s.invoice_number.toLowerCase().includes(invoiceQuery.trim().toLowerCase()),
       )
     : [];
-  const sale = getSales().find((s) => s.id === saleId);
-  const products = getProducts().filter((p) => p.active);
+  const sale = getSales(session.tenant_id).find((s) => s.id === saleId);
+  const products = getProducts(session.tenant_id).filter((p) => p.active);
   const newProduct = products.find((p) => p.id === selectedNewProductId);
   const availableSerials = newProduct?.serial_required
-    ? getProductSerials().filter((s) => s.product_id === newProduct.id && s.status === "available")
+    ? getProductSerials(session.tenant_id).filter(
+        (s) => s.product_id === newProduct.id && s.status === "available",
+      )
     : [];
 
   function selectSale(id: string) {
