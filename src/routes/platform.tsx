@@ -3,6 +3,7 @@ import {
   Building2,
   CheckCircle2,
   Copy,
+  Eye,
   LogOut,
   Pause,
   Play,
@@ -22,12 +23,13 @@ import {
   getManagedTenants,
   getUsers,
   provisionTenant,
+  recordAudit,
   setTenantStatus,
   signOut,
   subscribeData,
   type ProvisionTenantResult,
 } from "@/lib/data-store";
-import type { TenantStatus } from "@/types";
+import type { Tenant, TenantStatus } from "@/types";
 
 export const Route = createFileRoute("/platform")({
   component: PlatformControlRoom,
@@ -58,6 +60,8 @@ function PlatformControlRoom() {
   const [showCreate, setShowCreate] = useState(false);
   const [justCreated, setJustCreated] = useState<ProvisionTenantResult | null>(null);
   const [form, setForm] = useState({ name: "", owner_name: "", phone: "", owner_email: "" });
+  const [supportTarget, setSupportTarget] = useState<Tenant | null>(null);
+  const [supportReason, setSupportReason] = useState("");
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -96,6 +100,25 @@ function PlatformControlRoom() {
     const text = `البريد: ${result.ownerEmail}\nكلمة السر: ${result.ownerPassword}`;
     void navigator.clipboard.writeText(text);
     toast.success("تم نسخ بيانات الدخول");
+  }
+
+  /** §133 Support Access: never a silent lookup — a reason is mandatory and gets written to
+   * the TARGET tenant's own audit log (not the platform's), so the tenant's owner can see
+   * every time the platform team looked at their data and why. */
+  function handleSupportAccess() {
+    if (!supportTarget || !supportReason.trim()) return;
+    recordAudit({
+      tenant_id: supportTarget.id,
+      user_id: session?.user_id ?? null,
+      action: "support_access.use",
+      entity: "tenant",
+      entity_id: supportTarget.id,
+      reason: supportReason.trim(),
+    });
+    const tenantId = supportTarget.id;
+    setSupportTarget(null);
+    setSupportReason("");
+    void navigate({ to: "/platform/support/$tenantId", params: { tenantId } });
   }
 
   return (
@@ -205,6 +228,43 @@ function PlatformControlRoom() {
             >
               إخفاء
             </button>
+          </div>
+        )}
+
+        {supportTarget && (
+          <div className="mt-6 rounded-2xl border-2 border-warning/50 bg-warning/10 p-5">
+            <h2 className="text-sm font-extrabold text-sidebar-foreground">
+              دخول دعم فني لبيانات: {supportTarget.name}
+            </h2>
+            <p className="mt-1 text-xs font-bold text-sidebar-foreground/70">
+              اكتب سبب الدخول — إلزامي، وسيُسجَّل في سجل تدقيق هذا العميل نفسه باسمك. الدخول للعرض
+              فقط، بدون أي تعديل على بياناته.
+            </p>
+            <textarea
+              value={supportReason}
+              onChange={(e) => setSupportReason(e.target.value)}
+              rows={2}
+              placeholder="مثال: العميل أبلغ عن مشكلة في عرض الأقساط المتأخرة، بنتحقق من بياناته"
+              className="mt-3 w-full rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-sm text-sidebar-foreground outline-none focus:ring-2 focus:ring-ring"
+            />
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={handleSupportAccess}
+                disabled={!supportReason.trim()}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                متابعة للعرض
+              </button>
+              <button
+                onClick={() => {
+                  setSupportTarget(null);
+                  setSupportReason("");
+                }}
+                className="rounded-md border border-sidebar-border px-4 py-2 text-sm font-bold text-sidebar-foreground hover:bg-sidebar-accent/40"
+              >
+                إلغاء
+              </button>
+            </div>
           </div>
         )}
 
@@ -338,6 +398,16 @@ function PlatformControlRoom() {
                             <RefreshCw className="h-3 w-3" />
                             تجديد ٣٠ يوم
                           </button>
+                          <button
+                            onClick={() => {
+                              setSupportTarget(tenant);
+                              setSupportReason("");
+                            }}
+                            className="flex items-center gap-1 rounded-md border border-sidebar-border px-2 py-1 text-xs font-bold text-sidebar-foreground hover:bg-sidebar-accent/40"
+                          >
+                            <Eye className="h-3 w-3" />
+                            دعم فني
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -358,11 +428,11 @@ function PlatformControlRoom() {
           </Panel>
         </div>
 
-        <div className="mt-6 rounded-2xl border-2 border-warning/40 bg-warning/10 p-5 text-sm font-bold text-sidebar-foreground/80">
-          ملاحظة صريحة: الحساب وكلمة السر المولّدان لعميل جديد يعملان فعلياً لتسجيل الدخول، لكن باقي
-          صفحات النظام (المبيعات، العملاء، المخزون، الخزينة...) لسه بتعرض بيانات المحل التجريبي فقط
-          لكل المستخدمين، لحد ما يتم فصل عزل البيانات لكل عميل فعلياً — خطوة تالية منفصلة، مش جزء من
-          هذه الشاشة.
+        <div className="mt-6 rounded-2xl border-2 border-sidebar-border bg-sidebar-accent/20 p-5 text-sm font-bold text-sidebar-foreground/80">
+          ملاحظة صريحة: كل محل جديد معزول فعلياً عن باقي المحلات (عملاؤه، منتجاته، مبيعاته، تقسيطه،
+          خزينته...) — تعديل بيانات محل واحد لا يظهر أبداً عند محل آخر. هذا العزل تطبيقي
+          (Application-layer) داخل طبقة الـMock الحالية؛ عند ربط Supabase حقيقي، لازم تفعيل RLS على
+          مستوى قاعدة البيانات كطبقة حماية ثانية، مش الاعتماد على هذا العزل وحده.
         </div>
       </main>
     </div>
