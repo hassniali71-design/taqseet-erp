@@ -133,9 +133,9 @@ function DeliveriesPage() {
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
 
-        <div className="mt-6 overflow-x-auto rounded-xl border border-border bg-card">
+        <div className="mt-6 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-right text-sm">
-            <thead className="border-b border-border text-xs text-muted-foreground">
+            <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">العميل</th>
                 <th className="px-4 py-3 font-medium">العنوان</th>

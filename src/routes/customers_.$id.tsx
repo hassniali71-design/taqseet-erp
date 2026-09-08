@@ -192,9 +192,9 @@ function CustomerDetailPage() {
             </form>
           )}
 
-          <div className="mt-3 overflow-x-auto rounded-xl border border-border bg-card">
+          <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
             <table className="w-full text-right text-sm">
-              <thead className="border-b border-border text-xs text-muted-foreground">
+              <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3 font-medium">الاسم</th>
                   <th className="px-4 py-3 font-medium">الهاتف</th>
@@ -225,9 +225,9 @@ function CustomerDetailPage() {
 
         <section className="mt-8">
           <h2 className="text-lg font-bold text-foreground">عقود التقسيط</h2>
-          <div className="mt-3 overflow-x-auto rounded-xl border border-border bg-card">
+          <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
             <table className="w-full text-right text-sm">
-              <thead className="border-b border-border text-xs text-muted-foreground">
+              <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3 font-medium">رقم العقد</th>
                   <th className="px-4 py-3 font-medium">الإجمالي</th>
@@ -271,9 +271,9 @@ function CustomerDetailPage() {
 
         <section className="mt-8">
           <h2 className="text-lg font-bold text-foreground">سجل المشتريات</h2>
-          <div className="mt-3 overflow-x-auto rounded-xl border border-border bg-card">
+          <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
             <table className="w-full text-right text-sm">
-              <thead className="border-b border-border text-xs text-muted-foreground">
+              <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3 font-medium">رقم الفاتورة</th>
                   <th className="px-4 py-3 font-medium">الإجمالي</th>

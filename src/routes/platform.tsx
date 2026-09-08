@@ -313,9 +313,9 @@ function PlatformControlRoom() {
             description="كل محل مشترك في المنصة — تفعيل/تعليق/تجديد الاشتراك"
             className="border-sidebar-border bg-sidebar-accent/20 [&_h2]:text-sidebar-foreground [&_p]:text-sidebar-foreground/70"
           >
-            <div className="overflow-x-auto">
+            <div className="max-h-[26rem] overflow-x-auto overflow-y-auto">
               <table className="w-full text-sm">
-                <thead>
+                <thead className="sticky top-0 z-10 bg-sidebar-accent/95">
                   <tr className="border-b border-sidebar-border text-right text-sidebar-foreground/60">
                     <th className="pb-2 font-extrabold">المحل</th>
                     <th className="pb-2 font-extrabold">المالك</th>

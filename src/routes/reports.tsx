@@ -129,9 +129,9 @@ function SalesReport({ from, to, tenantId }: { from: number; to: number; tenantI
           {total.toLocaleString("ar-EG")} ج.م
         </span>
       </p>
-      <div className="mt-3 overflow-x-auto rounded-xl border border-border bg-card">
+      <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
         <table className="w-full text-right text-sm">
-          <thead className="border-b border-border text-xs text-muted-foreground">
+          <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
             <tr>
               <th className="px-4 py-3 font-medium">رقم الفاتورة</th>
               <th className="px-4 py-3 font-medium">العميل</th>
@@ -176,9 +176,9 @@ function ContractsReport({ tenantId }: { tenantId: string }) {
 
   return (
     <section className="mt-6">
-      <div className="overflow-x-auto rounded-xl border border-border bg-card">
+      <div className="max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
         <table className="w-full text-right text-sm">
-          <thead className="border-b border-border text-xs text-muted-foreground">
+          <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
             <tr>
               <th className="px-4 py-3 font-medium">رقم العقد</th>
               <th className="px-4 py-3 font-medium">العميل</th>
@@ -296,9 +296,9 @@ function StatementReport({
               {balance.toLocaleString("ar-EG")} ج.م
             </span>
           </p>
-          <div className="mt-3 overflow-x-auto rounded-xl border border-border bg-card">
+          <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
             <table className="w-full text-right text-sm">
-              <thead className="border-b border-border text-xs text-muted-foreground">
+              <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3 font-medium">الحركة</th>
                   <th className="px-4 py-3 font-medium">المبلغ</th>
@@ -375,9 +375,9 @@ function SlowMovingReport({ from, to, tenantId }: { from: number; to: number; te
       <p className="text-sm text-muted-foreground">
         الكمية المباعة (نقدًا أو تقسيطًا) خلال الفترة المحددة أعلاه، مرتبة من الأقل للأكثر.
       </p>
-      <div className="mt-3 overflow-x-auto rounded-xl border border-border bg-card">
+      <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
         <table className="w-full text-right text-sm">
-          <thead className="border-b border-border text-xs text-muted-foreground">
+          <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
             <tr>
               <th className="px-4 py-3 font-medium">الجهاز</th>
               <th className="px-4 py-3 font-medium">الكمية المباعة</th>

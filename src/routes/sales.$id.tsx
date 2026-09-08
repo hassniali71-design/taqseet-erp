@@ -211,7 +211,7 @@ function SaleReceiptPage() {
           </div>
 
           <table className="mt-4 w-full text-right text-sm">
-            <thead className="border-b border-border text-xs text-muted-foreground">
+            <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
               <tr>
                 <th className="py-2 font-medium">الصنف</th>
                 <th className="py-2 font-medium">السيريال</th>
@@ -259,9 +259,9 @@ function SaleReceiptPage() {
         {returns.length > 0 && (
           <div className="mt-6">
             <h2 className="text-sm font-bold text-foreground">مرتجعات هذه الفاتورة</h2>
-            <div className="mt-3 overflow-x-auto rounded-xl border border-border bg-card">
+            <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
               <table className="w-full text-right text-sm">
-                <thead className="border-b border-border text-xs text-muted-foreground">
+                <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
                   <tr>
                     <th className="px-4 py-2 font-medium">رقم المرتجع</th>
                     <th className="px-4 py-2 font-medium">المبلغ المسترد</th>

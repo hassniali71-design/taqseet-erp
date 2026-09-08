@@ -39,6 +39,7 @@ import { Route as SalesIdRouteImport } from './routes/sales.$id'
 import { Route as SalesNewRouteImport } from './routes/sales.new'
 import { Route as SalesNewInstallmentRouteImport } from './routes/sales.new-installment'
 import { Route as SuppliersIdRouteImport } from './routes/suppliers_.$id'
+import { Route as PlatformSupportTenantIdRouteImport } from './routes/platform_.support.$tenantId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -190,6 +191,11 @@ const SuppliersIdRoute = SuppliersIdRouteImport.update({
   path: '/suppliers/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlatformSupportTenantIdRoute = PlatformSupportTenantIdRouteImport.update({
+  id: '/platform_/support/$tenantId',
+  path: '/platform/support/$tenantId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -222,6 +228,7 @@ export interface FileRoutesByFullPath {
   '/sales/new': typeof SalesNewRoute
   '/sales/new-installment': typeof SalesNewInstallmentRoute
   '/suppliers/$id': typeof SuppliersIdRoute
+  '/platform/support/$tenantId': typeof PlatformSupportTenantIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -254,6 +261,7 @@ export interface FileRoutesByTo {
   '/sales/new': typeof SalesNewRoute
   '/sales/new-installment': typeof SalesNewInstallmentRoute
   '/suppliers/$id': typeof SuppliersIdRoute
+  '/platform/support/$tenantId': typeof PlatformSupportTenantIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -287,6 +295,7 @@ export interface FileRoutesById {
   '/sales/new': typeof SalesNewRoute
   '/sales/new-installment': typeof SalesNewInstallmentRoute
   '/suppliers_/$id': typeof SuppliersIdRoute
+  '/platform_/support/$tenantId': typeof PlatformSupportTenantIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -321,6 +330,7 @@ export interface FileRouteTypes {
     | '/sales/new'
     | '/sales/new-installment'
     | '/suppliers/$id'
+    | '/platform/support/$tenantId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -353,6 +363,7 @@ export interface FileRouteTypes {
     | '/sales/new'
     | '/sales/new-installment'
     | '/suppliers/$id'
+    | '/platform/support/$tenantId'
   id:
     | '__root__'
     | '/'
@@ -385,6 +396,7 @@ export interface FileRouteTypes {
     | '/sales/new'
     | '/sales/new-installment'
     | '/suppliers_/$id'
+    | '/platform_/support/$tenantId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -418,6 +430,7 @@ export interface RootRouteChildren {
   SalesNewRoute: typeof SalesNewRoute
   SalesNewInstallmentRoute: typeof SalesNewInstallmentRoute
   SuppliersIdRoute: typeof SuppliersIdRoute
+  PlatformSupportTenantIdRoute: typeof PlatformSupportTenantIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -632,6 +645,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SuppliersIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/platform_/support/$tenantId': {
+      id: '/platform_/support/$tenantId'
+      path: '/platform/support/$tenantId'
+      fullPath: '/platform/support/$tenantId'
+      preLoaderRoute: typeof PlatformSupportTenantIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -666,6 +686,7 @@ const rootRouteChildren: RootRouteChildren = {
   SalesNewRoute: SalesNewRoute,
   SalesNewInstallmentRoute: SalesNewInstallmentRoute,
   SuppliersIdRoute: SuppliersIdRoute,
+  PlatformSupportTenantIdRoute: PlatformSupportTenantIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
