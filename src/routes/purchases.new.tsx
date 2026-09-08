@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { AppHeader } from "@/components/AppHeader";
+import { AppSidebar } from "@/components/AppSidebar";
 import { createPurchase, getProducts, getSuppliers } from "@/lib/data-store";
 import { useRequireSession } from "@/hooks/use-session";
 
@@ -118,9 +118,9 @@ function NewPurchasePage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <AppHeader session={session} />
-      <main className="mx-auto max-w-5xl px-4 py-8">
+    <div className="flex min-h-screen bg-background">
+      <AppSidebar session={session} />
+      <main className="flex-1 mx-auto max-w-5xl px-4 py-8">
         <h1 className="text-2xl font-bold text-foreground">أمر شراء جديد</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           §61-§64 — الاستلام هنا فوري: تأكيد الأمر يحدّث المخزون وينشئ السيريالات المطلوبة مباشرة.

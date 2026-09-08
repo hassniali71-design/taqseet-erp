@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
-import { AppHeader } from "@/components/AppHeader";
+import { AppSidebar } from "@/components/AppSidebar";
 import { getPurchases, getTenants, subscribeData } from "@/lib/data-store";
 import { useRequireSession } from "@/hooks/use-session";
 
@@ -23,9 +23,9 @@ function PurchaseReceiptPage() {
 
   if (!purchase) {
     return (
-      <div className="min-h-screen bg-background">
-        <AppHeader session={session} />
-        <main className="mx-auto max-w-2xl px-4 py-8 text-center text-muted-foreground">
+      <div className="flex min-h-screen bg-background">
+        <AppSidebar session={session} />
+        <main className="flex-1 mx-auto max-w-2xl px-4 py-8 text-center text-muted-foreground">
           أمر الشراء غير موجود.{" "}
           <Link to="/purchases/new" className="text-primary hover:underline">
             أمر شراء جديد
@@ -36,9 +36,9 @@ function PurchaseReceiptPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <AppHeader session={session} />
-      <main className="mx-auto max-w-2xl px-4 py-8">
+    <div className="flex min-h-screen bg-background">
+      <AppSidebar session={session} />
+      <main className="flex-1 mx-auto max-w-2xl px-4 py-8">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-foreground">أمر شراء</h1>
           <Link

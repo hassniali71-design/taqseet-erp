@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
-import { AppHeader } from "@/components/AppHeader";
+import { AppSidebar } from "@/components/AppSidebar";
 import {
   createInstallmentPlan,
   getCurrentTenantSettings,
@@ -94,9 +94,9 @@ function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <AppHeader session={session} />
-      <main className="mx-auto max-w-3xl px-4 py-8">
+    <div className="flex min-h-screen bg-background">
+      <AppSidebar session={session} />
+      <main className="flex-1 mx-auto max-w-3xl px-4 py-8">
         <h1 className="text-2xl font-bold text-foreground">الإعدادات</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           هذه الإعدادات تُستخدم عبر المراحل القادمة (تقسيط، مرتجعات، ائتمان). أي تعديل هنا مستقبلًا

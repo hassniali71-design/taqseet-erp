@@ -71,11 +71,11 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "تقسيط — ERP لمحلات الأجهزة الكهربائية" },
+      { title: "حسبة — نظام إدارة محلات الأجهزة الكهربائية والتقسيط" },
       {
         name: "description",
         content:
-          "نظام ERP SaaS متعدد المستأجرين لمحلات الأجهزة الكهربائية والمنزلية، يدير البيع النقدي والتقسيط والمخزون والتحصيل والمحاسبة.",
+          "حسبة (HESBA): نظام ERP SaaS متعدد المستأجرين لمحلات الأجهزة الكهربائية والمنزلية، يدير البيع النقدي والتقسيط والمخزون والتحصيل والمحاسبة.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

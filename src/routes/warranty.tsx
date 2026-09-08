@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { AppHeader } from "@/components/AppHeader";
+import { AppSidebar } from "@/components/AppSidebar";
 import { getWarrantyInfo } from "@/lib/data-store";
 import { useRequireSession } from "@/hooks/use-session";
 import type { WarrantyInfo } from "@/lib/data-store";
@@ -22,9 +22,9 @@ function WarrantyPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <AppHeader session={session} />
-      <main className="mx-auto max-w-2xl px-4 py-8">
+    <div className="flex min-h-screen bg-background">
+      <AppSidebar session={session} />
+      <main className="flex-1 mx-auto max-w-2xl px-4 py-8">
         <h1 className="text-2xl font-bold text-foreground">الضمان</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           §86 — للقراءة فقط، محسوب من تاريخ البيع (نقدي أو تقسيط) + مدة ضمان المنتج، بدون أي كيان

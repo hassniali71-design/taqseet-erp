@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { AppHeader } from "@/components/AppHeader";
+import { AppSidebar } from "@/components/AppSidebar";
 import {
   collectPayment,
   getCurrentTenantSettings,
@@ -132,9 +132,9 @@ function CollectionsWorkbenchPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <AppHeader session={session} />
-      <main className="mx-auto max-w-5xl px-4 py-8">
+    <div className="flex min-h-screen bg-background">
+      <AppSidebar session={session} />
+      <main className="flex-1 mx-auto max-w-5xl px-4 py-8">
         <h1 className="text-2xl font-bold text-foreground">مركز التحصيل</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           §52 — التوزيع الافتراضي على أقدم قسط مستحق أولًا (§46). إيصال التحصيل مرقّم تلقائيًا ولا

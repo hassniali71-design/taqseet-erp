@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
-import { AppHeader } from "@/components/AppHeader";
+import { AppSidebar } from "@/components/AppSidebar";
 import {
   getCustomers,
   getInstallmentContracts,
@@ -49,9 +49,9 @@ function ReportsPage() {
   const to = new Date(toDate).getTime() + 24 * 60 * 60 * 1000 - 1;
 
   return (
-    <div className="min-h-screen bg-background">
-      <AppHeader session={session} />
-      <main className="mx-auto max-w-5xl px-4 py-8">
+    <div className="flex min-h-screen bg-background">
+      <AppSidebar session={session} />
+      <main className="flex-1 mx-auto max-w-5xl px-4 py-8">
         <h1 className="text-2xl font-bold text-foreground">التقارير</h1>
 
         <div className="mt-4 flex flex-wrap gap-2">

@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
+import { Logo } from "@/components/Logo";
 import { getSession } from "@/lib/data-store";
 
 export const Route = createFileRoute("/")({
@@ -18,18 +19,37 @@ function HomePage() {
   }, []);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background px-4 text-center">
-      <h1 className="text-3xl font-bold text-foreground">تقسيط — ERP لمحلات الأجهزة الكهربائية</h1>
-      <p className="max-w-lg text-sm text-muted-foreground">
-        المشروع في مرحلة التأسيس (Phase 0). سكافولد التقنية جاهز — الشاشات والمنطق التجاري سيُبنى
-        على مراحل متتالية بدءًا من Auth وTenants وRLS.
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background px-4 text-center">
+      <Logo className="flex-col items-center text-foreground [&_span:first-child]:text-3xl" />
+      <h1 className="mt-2 text-2xl font-extrabold text-foreground">أهلاً بكم في منصة حسبة</h1>
+      <p className="max-w-lg text-sm font-bold text-muted-foreground">
+        نظام إدارة ذكي لمحلات الأجهزة الكهربائية والتقسيط — مبيعات، تقسيط وتحصيل، مخزون بسيريالات،
+        مشتريات وموردون، خزينة ومحاسبة تلقائية، وتقارير حيّة، في مكان واحد.
       </p>
-      <Link
-        to={hasSession ? "/dashboard" : "/login"}
-        className="mt-2 inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-      >
-        {hasSession ? "الذهاب للوحة التحكم" : "تسجيل الدخول"}
-      </Link>
+
+      {hasSession ? (
+        <Link
+          to="/dashboard"
+          className="mt-2 inline-flex items-center justify-center rounded-md bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          الذهاب للوحة التحكم
+        </Link>
+      ) : (
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-3">
+          <Link
+            to="/login"
+            className="inline-flex items-center justify-center rounded-md bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            دخول العملاء
+          </Link>
+          <Link
+            to="/platform/login"
+            className="inline-flex items-center justify-center rounded-md border border-input bg-background px-5 py-2.5 text-sm font-bold text-foreground transition-colors hover:bg-accent"
+          >
+            دخول مشغّلي المنصة
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

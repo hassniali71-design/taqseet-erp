@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
-import { AppHeader } from "@/components/AppHeader";
+import { AppSidebar } from "@/components/AppSidebar";
 import {
   advanceDeliveryStatus,
   getDeliveryOrders,
@@ -77,9 +77,9 @@ function DeliveriesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <AppHeader session={session} />
-      <main className="mx-auto max-w-4xl px-4 py-8">
+    <div className="flex min-h-screen bg-background">
+      <AppSidebar session={session} />
+      <main className="flex-1 mx-auto max-w-4xl px-4 py-8">
         <h1 className="text-2xl font-bold text-foreground">التوصيل</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           §84 — خدمة توصيل منفصلة تمامًا عن قيمة البيع أو التقسيط، لا تؤثر على أي منهما.

@@ -30,6 +30,7 @@ import { Route as WarrantyRouteImport } from './routes/warranty'
 import { Route as ContractsIdRouteImport } from './routes/contracts_.$id'
 import { Route as CustomersIdRouteImport } from './routes/customers_.$id'
 import { Route as ExchangesNewRouteImport } from './routes/exchanges.new'
+import { Route as PlatformLoginRouteImport } from './routes/platform.login'
 import { Route as ProductsIdRouteImport } from './routes/products_.$id'
 import { Route as PurchasesIdRouteImport } from './routes/purchases.$id'
 import { Route as PurchasesNewRouteImport } from './routes/purchases.new'
@@ -143,6 +144,11 @@ const ExchangesNewRoute = ExchangesNewRouteImport.update({
   path: '/exchanges/new',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlatformLoginRoute = PlatformLoginRouteImport.update({
+  id: '/platform/login',
+  path: '/platform/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProductsIdRoute = ProductsIdRouteImport.update({
   id: '/products_/$id',
   path: '/products/$id',
@@ -201,6 +207,7 @@ export interface FileRoutesByFullPath {
   '/contracts/$id': typeof ContractsIdRoute
   '/customers/$id': typeof CustomersIdRoute
   '/exchanges/new': typeof ExchangesNewRoute
+  '/platform/login': typeof PlatformLoginRoute
   '/products/$id': typeof ProductsIdRoute
   '/purchases/$id': typeof PurchasesIdRoute
   '/purchases/new': typeof PurchasesNewRoute
@@ -231,6 +238,7 @@ export interface FileRoutesByTo {
   '/contracts/$id': typeof ContractsIdRoute
   '/customers/$id': typeof CustomersIdRoute
   '/exchanges/new': typeof ExchangesNewRoute
+  '/platform/login': typeof PlatformLoginRoute
   '/products/$id': typeof ProductsIdRoute
   '/purchases/$id': typeof PurchasesIdRoute
   '/purchases/new': typeof PurchasesNewRoute
@@ -262,6 +270,7 @@ export interface FileRoutesById {
   '/contracts_/$id': typeof ContractsIdRoute
   '/customers_/$id': typeof CustomersIdRoute
   '/exchanges/new': typeof ExchangesNewRoute
+  '/platform/login': typeof PlatformLoginRoute
   '/products_/$id': typeof ProductsIdRoute
   '/purchases/$id': typeof PurchasesIdRoute
   '/purchases/new': typeof PurchasesNewRoute
@@ -294,6 +303,7 @@ export interface FileRouteTypes {
     | '/contracts/$id'
     | '/customers/$id'
     | '/exchanges/new'
+    | '/platform/login'
     | '/products/$id'
     | '/purchases/$id'
     | '/purchases/new'
@@ -324,6 +334,7 @@ export interface FileRouteTypes {
     | '/contracts/$id'
     | '/customers/$id'
     | '/exchanges/new'
+    | '/platform/login'
     | '/products/$id'
     | '/purchases/$id'
     | '/purchases/new'
@@ -354,6 +365,7 @@ export interface FileRouteTypes {
     | '/contracts_/$id'
     | '/customers_/$id'
     | '/exchanges/new'
+    | '/platform/login'
     | '/products_/$id'
     | '/purchases/$id'
     | '/purchases/new'
@@ -385,6 +397,7 @@ export interface RootRouteChildren {
   ContractsIdRoute: typeof ContractsIdRoute
   CustomersIdRoute: typeof CustomersIdRoute
   ExchangesNewRoute: typeof ExchangesNewRoute
+  PlatformLoginRoute: typeof PlatformLoginRoute
   ProductsIdRoute: typeof ProductsIdRoute
   PurchasesIdRoute: typeof PurchasesIdRoute
   PurchasesNewRoute: typeof PurchasesNewRoute
@@ -543,6 +556,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ExchangesNewRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/platform/login': {
+      id: '/platform/login'
+      path: '/platform/login'
+      fullPath: '/platform/login'
+      preLoaderRoute: typeof PlatformLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/products_/$id': {
       id: '/products_/$id'
       path: '/products/$id'
@@ -617,6 +637,7 @@ const rootRouteChildren: RootRouteChildren = {
   ContractsIdRoute: ContractsIdRoute,
   CustomersIdRoute: CustomersIdRoute,
   ExchangesNewRoute: ExchangesNewRoute,
+  PlatformLoginRoute: PlatformLoginRoute,
   ProductsIdRoute: ProductsIdRoute,
   PurchasesIdRoute: PurchasesIdRoute,
   PurchasesNewRoute: PurchasesNewRoute,

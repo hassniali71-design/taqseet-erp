@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
-import { AppHeader } from "@/components/AppHeader";
+import { AppSidebar } from "@/components/AppSidebar";
 import { getNotifications, subscribeData } from "@/lib/data-store";
 import { useRequireSession } from "@/hooks/use-session";
 import type { AppNotification } from "@/lib/data-store";
@@ -41,9 +41,9 @@ function NotificationsPage() {
   const notifications = getNotifications();
 
   return (
-    <div className="min-h-screen bg-background">
-      <AppHeader session={session} />
-      <main className="mx-auto max-w-3xl px-4 py-8">
+    <div className="flex min-h-screen bg-background">
+      <AppSidebar session={session} />
+      <main className="flex-1 mx-auto max-w-3xl px-4 py-8">
         <h1 className="text-2xl font-bold text-foreground">الإشعارات</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           §92 — كل إشعار هنا مُشتق من البيانات وقت العرض (بدون تخزين أو حالة "مقروء")، مفيش أي إرسال

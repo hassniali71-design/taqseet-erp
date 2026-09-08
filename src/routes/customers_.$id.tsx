@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 
-import { AppHeader } from "@/components/AppHeader";
+import { AppSidebar } from "@/components/AppSidebar";
 import {
   createGuarantor,
   getCustomerExposure,
@@ -34,9 +34,9 @@ function CustomerDetailPage() {
   const customer = getCustomers().find((c) => c.id === id);
   if (!customer) {
     return (
-      <div className="min-h-screen bg-background">
-        <AppHeader session={session} />
-        <main className="mx-auto max-w-5xl px-4 py-8 text-center text-muted-foreground">
+      <div className="flex min-h-screen bg-background">
+        <AppSidebar session={session} />
+        <main className="flex-1 mx-auto max-w-5xl px-4 py-8 text-center text-muted-foreground">
           العميل غير موجود.{" "}
           <Link to="/customers" className="text-primary hover:underline">
             العودة للعملاء
@@ -74,9 +74,9 @@ function CustomerDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <AppHeader session={session} />
-      <main className="mx-auto max-w-5xl px-4 py-8">
+    <div className="flex min-h-screen bg-background">
+      <AppSidebar session={session} />
+      <main className="flex-1 mx-auto max-w-5xl px-4 py-8">
         <Link to="/customers" className="text-xs text-muted-foreground hover:underline">
           ← كل العملاء
         </Link>

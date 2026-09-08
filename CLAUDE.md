@@ -1,4 +1,4 @@
-# تقسيط (taqseet-erp) — سياق المشروع لجلسات Claude Code القادمة
+# حسبة (HESBA) — taqseet-erp — سياق المشروع لجلسات Claude Code القادمة
 
 اقرأ هذا الملف كاملًا، ثم `docs/ERP_SaaS_Requirements.md` (المواصفة الكاملة، 134 قسم، المرجع الملزم الوحيد) قبل أي تعديل.
 
@@ -24,6 +24,19 @@ bun run lint
 **قاعدة عامة تنطبق على كل ما هو موجود حاليًا:** كل شيء مبني على **Mock data-store** (`src/lib/data-store.ts`، localStorage + subscribe/emit). لا يوجد اتصال Supabase حقيقي بعد (بانتظار بيانات اعتماد المستخدم في `.env`، انظر `.env.example`). كل الجداول/الحقول مطابقة بالاسم لـ`docs/ERP_SaaS_Requirements.md §118` و`supabase/migrations/*.sql` — الانتقال لاحقًا **drop-in replacement** لأجسام الدوال في `data-store.ts`، مش إعادة بناء. **⚠️ طالما البيانات Mock، لا Phase "جاهزة للإنتاج" بمعايير §134** — RLS/Tenant isolation/Server-side authorization الحقيقيين (§133) لا يتحققوا إلا بعد ربط Supabase فعليًا.
 
 **بيانات الدخول التجريبية:** `owner@demo.local` / `owner123` (نظام دخول Mock بحت في `signIn`/`getSession`/`signOut`، سيُستبدل بالكامل بـSupabase Auth الحقيقي عند توفره — ليس قبل ذلك).
+
+### الهوية البصرية — "حسبة" (HESBA)
+
+المشروع بقى له هوية بصرية معتمدة (اسم/ألوان/شعار)، مطبّقة فعليًا على الكود — **مستقلة تمامًا عن حالة الفيتشرز** (تعديل هوية بحت، لا يمس أي منطق أعمال):
+
+- **الألوان** (`src/styles.css`، `:root`): ذهبي `#D4AA17` (`--primary`)، كحلي `#1B2A41` (`--sidebar`)، تركواز `#16A3B0` (`--secondary`/`--ring`)، كريمي `#F3EFE7` (`--background`)، أسود `#111417` (`--foreground`). **لا تُرجع لأي لون افتراضي (oklch الرمادي القديم) بدون سبب موثّق.**
+- **الشعار**: `src/components/Logo.tsx` (`Logo` = أيقونة+وردمارك "حسبة/HESBA"، `LogoIcon` = أيقونة فقط) — SVG مرسوم بالكود (آلة حاسبة + شريط ذهبي/تركواز)، مش صورة مستوردة. مُستخدم في: `/` (الصفحة الرئيسية)، `/login`، `/platform/login`، وأعلى الشريط الجانبي (`AppSidebar`).
+- **القوائم**: تحوّلت من شريط علوي أفقي إلى **شريط جانبي رأسي على اليمين** (`src/components/AppSidebar.tsx`، بديل `AppHeader.tsx` القديم اللي اتحذف) — 20 عنصر نفس السابق لكن مُجمّعين في 8 أقسام منطقية (الرئيسية/المبيعات والعملاء/التقسيط والتحصيل/المخزون/المشتريات والموردون/المالية/ما بعد البيع/الإدارة) مع أيقونة `lucide-react` لكل عنصر. التطبيق ميكانيكي وموحّد عبر كل الـ26 route: الحاوية الخارجية `flex min-h-screen bg-background`، و`<main className="flex-1 mx-auto max-w-...">` — الشريط أول عنصر DOM فيظهر على اليمين تلقائيًا لأن `dir="rtl"` على `<html>`.
+- **بوابتا دخول منفصلتان بصريًا** (لسه بيستخدموا نفس `signIn` تقنيًا — الفصل الوظيفي الحقيقي بين Platform Owner والعملاء هو **Phase 9** ولسه ما بدأش):
+  - `/login` — دخول العملاء (خلفية كريمي فاتحة)، رسالة ترحيب "أهلاً بكم في منصة حسبة لإدارة محلات الأجهزة الكهربائية والتقسيط".
+  - `/platform/login` — دخول مشغّلي المنصة (خلفية كحلي داكنة، نفس الشعار)، فيها ملاحظة صريحة إن إدارة العملاء (Tenants) الفعلية "قريباً" — **لسه مش موصولة بأي منطق Platform Owner حقيقي**، مجرد شكل/هوية تمهيدًا لـPhase 9.
+  - `/` — صفحة رئيسية بسيطة بالشعار والترحيب + زرارين يوديوا للبوابتين.
+- **الخط**: Tajawal (لم يتغيّر). **لا تضف مكتبة أيقونات/تصميم جديدة** — `lucide-react` (موجودة بالفعل) كافية لكل الاحتياج الحالي.
 
 ### منفّذ فعليًا (مبني، مُختبر بمتصفح حقيقي عبر Playwright، Build/Lint/tsc نظيفين)
 
@@ -51,9 +64,9 @@ bun run lint
   - **Inventory Ledger فعلي (§29):** `InventoryMovement`، `getProductStock` هو المصدر الوحيد للكمية (سيريال: عدّ `available`؛ غير سيريال: مجموع الحركات) — **لا يوجد حقل كمية منفصل في أي مكان، لا تضِف واحدًا**.
   - الناقص عمدًا: Categories/Brands ككيانات منفصلة (استُبدلت بحقول نص حر بسيطة — قرار تبسيط متعمد، مذكور في تعليق `Product` بـ`types/index.ts`)، Multiple Units، تسعير خاص بعميل.
 - **بنية مشتركة يُعاد استخدامها في كل صفحة محمية جديدة (لا تخترع نمطًا موازيًا):**
-  - `src/components/AppHeader.tsx` — Nav + Sign out.
+  - `src/components/AppSidebar.tsx` — الشريط الجانبي (Nav مجمّع بأقسام + Sign out) — بديل `AppHeader.tsx` القديم (انظر قسم الهوية البصرية أعلاه).
   - `src/hooks/use-session.ts` — `useSession`/`useRequireSession` (نمط SSR-آمن لقراءة الجلسة).
-  - نمط الصفحة القياسي: `useRequireSession()` → `if (!session) return null` → استخراج `actorUserId`/`tenantId` كمتغيرات منفصلة (تفادي مشكلة TS closure narrowing) → `<AppHeader session={session} />` + محتوى الصفحة.
+  - نمط الصفحة القياسي: `useRequireSession()` → `if (!session) return null` → استخراج `actorUserId`/`tenantId` كمتغيرات منفصلة (تفادي مشكلة TS closure narrowing) → الحاوية `<div className="flex min-h-screen bg-background">` → `<AppSidebar session={session} />` + `<main className="flex-1 mx-auto max-w-...">محتوى الصفحة</main>`.
   - **⚠️ ملاحظة راوتنج مهمة (باگ حقيقي اتصلح في Phase 2):** لو عندك صفحة قائمة `foo.tsx` ومحتاج صفحة تفاصيل ديناميكية `/foo/$id`، **لازم** تسمي الملف `foo_.$id.tsx` (شرطة تحتية `_` قبل النقطة) — مش `foo.$id.tsx`. من غيرها، TanStack Router بيعتبر `foo.tsx` Layout ضمني للـ`$id` (لازم `<Outlet/>` فيه)، فالـURL يتغير بس المحتوى يفضل صفحة القائمة (باگ صامت، اتسبب فيه ولاحظته بس بمتصفح فعلي). طبّق ده على `/customers/$id`، `/contracts/$id`، إلخ في الـPhases الجاية.
 - **Phase 4 — Installments (الأعقد، أهم فيتشر في المنتج) — منفّذة بالكامل:**
   - `src/lib/finance-engine.ts` — دالتان نقيتان (لا I/O، لا اعتماد على `data-store.ts`): `calculateFinance(principal, ratePct)` (§37: `Finance = Principal × Rate` مرة واحدة، غير مركّب) و`generateSchedule(totalAmount, durationMonths, startDate?)` (§41: تواريخ استحقاق شهرية ثابتة، القسط الأخير يمتص فرق التقريب). **أول اختبار حقيقي في المشروع:** `scripts/verify-finance-engine.ts` (`bun run scripts/verify-finance-engine.ts`) يتحقق من مثال القبول في §128 حرفيًا (15,000@40%/12 شهر = 21,000 إجمالي / 12×1,750) + حالة أرقام غير مضبوطة (تقريب). أي تعديل على `finance-engine.ts` لازم يعيد تشغيل السكريبت ده قبل الثقة فيه.

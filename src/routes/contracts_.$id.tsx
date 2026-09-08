@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 
-import { AppHeader } from "@/components/AppHeader";
+import { AppSidebar } from "@/components/AppSidebar";
 import {
   collectPayment,
   earlySettleContract,
@@ -85,9 +85,9 @@ function ContractDetailPage() {
 
   if (!contract) {
     return (
-      <div className="min-h-screen bg-background">
-        <AppHeader session={session} />
-        <main className="mx-auto max-w-3xl px-4 py-8 text-center text-muted-foreground">
+      <div className="flex min-h-screen bg-background">
+        <AppSidebar session={session} />
+        <main className="flex-1 mx-auto max-w-3xl px-4 py-8 text-center text-muted-foreground">
           العقد غير موجود.{" "}
           <Link to="/sales/new-installment" className="text-primary hover:underline">
             عقد تقسيط جديد
@@ -202,9 +202,9 @@ function ContractDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <AppHeader session={session} />
-      <main className="mx-auto max-w-4xl px-4 py-8">
+    <div className="flex min-h-screen bg-background">
+      <AppSidebar session={session} />
+      <main className="flex-1 mx-auto max-w-4xl px-4 py-8">
         <Link to="/customers" className="text-xs text-muted-foreground hover:underline">
           ← كل العملاء
         </Link>

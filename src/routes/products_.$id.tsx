@@ -1,7 +1,7 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 
-import { AppHeader } from "@/components/AppHeader";
+import { AppSidebar } from "@/components/AppSidebar";
 import {
   getInventoryMovements,
   getProductSerials,
@@ -62,9 +62,9 @@ function ProductDetailPage() {
   const product = getProducts().find((p) => p.id === id);
   if (!product) {
     return (
-      <div className="min-h-screen bg-background">
-        <AppHeader session={session} />
-        <main className="mx-auto max-w-5xl px-4 py-8 text-center text-muted-foreground">
+      <div className="flex min-h-screen bg-background">
+        <AppSidebar session={session} />
+        <main className="flex-1 mx-auto max-w-5xl px-4 py-8 text-center text-muted-foreground">
           المنتج غير موجود.{" "}
           <Link to="/products" className="text-primary hover:underline">
             العودة للأجهزة
@@ -120,9 +120,9 @@ function ProductDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <AppHeader session={session} />
-      <main className="mx-auto max-w-5xl px-4 py-8">
+    <div className="flex min-h-screen bg-background">
+      <AppSidebar session={session} />
+      <main className="flex-1 mx-auto max-w-5xl px-4 py-8">
         <Link to="/products" className="text-xs text-muted-foreground hover:underline">
           ← كل الأجهزة
         </Link>
