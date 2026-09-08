@@ -4,8 +4,12 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import {
   createProduct,
+  getProductBrands,
+  getProductCategories,
   getProductStock,
   getProducts,
+  registerProductBrand,
+  registerProductCategory,
   subscribeData,
   updateProduct,
 } from "@/lib/data-store";
@@ -65,6 +69,8 @@ function ProductsPage() {
   const actorUserId = session.user_id;
 
   const products = getProducts(session.tenant_id);
+  const categories = getProductCategories(session.tenant_id).filter((c) => c.active);
+  const brands = getProductBrands(session.tenant_id).filter((b) => b.active);
 
   function startCreate() {
     setForm(EMPTY_FORM);
@@ -91,6 +97,8 @@ function ProductsPage() {
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (form.brand.trim()) registerProductBrand(form.brand.trim(), actorUserId);
+    if (form.category.trim()) registerProductCategory(form.category.trim(), actorUserId);
     const payload = {
       name: form.name.trim(),
       ...(form.brand.trim() && { brand: form.brand.trim() }),
@@ -153,10 +161,16 @@ function ProductsPage() {
               </Field>
               <Field label="الماركة">
                 <input
+                  list="brand-options"
                   value={form.brand}
                   onChange={(e) => setForm({ ...form, brand: e.target.value })}
                   className="form-input"
                 />
+                <datalist id="brand-options">
+                  {brands.map((b) => (
+                    <option key={b.id} value={b.name} />
+                  ))}
+                </datalist>
               </Field>
               <Field label="الموديل">
                 <input
@@ -167,11 +181,17 @@ function ProductsPage() {
               </Field>
               <Field label="الفئة">
                 <input
+                  list="category-options"
                   value={form.category}
                   onChange={(e) => setForm({ ...form, category: e.target.value })}
                   className="form-input"
                   placeholder="ثلاجات، غسالات، ..."
                 />
+                <datalist id="category-options">
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.name} />
+                  ))}
+                </datalist>
               </Field>
               <Field label="الوحدة">
                 <input

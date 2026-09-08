@@ -151,13 +151,35 @@ export interface Guarantor {
   created_at: string;
 }
 
+/** §19/§118 "simple addable list": Owner-managed collections behind the brand/category
+ * `<datalist>` in the Products form — real rows (addable from the form itself, deactivatable
+ * from /settings), not scraped from whatever past products happened to use. `Product.brand`/
+ * `Product.category` deliberately stay plain strings rather than becoming foreign keys — a
+ * fully normalized relation is real Supabase-connected work, not worth it over Mock; the UI
+ * auto-registers any newly typed value here so it's offered again next time. §20 governance:
+ * no hard delete, `active` only. */
+export interface ProductCategory {
+  id: string;
+  tenant_id: string;
+  name: string;
+  active: boolean;
+  created_at: string;
+}
+
+export interface ProductBrand {
+  id: string;
+  tenant_id: string;
+  name: string;
+  active: boolean;
+  created_at: string;
+}
+
 /**
- * §19 Product Master — lean subset for this demo increment. `brand`/`model`/`category` are
- * plain text (with a `<datalist>` of previously-used values in the UI as the "simple
- * addable list" §19/§118 asks for, deliberately not a normalized `brands`/
- * `product_categories` table — that promotion is real Supabase-connected work, not worth it
- * over Mock). Missing on purpose: Multiple Units (§23), customer-specific pricing (§25).
- * §20 governance: no hard delete — `active` is the only way a product is retired.
+ * §19 Product Master — lean subset for this demo increment. `model` stays plain text (makes
+ * and models vary too much to gain from a managed list the way brand/category do, see
+ * `ProductCategory`/`ProductBrand` above). Missing on purpose: Multiple Units (§23),
+ * customer-specific pricing (§25). §20 governance: no hard delete — `active` is the only way
+ * a product is retired.
  *
  * Serial Number Management (§21) and Inventory Ledger (§29) are real as of Phase 2 — see
  * `ProductSerial` and `InventoryMovement` below, and `receiveStock`/`getProductStock` in

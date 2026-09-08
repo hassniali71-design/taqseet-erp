@@ -17,6 +17,8 @@ import type {
   Permission,
   PromiseToPay,
   Product,
+  ProductBrand,
+  ProductCategory,
   ProductSerial,
   Purchase,
   PurchaseItem,
@@ -68,6 +70,8 @@ const KEYS = {
   session: `${STORAGE_PREFIX}.session.v1`,
   customers: `${STORAGE_PREFIX}.customers.v1`,
   products: `${STORAGE_PREFIX}.products.v1`,
+  productCategories: `${STORAGE_PREFIX}.product_categories.v1`,
+  productBrands: `${STORAGE_PREFIX}.product_brands.v1`,
   productSerials: `${STORAGE_PREFIX}.product_serials.v1`,
   inventoryMovements: `${STORAGE_PREFIX}.inventory_movements.v1`,
   guarantors: `${STORAGE_PREFIX}.guarantors.v1`,
@@ -393,6 +397,30 @@ function seedProducts(): Product[] {
   ];
 }
 
+/** §19/§118 — seeded to match the demo products' existing category/brand text exactly, so the
+ * datalist has real entries from day one instead of only growing as new products get typed. */
+function seedProductCategories(): ProductCategory[] {
+  const now = new Date().toISOString();
+  return ["ثلاجات", "غسالات", "إكسسوارات"].map((name, i) => ({
+    id: `cat_demo_${i + 1}`,
+    tenant_id: DEMO_TENANT_ID,
+    name,
+    active: true,
+    created_at: now,
+  }));
+}
+
+function seedProductBrands(): ProductBrand[] {
+  const now = new Date().toISOString();
+  return ["Toshiba", "Samsung", "Generic"].map((name, i) => ({
+    id: `brand_demo_${i + 1}`,
+    tenant_id: DEMO_TENANT_ID,
+    name,
+    active: true,
+    created_at: now,
+  }));
+}
+
 /** Sequential human-friendly codes (e.g. `CUST-0003`) from the current row count — fine for a
  * single-tenant Mock demo; a real Phase 2/3 numbering scheme (§91) is tenant-wide and
  * server-generated. */
@@ -655,6 +683,14 @@ export function getCustomers(tenantId?: string): Customer[] {
 
 export function getProducts(tenantId?: string): Product[] {
   return scopeToTenant(readCollection(KEYS.products, seedProducts), tenantId);
+}
+
+export function getProductCategories(tenantId?: string): ProductCategory[] {
+  return scopeToTenant(readCollection(KEYS.productCategories, seedProductCategories), tenantId);
+}
+
+export function getProductBrands(tenantId?: string): ProductBrand[] {
+  return scopeToTenant(readCollection(KEYS.productBrands, seedProductBrands), tenantId);
 }
 
 export function getProductSerials(tenantId?: string): ProductSerial[] {
@@ -1322,6 +1358,112 @@ export function updateCustomer(
 }
 
 /* ---------------- Products (§19 — lean subset, see src/types/index.ts) ---------------- */
+
+/** Idempotent: returns the existing row (case/whitespace-insensitive match) instead of a
+ * duplicate if this name is already registered for the tenant — this is what lets the
+ * Products form call it on every submit without piling up near-duplicate categories. */
+export function registerProductCategory(name: string, actorUserId: string | null): ProductCategory {
+  const trimmed = name.trim();
+  const existing = getProductCategories();
+  const match = existing.find(
+    (c) =>
+      c.tenant_id === getCurrentTenantId() && c.name.trim().toLowerCase() === trimmed.toLowerCase(),
+  );
+  if (match) return match;
+  const row: ProductCategory = {
+    id: genId("cat"),
+    tenant_id: getCurrentTenantId(),
+    name: trimmed,
+    active: true,
+    created_at: new Date().toISOString(),
+  };
+  writeCollection(KEYS.productCategories, [...existing, row]);
+  recordAudit({
+    tenant_id: row.tenant_id,
+    user_id: actorUserId,
+    action: "product_category.create",
+    entity: "product_categories",
+    entity_id: row.id,
+    new_value: row,
+  });
+  return row;
+}
+
+export function registerProductBrand(name: string, actorUserId: string | null): ProductBrand {
+  const trimmed = name.trim();
+  const existing = getProductBrands();
+  const match = existing.find(
+    (b) =>
+      b.tenant_id === getCurrentTenantId() && b.name.trim().toLowerCase() === trimmed.toLowerCase(),
+  );
+  if (match) return match;
+  const row: ProductBrand = {
+    id: genId("brand"),
+    tenant_id: getCurrentTenantId(),
+    name: trimmed,
+    active: true,
+    created_at: new Date().toISOString(),
+  };
+  writeCollection(KEYS.productBrands, [...existing, row]);
+  recordAudit({
+    tenant_id: row.tenant_id,
+    user_id: actorUserId,
+    action: "product_brand.create",
+    entity: "product_brands",
+    entity_id: row.id,
+    new_value: row,
+  });
+  return row;
+}
+
+/** §20 governance: no hard delete — Owner can only retire a category/brand from being offered
+ * again, never remove it (existing products keep referencing the name either way, since it's
+ * stored as plain text on the product, not a foreign key). */
+export function setProductCategoryActive(
+  id: string,
+  active: boolean,
+  actorUserId: string | null,
+): void {
+  const rows = getProductCategories();
+  const before = rows.find((c) => c.id === id);
+  if (!before) throw new Error("الفئة غير موجودة");
+  writeCollection(
+    KEYS.productCategories,
+    rows.map((c) => (c.id === id ? { ...c, active } : c)),
+  );
+  recordAudit({
+    tenant_id: before.tenant_id,
+    user_id: actorUserId,
+    action: "product_category.update",
+    entity: "product_categories",
+    entity_id: id,
+    old_value: before,
+    new_value: { ...before, active },
+  });
+}
+
+export function setProductBrandActive(
+  id: string,
+  active: boolean,
+  actorUserId: string | null,
+): void {
+  const rows = getProductBrands();
+  const before = rows.find((b) => b.id === id);
+  if (!before) throw new Error("الماركة غير موجودة");
+  writeCollection(
+    KEYS.productBrands,
+    rows.map((b) => (b.id === id ? { ...b, active } : b)),
+  );
+  recordAudit({
+    tenant_id: before.tenant_id,
+    user_id: actorUserId,
+    action: "product_brand.update",
+    entity: "product_brands",
+    entity_id: id,
+    old_value: before,
+    new_value: { ...before, active },
+  });
+}
 
 export function createProduct(
   input: Omit<Product, "id" | "tenant_id" | "code" | "active" | "created_at">,

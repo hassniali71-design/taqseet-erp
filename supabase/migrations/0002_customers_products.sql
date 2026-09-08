@@ -5,9 +5,10 @@
 -- 0001_foundation.sql.
 --
 -- Deliberately NOT included yet (real Phase 2/3 work): customer_documents, guarantors,
--- customer_credit_profiles, customer_risk_scores, product_categories, brands, units,
--- product_serials, product_images, product_prices (per-customer pricing). §133: no hard
--- delete — both tables use a status/active flag instead.
+-- customer_credit_profiles, customer_risk_scores, units, product_serials, product_images,
+-- product_prices (per-customer pricing). §133: no hard delete — both tables use a
+-- status/active flag instead. product_categories/product_brands land in 0009 — products.brand/
+-- products.category stay plain text here on purpose (see that migration's own comment).
 
 create table if not exists customers (
   id uuid primary key default gen_random_uuid(),

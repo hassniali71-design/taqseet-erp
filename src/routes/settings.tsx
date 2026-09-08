@@ -6,7 +6,13 @@ import {
   createInstallmentPlan,
   getCurrentTenantSettings,
   getInstallmentPlans,
+  getProductBrands,
+  getProductCategories,
+  registerProductBrand,
+  registerProductCategory,
   setInstallmentPlanActive,
+  setProductBrandActive,
+  setProductCategoryActive,
   subscribeData,
   updateTenantSettings,
 } from "@/lib/data-store";
@@ -42,6 +48,8 @@ function SettingsPage() {
   const [showPlanForm, setShowPlanForm] = useState(false);
   const [planDuration, setPlanDuration] = useState("6");
   const [planRate, setPlanRate] = useState("20");
+  const [newCategory, setNewCategory] = useState("");
+  const [newBrand, setNewBrand] = useState("");
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -81,6 +89,8 @@ function SettingsPage() {
   }
 
   const plans = getInstallmentPlans(session.tenant_id);
+  const categories = getProductCategories(session.tenant_id);
+  const brands = getProductBrands(session.tenant_id);
 
   function handleAddPlan(event: FormEvent) {
     event.preventDefault();
@@ -91,6 +101,20 @@ function SettingsPage() {
     setPlanDuration("6");
     setPlanRate("20");
     setShowPlanForm(false);
+  }
+
+  function handleAddCategory(event: FormEvent) {
+    event.preventDefault();
+    if (!newCategory.trim()) return;
+    registerProductCategory(newCategory.trim(), actorUserId);
+    setNewCategory("");
+  }
+
+  function handleAddBrand(event: FormEvent) {
+    event.preventDefault();
+    if (!newBrand.trim()) return;
+    registerProductBrand(newBrand.trim(), actorUserId);
+    setNewBrand("");
   }
 
   return (
@@ -367,6 +391,96 @@ function SettingsPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </section>
+
+        <section className="mt-8 rounded-xl border border-border bg-card p-5 shadow-sm">
+          <h2 className="text-sm font-bold text-foreground">فئات وماركات المنتجات (§19/§118)</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            نفس القيم المتاحة في قائمة الفئة/الماركة عند إضافة جهاز جديد. إيقاف فئة أو ماركة هنا لا
+            يحذفها من الأجهزة الموجودة أصلاً — يمنع فقط اقتراحها لأجهزة جديدة (§20).
+          </p>
+          <div className="mt-4 grid grid-cols-1 gap-6 sm:grid-cols-2">
+            <div>
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold text-foreground">الفئات</h3>
+              </div>
+              <form onSubmit={handleAddCategory} className="mt-2 flex gap-2">
+                <input
+                  value={newCategory}
+                  onChange={(e) => setNewCategory(e.target.value)}
+                  placeholder="فئة جديدة"
+                  className="form-input flex-1"
+                />
+                <button
+                  type="submit"
+                  className="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  إضافة
+                </button>
+              </form>
+              <ul className="mt-3 max-h-56 space-y-1.5 overflow-y-auto">
+                {categories.map((c) => (
+                  <li
+                    key={c.id}
+                    className="flex items-center justify-between rounded-md border border-border px-3 py-1.5 text-sm"
+                  >
+                    <span className={c.active ? "text-foreground" : "text-muted-foreground"}>
+                      {c.name}
+                    </span>
+                    <button
+                      onClick={() => setProductCategoryActive(c.id, !c.active, actorUserId)}
+                      className="text-xs font-medium text-primary hover:underline"
+                    >
+                      {c.active ? "إيقاف" : "تفعيل"}
+                    </button>
+                  </li>
+                ))}
+                {categories.length === 0 && (
+                  <li className="text-xs text-muted-foreground">لا توجد فئات بعد.</li>
+                )}
+              </ul>
+            </div>
+            <div>
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold text-foreground">الماركات</h3>
+              </div>
+              <form onSubmit={handleAddBrand} className="mt-2 flex gap-2">
+                <input
+                  value={newBrand}
+                  onChange={(e) => setNewBrand(e.target.value)}
+                  placeholder="ماركة جديدة"
+                  className="form-input flex-1"
+                />
+                <button
+                  type="submit"
+                  className="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  إضافة
+                </button>
+              </form>
+              <ul className="mt-3 max-h-56 space-y-1.5 overflow-y-auto">
+                {brands.map((b) => (
+                  <li
+                    key={b.id}
+                    className="flex items-center justify-between rounded-md border border-border px-3 py-1.5 text-sm"
+                  >
+                    <span className={b.active ? "text-foreground" : "text-muted-foreground"}>
+                      {b.name}
+                    </span>
+                    <button
+                      onClick={() => setProductBrandActive(b.id, !b.active, actorUserId)}
+                      className="text-xs font-medium text-primary hover:underline"
+                    >
+                      {b.active ? "إيقاف" : "تفعيل"}
+                    </button>
+                  </li>
+                ))}
+                {brands.length === 0 && (
+                  <li className="text-xs text-muted-foreground">لا توجد ماركات بعد.</li>
+                )}
+              </ul>
+            </div>
           </div>
         </section>
       </main>
