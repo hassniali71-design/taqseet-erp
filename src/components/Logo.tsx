@@ -54,7 +54,7 @@ export function Logo({
     <div className={cn("flex items-center gap-2.5", className)}>
       <LogoIcon className={cn("h-9 w-9 shrink-0", iconClassName)} />
       <div className="flex flex-col leading-tight">
-        <span className="text-lg font-extrabold tracking-tight">حسبة</span>
+        <span className="font-display text-lg font-bold tracking-tight">حسبة</span>
         {showTagline && (
           <span className="text-[10px] font-bold tracking-[0.2em] opacity-70">HESBA</span>
         )}

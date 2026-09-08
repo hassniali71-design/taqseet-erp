@@ -90,6 +90,9 @@ export interface User {
   password?: string;
   active: boolean;
   created_at: string;
+  /** Phase 9 — marks the platform-operator account (tenant_id = the reserved "platform" tenant).
+   * Not a `role`; this is orthogonal to the tenant's own role system. */
+  is_platform_owner?: boolean;
 }
 
 export interface UserRoleAssignment {

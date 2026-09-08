@@ -1,7 +1,21 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import {
+  AlertTriangle,
+  Clock,
+  CreditCard,
+  Landmark,
+  Package,
+  PackageX,
+  Percent,
+  Truck,
+  Users,
+  Wallet,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { SalesTrendChart } from "@/components/ui/Charts";
+import { LinkCard, Panel, StatCard } from "@/components/ui/StatCard";
 import {
   getAccountBalance,
   getCurrentTenantSettings,
@@ -24,15 +38,16 @@ export const Route = createFileRoute("/dashboard")({
   component: DashboardPage,
 });
 
-function isToday(isoDate: string): boolean {
+function isSameDay(isoDate: string, ref: Date): boolean {
   const d = new Date(isoDate);
-  const now = new Date();
   return (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
+    d.getFullYear() === ref.getFullYear() &&
+    d.getMonth() === ref.getMonth() &&
+    d.getDate() === ref.getDate()
   );
 }
+
+const WEEKDAY_LABELS_AR = ["أحد", "اثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت"];
 
 function DashboardPage() {
   const session = useRequireSession();
@@ -45,12 +60,22 @@ function DashboardPage() {
   const tenant = getTenants().find((t) => t.id === session.tenant_id);
   const customers = getCustomers();
   const products = getProducts();
-  const sales = getSales();
+  const sales = getSales().filter((s) => s.status === "completed");
   const settings = getCurrentTenantSettings();
 
+  const today = new Date();
   const todaySalesTotal = sales
-    .filter((s) => isToday(s.created_at) && s.status === "completed")
+    .filter((s) => isSameDay(s.created_at, today))
     .reduce((sum, s) => sum + s.total, 0);
+
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
+    const day = new Date(today);
+    day.setDate(day.getDate() - (6 - i));
+    const total = sales
+      .filter((s) => isSameDay(s.created_at, day))
+      .reduce((sum, s) => sum + s.total, 0);
+    return { label: WEEKDAY_LABELS_AR[day.getDay()] ?? "", value: total };
+  });
 
   const contracts = getInstallmentContracts().filter(
     (c) => c.status !== "settled" && c.status !== "settled_early",
@@ -88,44 +113,63 @@ function DashboardPage() {
     <div className="flex min-h-screen bg-background">
       <AppSidebar session={session} />
       <main className="flex-1 mx-auto max-w-6xl px-4 py-8">
-        <h1 className="text-2xl font-bold text-foreground">لوحة التحكم</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <h1 className="text-2xl text-foreground">لوحة التحكم</h1>
+        <p className="mt-1 text-sm font-bold text-muted-foreground">
           محل: {tenant?.name} — حالة الاشتراك: {tenant?.status}
         </p>
 
         <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <Stat label="مبيعات اليوم" value={`${todaySalesTotal.toLocaleString("ar-EG")} ج.م`} />
-          <Stat
+          <StatCard
+            label="مبيعات اليوم"
+            value={`${todaySalesTotal.toLocaleString("ar-EG")} ج.م`}
+            icon={Wallet}
+            tone="primary"
+            valueDir="ltr"
+          />
+          <StatCard
             label="مستحق اليوم (تقسيط)"
             value={`${dueTodayAmount.toLocaleString("ar-EG")} ج.م`}
+            icon={Clock}
+            valueDir="ltr"
           />
-          <Stat
+          <StatCard
             label="متأخرات (تقسيط)"
             value={`${overdueAmount.toLocaleString("ar-EG")} ج.م`}
-            danger={overdueCount > 0}
+            icon={AlertTriangle}
+            tone={overdueCount > 0 ? "danger" : "default"}
+            valueDir="ltr"
             {...(overdueCount > 0 && { sub: `${overdueCount} قسط متأخر` })}
           />
-          <Stat
+          <StatCard
             label="رصيد خزينة الكاشير"
             value={`${cashierBalance.toLocaleString("ar-EG")} ج.م`}
+            icon={Landmark}
+            valueDir="ltr"
           />
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <Stat label="عملاء" value={String(customers.length)} />
-          <Stat label="عقود تقسيط مفتوحة" value={String(contracts.length)} />
-          <Stat
+          <StatCard label="عملاء" value={String(customers.length)} icon={Users} />
+          <StatCard label="عقود تقسيط مفتوحة" value={String(contracts.length)} icon={Percent} />
+          <StatCard
             label="أجهزة تحت الحد الأدنى"
             value={String(lowStockProducts.length)}
-            danger={lowStockProducts.length > 0}
+            icon={PackageX}
+            tone={lowStockProducts.length > 0 ? "danger" : "default"}
           />
-          <Stat label="توصيلات جارية" value={String(pendingDeliveries)} />
+          <StatCard label="توصيلات جارية" value={String(pendingDeliveries)} icon={Truck} />
+        </div>
+
+        <div className="mt-6">
+          <Panel title="المبيعات آخر 7 أيام" description="إجمالي المبيعات النقدية المكتملة يومياً">
+            <SalesTrendChart data={last7Days} />
+          </Panel>
         </div>
 
         {(overdueCount > 0 || lowStockProducts.length > 0 || pendingExpenses > 0) && (
-          <div className="mt-6 rounded-xl border border-warning/30 bg-warning/5 p-5">
-            <h2 className="text-sm font-bold text-foreground">قرارات تحتاج انتباه</h2>
-            <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+          <div className="mt-6 rounded-2xl border-2 border-warning/40 bg-warning/5 p-5">
+            <h2 className="text-sm text-foreground">قرارات تحتاج انتباه</h2>
+            <ul className="mt-2 space-y-1 text-sm font-bold text-muted-foreground">
               {overdueCount > 0 && (
                 <li>
                   <Link to="/collections" className="text-primary hover:underline">
@@ -152,59 +196,34 @@ function DashboardPage() {
         )}
 
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Link
-            to="/customers"
-            className="rounded-xl border border-border bg-card p-5 shadow-sm transition-colors hover:bg-accent"
-          >
-            <p className="text-sm text-muted-foreground">العملاء</p>
-            <p className="mt-1 text-3xl font-bold text-foreground">{customers.length}</p>
-            <p className="mt-2 text-xs text-primary">إدارة العملاء ←</p>
+          <Link to="/customers">
+            <LinkCard
+              label="العملاء"
+              value={String(customers.length)}
+              cta="إدارة العملاء ←"
+              icon={Users}
+            />
           </Link>
-
-          <Link
-            to="/products"
-            className="rounded-xl border border-border bg-card p-5 shadow-sm transition-colors hover:bg-accent"
-          >
-            <p className="text-sm text-muted-foreground">الأجهزة (المنتجات)</p>
-            <p className="mt-1 text-3xl font-bold text-foreground">{products.length}</p>
-            <p className="mt-2 text-xs text-primary">إدارة الأجهزة ←</p>
+          <Link to="/products">
+            <LinkCard
+              label="الأجهزة (المنتجات)"
+              value={String(products.length)}
+              cta="إدارة الأجهزة ←"
+              icon={Package}
+              tone="default"
+            />
           </Link>
-
-          <Link
-            to="/reports"
-            className="rounded-xl border border-border bg-card p-5 shadow-sm transition-colors hover:bg-accent"
-          >
-            <p className="text-sm text-muted-foreground">التقارير</p>
-            <p className="mt-1 text-3xl font-bold text-foreground">📊</p>
-            <p className="mt-2 text-xs text-primary">عرض التقارير ←</p>
+          <Link to="/reports">
+            <LinkCard
+              label="التقارير"
+              value="📊"
+              cta="عرض التقارير ←"
+              icon={CreditCard}
+              tone="default"
+            />
           </Link>
         </div>
       </main>
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  danger,
-  sub,
-}: {
-  label: string;
-  value: string;
-  danger?: boolean;
-  sub?: string;
-}) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p
-        className={`mt-1 text-xl font-bold ${danger ? "text-destructive" : "text-foreground"}`}
-        dir="ltr"
-      >
-        {value}
-      </p>
-      {sub && <p className="mt-1 text-xs text-muted-foreground">{sub}</p>}
     </div>
   );
 }

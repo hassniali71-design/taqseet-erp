@@ -2,9 +2,9 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
 
 import { Logo } from "@/components/Logo";
-import { signIn } from "@/lib/data-store";
+import { getUsers, signIn, signOut } from "@/lib/data-store";
 
-export const Route = createFileRoute("/platform/login")({
+export const Route = createFileRoute("/platform_/login")({
   component: PlatformLoginPage,
 });
 
@@ -21,8 +21,14 @@ function PlatformLoginPage() {
       setError(result.error);
       return;
     }
+    const user = getUsers().find((u) => u.id === result.session.user_id);
+    if (!user?.is_platform_owner) {
+      signOut();
+      setError("هذا الحساب ليس حساب مشغّل منصة — استخدم دخول العملاء بدلاً منه.");
+      return;
+    }
     setError(null);
-    void navigate({ to: "/dashboard" });
+    void navigate({ to: "/platform" });
   }
 
   return (
@@ -51,7 +57,7 @@ function PlatformLoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-sm text-sidebar-foreground outline-none focus:ring-2 focus:ring-ring"
-                placeholder="owner@demo.local"
+                placeholder="platform@hesba.local"
                 dir="ltr"
               />
             </div>
@@ -83,8 +89,7 @@ function PlatformLoginPage() {
           </form>
 
           <div className="mt-6 rounded-md border border-sidebar-border bg-sidebar/60 p-3 text-xs font-bold text-sidebar-foreground/70">
-            قريباً في هذه اللوحة: إنشاء عملاء (Tenants) جدد، وتفعيل/تعليق/تجديد الاشتراكات — جزء من
-            المرحلة القادمة في خطة المشروع.
+            بيانات تجريبية: platform@hesba.local / hesba123
           </div>
         </div>
 

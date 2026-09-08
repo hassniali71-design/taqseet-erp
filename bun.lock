@@ -5,6 +5,9 @@
     "": {
       "name": "taqseet-erp",
       "dependencies": {
+        "@fontsource/almarai": "^5.3.0",
+        "@fontsource/cairo": "^5.3.0",
+        "@fontsource/changa": "^5.3.0",
         "@fontsource/tajawal": "^5.3.0",
         "@hookform/resolvers": "^5.2.2",
         "@radix-ui/react-accordion": "^1.2.12",
@@ -155,6 +158,12 @@
     "@floating-ui/react-dom": ["@floating-ui/react-dom@2.1.9", "", { "dependencies": { "@floating-ui/dom": "^1.8.0" }, "peerDependencies": { "react": ">=16.8.0", "react-dom": ">=16.8.0" } }, "sha512-JDjEFGCpImxDCA7JJKviA0M9+RtmJdj0m/NVU5IMgBK+AmZouAQQ7/+2GLH0GXXY0YMw9oXPB8hKdbPYg5QLYg=="],
 
     "@floating-ui/utils": ["@floating-ui/utils@0.2.12", "", {}, "sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww=="],
+
+    "@fontsource/almarai": ["@fontsource/almarai@5.3.0", "", {}, "sha512-btLbQO3LSL6F6KLQeZqTFwmS3wArSDJxHdXAYJMaKLyxhp8C7ZQqTYjPFqENx+SwROzDyAyFRK5fKFWh5+uZtQ=="],
+
+    "@fontsource/cairo": ["@fontsource/cairo@5.3.0", "", {}, "sha512-MdY6+gee1DVz4eUvx1Dd8Y1f50WcRELRKwKBarYZA3zT8dMhkuTWbcoE1LzezAy97h/9rob87s02NI6L8MaDgA=="],
+
+    "@fontsource/changa": ["@fontsource/changa@5.3.0", "", {}, "sha512-zKPYCAB4338o8g7SejgbXPlNbENNr9Y7aJMzrU+umlVBiPdU8tvJYiREHFbLFxge5mI89ktaR2gt7Q1Pq15Zsg=="],
 
     "@fontsource/tajawal": ["@fontsource/tajawal@5.3.0", "", {}, "sha512-R2GUdHHAebeZ+CyYvulaSECfZe3BWbNjEWX3TXG0Csnx4RADO/zyqk6Y//NYdSx5n74zRJh9HTvd61mpX/UzZQ=="],
 

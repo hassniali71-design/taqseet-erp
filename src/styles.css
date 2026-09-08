@@ -2,12 +2,24 @@
 @source "../src";
 @import "tw-animate-css";
 
-/* Arabic-first font, bundled locally via @fontsource for offline stability
-   (no external Google Fonts CDN dependency). */
+/* أربع خطوط عربية تقيلة/بولد، كل واحد بدور واضح — مُجمّعة محلياً عبر @fontsource
+   (بدون أي CDN خارجي، ثباتاً بلا اتصال، نفس النمط المتبع مع Tajawal سابقاً):
+   - Changa: للشعار وعناوين العرض الكبيرة (Display) — أثقل وأبرز خط في الهوية.
+   - Cairo: لعناوين الصفحات (h1/h2/h3) — واضح وثقيل ومقروء بسهولة.
+   - Almarai: للأرقام البارزة (كروت الإحصائيات/المبالغ) — بولد هندسي قوي.
+   - Tajawal: لنص الجسم/الأزرار/الجداول (الوزن 700/800) — ثابت من البداية، الأخف نسبياً
+     بين الأربعة لكنه يبقى بولد واضح، يحافظ على القراءة عند الأحجام الصغيرة. */
 @import "@fontsource/tajawal/400.css";
 @import "@fontsource/tajawal/500.css";
 @import "@fontsource/tajawal/700.css";
 @import "@fontsource/tajawal/800.css";
+@import "@fontsource/cairo/700.css";
+@import "@fontsource/cairo/800.css";
+@import "@fontsource/cairo/900.css";
+@import "@fontsource/almarai/700.css";
+@import "@fontsource/almarai/800.css";
+@import "@fontsource/changa/700.css";
+@import "@fontsource/changa/800.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -19,6 +31,9 @@
 
 @theme inline {
   --font-sans: "Tajawal", system-ui, sans-serif;
+  --font-display: "Changa", "Cairo", system-ui, sans-serif;
+  --font-heading: "Cairo", "Tajawal", system-ui, sans-serif;
+  --font-stat: "Almarai", "Cairo", system-ui, sans-serif;
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -160,5 +175,16 @@
     background-color: var(--color-background);
     color: var(--color-foreground);
     -webkit-font-smoothing: antialiased;
+  }
+
+  /* هوية الطباعة: كل عنوان في أي صفحة (حتى القديم منها) ياخد خط Cairo التقيل تلقائياً
+     بدون الحاجة لتعديل className في كل صفحة على حدة. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-heading);
+    font-weight: 800;
+    letter-spacing: -0.01em;
   }
 }

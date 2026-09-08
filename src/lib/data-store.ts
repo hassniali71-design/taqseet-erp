@@ -133,9 +133,26 @@ function genId(prefix: string): string {
 
 const DEMO_TENANT_ID = "tenant_demo";
 
+/** Phase 9 — reserved sentinel tenant id for the platform operator's own account. Never shown
+ * in the platform control room's tenant list (filtered out explicitly there), never a real
+ * customer. Mirrors the same "magic tenant id marks the super-admin" pattern used elsewhere in
+ * this codebase's sibling projects. */
+const PLATFORM_TENANT_ID = "platform";
+
 function seedTenants(): Tenant[] {
   const now = new Date().toISOString();
   return [
+    {
+      id: PLATFORM_TENANT_ID,
+      name: "منصة حسبة",
+      owner_name: "مشغّل المنصة",
+      phone: "-",
+      status: "active",
+      plan_id: "plan_platform",
+      subscription_start: now,
+      subscription_end: new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000).toISOString(),
+      created_at: now,
+    },
     {
       id: DEMO_TENANT_ID,
       name: "محل تجريبي",
@@ -152,6 +169,20 @@ function seedTenants(): Tenant[] {
 
 function seedTenantSettings(): TenantSettings[] {
   return [
+    {
+      tenant_id: PLATFORM_TENANT_ID,
+      currency: "EGP",
+      timezone: "Africa/Cairo",
+      costing_method: "average",
+      employee_discount_limit_pct: 0,
+      min_down_payment_pct: 0,
+      grace_period_days: 0,
+      credit_hold_days: 0,
+      late_fee_enabled: false,
+      return_period_days: 0,
+      expense_approval_threshold: 0,
+      whatsapp_notifications_enabled: false,
+    },
     {
       tenant_id: DEMO_TENANT_ID,
       currency: "EGP",
@@ -228,6 +259,16 @@ function seedRolePermissions(): RolePermission[] {
 
 function seedUsers(): User[] {
   return [
+    {
+      id: "user_platform_owner",
+      tenant_id: PLATFORM_TENANT_ID,
+      full_name: "مشغّل منصة حسبة",
+      email: "platform@hesba.local",
+      password: "hesba123",
+      active: true,
+      created_at: new Date().toISOString(),
+      is_platform_owner: true,
+    },
     {
       id: "user_demo_owner",
       tenant_id: DEMO_TENANT_ID,
@@ -509,6 +550,12 @@ function seedTreasuryMovements(): TreasuryMovement[] {
 
 export function getTenants(): Tenant[] {
   return readCollection(KEYS.tenants, seedTenants);
+}
+
+/** Phase 9 — every real customer tenant, excluding the reserved platform-operator sentinel. This
+ * is what the platform control room lists; never show `PLATFORM_TENANT_ID` as a "customer". */
+export function getManagedTenants(): Tenant[] {
+  return getTenants().filter((t) => t.id !== PLATFORM_TENANT_ID);
 }
 
 export function getTenantSettings(): TenantSettings[] {
@@ -846,6 +893,146 @@ export function setTenantStatus(
     new_value: { status: after.status },
     reason,
   });
+}
+
+export function extendTenantSubscription(
+  tenantId: string,
+  days: number,
+  actorUserId: string | null,
+): void {
+  const tenants = getTenants();
+  const before = tenants.find((t) => t.id === tenantId);
+  if (!before) throw new Error("Tenant غير موجود");
+  const base =
+    new Date(before.subscription_end) > new Date()
+      ? before.subscription_end
+      : new Date().toISOString();
+  const after: Tenant = {
+    ...before,
+    subscription_end: new Date(new Date(base).getTime() + days * 24 * 60 * 60 * 1000).toISOString(),
+  };
+  writeCollection(
+    KEYS.tenants,
+    tenants.map((t) => (t.id === tenantId ? after : t)),
+  );
+  recordAudit({
+    tenant_id: tenantId,
+    user_id: actorUserId,
+    action: "tenant.subscription_extend",
+    entity: "tenants",
+    entity_id: tenantId,
+    old_value: { subscription_end: before.subscription_end },
+    new_value: { subscription_end: after.subscription_end },
+    reason: `تمديد ${days} يوم`,
+  });
+}
+
+function generateTempPassword(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let out = "";
+  for (let i = 0; i < 8; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
+
+export interface ProvisionTenantInput {
+  name: string;
+  owner_name: string;
+  phone: string;
+  owner_email: string;
+  contact_email?: string;
+}
+
+export interface ProvisionTenantResult {
+  tenant: Tenant;
+  ownerEmail: string;
+  ownerPassword: string;
+}
+
+/** Phase 9 — genuine multi-tenant onboarding for the platform control room: creates a brand-new
+ * Tenant + its own TenantSettings row (mirrors the demo tenant's defaults) + its own 8 system
+ * Roles (unique genId()-based ids — deliberately NOT the `role_${name}` scheme `seedRoles()`
+ * uses, which is a stable literal that would collide across tenants) + links the new tenant's
+ * "owner" role to every existing Permission + a starter Owner user with a generated password.
+ *
+ * Scope honesty: this makes account-level entities (Tenant/TenantSettings/Roles/Users) genuinely
+ * per-tenant and safe. It does NOT retrofit the ~40 other `get*()` readers across the app that
+ * still resolve business data (customers/sales/products/etc.) — those remain hardcoded to
+ * `DEMO_TENANT_ID` today. A user created for a new tenant here can sign in, but the rest of the
+ * app will not yet show that tenant's own isolated business data — that is a separate, larger
+ * follow-up (see CLAUDE.md §"الهوية البصرية"/Phase 9 notes) and is not silently claimed as done. */
+export function provisionTenant(
+  input: ProvisionTenantInput,
+  actorUserId: string | null,
+): ProvisionTenantResult {
+  const now = new Date().toISOString();
+  const tenant = createTenant({
+    name: input.name,
+    owner_name: input.owner_name,
+    phone: input.phone,
+    ...(input.contact_email && { contact_email: input.contact_email }),
+    status: "trial",
+    plan_id: "plan_trial",
+    subscription_start: now,
+    subscription_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+  });
+
+  const settingsRow: TenantSettings = {
+    tenant_id: tenant.id,
+    currency: "EGP",
+    timezone: "Africa/Cairo",
+    costing_method: "average",
+    employee_discount_limit_pct: 5,
+    min_down_payment_pct: 10,
+    grace_period_days: 3,
+    credit_hold_days: 7,
+    late_fee_enabled: false,
+    return_period_days: 14,
+    expense_approval_threshold: 2000,
+    whatsapp_notifications_enabled: false,
+  };
+  writeCollection(KEYS.tenantSettings, [...getTenantSettings(), settingsRow]);
+
+  const newRoles: Role[] = SYSTEM_ROLE_NAMES.map((name) => ({
+    id: genId("role"),
+    tenant_id: tenant.id,
+    name,
+    is_system: true,
+  }));
+  writeCollection(KEYS.roles, [...getRoles(), ...newRoles]);
+
+  const ownerRole = newRoles.find((r) => r.name === "owner");
+  if (ownerRole) {
+    const permissions = getPermissions();
+    const newRolePermissions: RolePermission[] = permissions.map((p) => ({
+      role_id: ownerRole.id,
+      permission_id: p.id,
+    }));
+    writeCollection(KEYS.rolePermissions, [...getRolePermissions(), ...newRolePermissions]);
+  }
+
+  const ownerPassword = generateTempPassword();
+  const ownerUser = createUser(
+    {
+      tenant_id: tenant.id,
+      full_name: input.owner_name,
+      email: input.owner_email.trim().toLowerCase(),
+      password: ownerPassword,
+      active: true,
+    },
+    actorUserId,
+  );
+  if (ownerRole) assignUserRole(ownerUser.id, ownerRole.id, actorUserId);
+
+  recordAudit({
+    tenant_id: tenant.id,
+    user_id: actorUserId,
+    action: "tenant.provision",
+    entity: "tenants",
+    entity_id: tenant.id,
+    new_value: { tenant, owner_email: ownerUser.email },
+  });
+
+  return { tenant, ownerEmail: ownerUser.email, ownerPassword };
 }
 
 export function createUser(
