@@ -2,7 +2,14 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import { createCustomer, getCustomers, subscribeData, updateCustomer } from "@/lib/data-store";
+import { RiskBadge } from "@/components/ui/StatCard";
+import {
+  createCustomer,
+  getCustomerRiskAssessment,
+  getCustomers,
+  subscribeData,
+  updateCustomer,
+} from "@/lib/data-store";
 import { useRequireSession } from "@/hooks/use-session";
 import type { Customer } from "@/types";
 
@@ -193,6 +200,7 @@ function CustomersPage() {
                 <th className="px-4 py-3 font-medium">الهاتف</th>
                 <th className="px-4 py-3 font-medium">العنوان</th>
                 <th className="px-4 py-3 font-medium">حد الائتمان</th>
+                <th className="px-4 py-3 font-medium">التقييم</th>
                 <th className="px-4 py-3 font-medium">الحالة</th>
                 <th className="px-4 py-3 font-medium"></th>
               </tr>
@@ -218,6 +226,9 @@ function CustomersPage() {
                   <td className="px-4 py-3 text-muted-foreground">{customer.address ?? "—"}</td>
                   <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
                     {customer.credit_limit.toLocaleString("ar-EG")} ج.م
+                  </td>
+                  <td className="px-4 py-3">
+                    <RiskBadge assessment={getCustomerRiskAssessment(customer.id)} />
                   </td>
                   <td className="px-4 py-3">
                     <span
@@ -248,7 +259,7 @@ function CustomersPage() {
               ))}
               {customers.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">
+                  <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">
                     لا يوجد عملاء بعد.
                   </td>
                 </tr>

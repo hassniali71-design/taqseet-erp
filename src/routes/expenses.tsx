@@ -3,9 +3,11 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import {
+  approveExpense,
   getCurrentTenantSettings,
   getExpenses,
   getTreasuryAccounts,
+  getUsers,
   recordExpense,
   subscribeData,
 } from "@/lib/data-store";
@@ -32,6 +34,13 @@ function ExpensesPage() {
   const settings = getCurrentTenantSettings();
   const accounts = getTreasuryAccounts().filter((a) => a.active);
   const expenses = getExpenses().sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const users = getUsers();
+
+  function handleApprove(expenseId: string) {
+    const note = window.prompt("ملاحظة الاعتماد (اختياري):", "");
+    if (note === null) return;
+    approveExpense(expenseId, actorUserId, note);
+  }
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -57,8 +66,9 @@ function ExpensesPage() {
         <h1 className="text-2xl font-bold text-foreground">المصروفات</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           §73 — المصروفات فوق {settings.expense_approval_threshold.toLocaleString("ar-EG")} ج.م
-          (قابل للتعديل من الإعدادات) بتتعلّم "تحتاج اعتماد" للمراجعة، لكنها لسه بتتسجّل فورًا في
-          هذه المرحلة (محرك اعتماد فعلي مؤجّل).
+          (قابل للتعديل من الإعدادات) بتتسجّل فورًا وتُعلَّم "تحتاج اعتماد"، وتحتاج زرار "اعتماد"
+          صريح من مسؤول ليتم توثيق مراجعتها (المال بيكون خرج بالفعل — الاعتماد هنا رقابي/توثيقي، مش
+          حجب فعلي قبل الصرف؛ الحجب الكامل قبل الصرف مؤجّل).
         </p>
 
         <form
@@ -132,35 +142,58 @@ function ExpensesPage() {
                 <th className="px-4 py-3 font-medium">السبب</th>
                 <th className="px-4 py-3 font-medium">الحالة</th>
                 <th className="px-4 py-3 font-medium">التاريخ</th>
+                <th className="px-4 py-3 font-medium">إجراءات</th>
               </tr>
             </thead>
             <tbody>
-              {expenses.map((expense) => (
-                <tr key={expense.id} className="border-b border-border last:border-0">
-                  <td className="px-4 py-3 font-medium text-foreground">{expense.category}</td>
-                  <td className="px-4 py-3 text-muted-foreground" dir="ltr">
-                    {expense.amount.toLocaleString("ar-EG")} ج.م
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">{expense.reason}</td>
-                  <td className="px-4 py-3">
-                    {expense.needs_approval ? (
-                      <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
-                        يحتاج اعتماد
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
-                        عادي
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
-                    {new Date(expense.created_at).toLocaleString("ar-EG")}
-                  </td>
-                </tr>
-              ))}
+              {expenses.map((expense) => {
+                const approver = expense.approved_by
+                  ? users.find((u) => u.id === expense.approved_by)
+                  : undefined;
+                return (
+                  <tr key={expense.id} className="border-b border-border last:border-0">
+                    <td className="px-4 py-3 font-medium text-foreground">{expense.category}</td>
+                    <td className="px-4 py-3 text-muted-foreground" dir="ltr">
+                      {expense.amount.toLocaleString("ar-EG")} ج.م
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">{expense.reason}</td>
+                    <td className="px-4 py-3">
+                      {expense.needs_approval ? (
+                        <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
+                          يحتاج اعتماد
+                        </span>
+                      ) : expense.approved_at ? (
+                        <span
+                          className="rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success"
+                          title={approver ? `اعتمده ${approver.full_name}` : undefined}
+                        >
+                          معتمد{approver ? ` — ${approver.full_name}` : ""}
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
+                          عادي
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
+                      {new Date(expense.created_at).toLocaleString("ar-EG")}
+                    </td>
+                    <td className="px-4 py-3">
+                      {expense.needs_approval && (
+                        <button
+                          onClick={() => handleApprove(expense.id)}
+                          className="rounded-md border border-primary/40 px-2.5 py-1 text-xs font-bold text-primary hover:bg-primary/10"
+                        >
+                          اعتماد
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
               {expenses.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">
+                  <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
                     لا يوجد مصروفات بعد.
                   </td>
                 </tr>

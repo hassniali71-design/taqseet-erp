@@ -2,7 +2,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import { getNotifications, subscribeData } from "@/lib/data-store";
+import {
+  getNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+  subscribeData,
+} from "@/lib/data-store";
 import { useRequireSession } from "@/hooks/use-session";
 import type { AppNotification } from "@/lib/data-store";
 
@@ -39,26 +44,53 @@ function NotificationsPage() {
   if (!session) return null;
 
   const notifications = getNotifications();
+  const unreadCount = notifications.filter((n) => !n.read).length;
 
   return (
     <div className="flex min-h-screen bg-background">
       <AppSidebar session={session} />
       <main className="flex-1 mx-auto max-w-3xl px-4 py-8">
-        <h1 className="text-2xl font-bold text-foreground">الإشعارات</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          §92 — كل إشعار هنا مُشتق من البيانات وقت العرض (بدون تخزين أو حالة "مقروء")، مفيش أي إرسال
-          واتساب/SMS فعلي (§93 — Feature Flag متوقف افتراضيًا في الإعدادات).
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">الإشعارات</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              §92 — كل إشعار هنا مُشتق من البيانات وقت العرض، وحالة "مقروء" فعلية لكل إشعار. مفيش أي
+              إرسال واتساب/SMS فعلي (§93 — Feature Flag متوقف افتراضيًا في الإعدادات).
+            </p>
+          </div>
+          {unreadCount > 0 && (
+            <button
+              onClick={() => markAllNotificationsRead(notifications.map((n) => n.id))}
+              className="whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-xs font-bold text-foreground hover:bg-accent"
+            >
+              تعليم الكل كمقروء ({unreadCount})
+            </button>
+          )}
+        </div>
 
         <div className="mt-6 space-y-3">
           {notifications.map((n) => (
-            <div key={n.id} className={`rounded-xl border p-4 ${SEVERITY_CLASS[n.severity]}`}>
+            <div
+              key={n.id}
+              className={`rounded-xl border p-4 ${SEVERITY_CLASS[n.severity]} ${n.read ? "opacity-60" : ""}`}
+            >
               <div className="flex items-center justify-between gap-3">
-                <span
-                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_BADGE[n.severity]}`}
-                >
-                  {CATEGORY_LABEL[n.category]}
-                </span>
+                <div className="flex items-center gap-2">
+                  {!n.read && <span className="h-2 w-2 rounded-full bg-primary" />}
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_BADGE[n.severity]}`}
+                  >
+                    {CATEGORY_LABEL[n.category]}
+                  </span>
+                </div>
+                {!n.read && (
+                  <button
+                    onClick={() => markNotificationRead(n.id)}
+                    className="text-xs font-bold text-primary hover:underline"
+                  >
+                    تعليم كمقروء
+                  </button>
+                )}
               </div>
               <p className="mt-2 text-sm text-foreground">{n.message}</p>
             </div>

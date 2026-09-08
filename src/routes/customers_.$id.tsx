@@ -2,9 +2,11 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { RiskBadge } from "@/components/ui/StatCard";
 import {
   createGuarantor,
   getCustomerExposure,
+  getCustomerRiskAssessment,
   getCustomers,
   getGuarantors,
   getInstallmentContracts,
@@ -88,15 +90,18 @@ function CustomerDetailPage() {
               {customer.code} · {customer.phone}
             </p>
           </div>
-          <span
-            className={
-              customer.status === "active"
-                ? "rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success"
-                : "rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
-            }
-          >
-            {customer.status === "active" ? "نشط" : "موقوف"}
-          </span>
+          <div className="flex items-center gap-2">
+            <RiskBadge assessment={getCustomerRiskAssessment(customer.id)} />
+            <span
+              className={
+                customer.status === "active"
+                  ? "rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success"
+                  : "rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
+              }
+            >
+              {customer.status === "active" ? "نشط" : "موقوف"}
+            </span>
+          </div>
         </div>
 
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">

@@ -89,6 +89,7 @@ const KEYS = {
   saleReturns: `${STORAGE_PREFIX}.sale_returns.v1`,
   exchangeTransactions: `${STORAGE_PREFIX}.exchange_transactions.v1`,
   deliveryOrders: `${STORAGE_PREFIX}.delivery_orders.v1`,
+  readNotificationIds: `${STORAGE_PREFIX}.read_notification_ids.v1`,
 } as const;
 
 const listeners = new Set<() => void>();
@@ -795,6 +796,90 @@ export function isCustomerOnCreditHold(customerId: string, creditHoldDays: numbe
       i.status !== "waived" &&
       getDaysOverdue(i) > creditHoldDays,
   );
+}
+
+export type CustomerRiskLevel = "excellent" | "good" | "watch" | "critical";
+
+export interface CustomerRiskAssessment {
+  level: CustomerRiskLevel;
+  label: string;
+  /** Human-readable reasons behind the level, for display — always at least one entry. */
+  reasons: string[];
+}
+
+const RISK_LEVEL_LABEL_AR: Record<CustomerRiskLevel, string> = {
+  excellent: "ممتاز",
+  good: "جيد",
+  watch: "تحت المراقبة",
+  critical: "حرج",
+};
+
+/** §17 Risk Score — derived on read (never stored, same pattern as `getEffectiveInstallmentStatus`
+ * and every other time-dependent status in this project) from the customer's actual installment
+ * history: on-time vs late payments, currently-overdue lines, and broken promises to pay. A
+ * customer with no installment history at all is "good" by default (no negative signal yet), not
+ * "excellent" (no positive signal either). */
+export function getCustomerRiskAssessment(customerId: string): CustomerRiskAssessment {
+  const contracts = getInstallmentContracts().filter((c) => c.customer_id === customerId);
+  if (contracts.length === 0) {
+    return { level: "good", label: RISK_LEVEL_LABEL_AR.good, reasons: ["لا يوجد سجل تقسيط بعد"] };
+  }
+
+  const settings = getCurrentTenantSettings();
+  const contractIds = new Set(contracts.map((c) => c.id));
+  const installments = getInstallments().filter((i) => contractIds.has(i.contract_id));
+  const payments = getInstallmentPayments().filter((p) => contractIds.has(p.contract_id));
+
+  let paidOnTime = 0;
+  let paidLate = 0;
+  let currentlyOverdue = 0;
+
+  for (const installment of installments) {
+    const effective = getEffectiveInstallmentStatus(installment, settings.grace_period_days);
+    if (effective === "overdue") currentlyOverdue += 1;
+    if (installment.status === "paid") {
+      const lastPaymentAt = payments
+        .filter((p) => p.allocations.some((a) => a.installment_id === installment.id))
+        .map((p) => p.created_at)
+        .sort()
+        .at(-1);
+      if (lastPaymentAt && new Date(lastPaymentAt) > new Date(installment.due_date)) {
+        paidLate += 1;
+      } else {
+        paidOnTime += 1;
+      }
+    }
+  }
+
+  const failedPromises = getPromisesToPay().filter(
+    (p) => contractIds.has(p.contract_id) && getEffectivePromiseStatus(p) === "failed",
+  ).length;
+
+  const reasons: string[] = [];
+  let riskPoints = 0;
+  if (currentlyOverdue > 0) {
+    riskPoints += currentlyOverdue * 3;
+    reasons.push(`${currentlyOverdue} قسط متأخر حالياً`);
+  }
+  if (paidLate > 0) {
+    riskPoints += paidLate;
+    reasons.push(`${paidLate} قسط دُفع بعد موعده سابقاً`);
+  }
+  if (failedPromises > 0) {
+    riskPoints += failedPromises * 2;
+    reasons.push(`${failedPromises} وعد بالدفع لم يُنفَّذ`);
+  }
+  if (riskPoints === 0) {
+    reasons.push(paidOnTime > 0 ? `${paidOnTime} قسط مدفوع في موعده` : "لا يوجد تأخير حتى الآن");
+  }
+
+  let level: CustomerRiskLevel;
+  if (riskPoints === 0) level = paidOnTime >= 3 ? "excellent" : "good";
+  else if (riskPoints <= 2) level = "good";
+  else if (riskPoints <= 5) level = "watch";
+  else level = "critical";
+
+  return { level, label: RISK_LEVEL_LABEL_AR[level], reasons };
 }
 
 /**
@@ -2587,6 +2672,39 @@ export function recordExpense(
   return expense;
 }
 
+/** Closes the loop on `needs_approval`: previously that flag was permanent (set once, never
+ * cleared by any function) — an owner could see "يحتاج اعتماد" forever with no way to act on
+ * it. This does not reverse the money (§105's full blocking-approval-before-spend engine is
+ * still deferred, same as discount/credit overrides) — it records who reviewed the expense and
+ * why, which is the real, honest scope of an approval workflow at this Mock stage. */
+export function approveExpense(expenseId: string, actorUserId: string | null, note: string): void {
+  const expenses = getExpenses();
+  const before = expenses.find((e) => e.id === expenseId);
+  if (!before) throw new Error("المصروف غير موجود");
+  if (!before.needs_approval) throw new Error("هذا المصروف لا يحتاج اعتماد أصلاً");
+  const after: Expense = {
+    ...before,
+    needs_approval: false,
+    approved_by: actorUserId,
+    approved_at: new Date().toISOString(),
+    approval_note: note.trim(),
+  };
+  writeCollection(
+    KEYS.expenses,
+    expenses.map((e) => (e.id === expenseId ? after : e)),
+  );
+  recordAudit({
+    tenant_id: before.tenant_id,
+    user_id: actorUserId,
+    action: "expense.approve",
+    entity: "expenses",
+    entity_id: expenseId,
+    old_value: { needs_approval: true },
+    new_value: { needs_approval: false, approval_note: after.approval_note },
+    reason: note,
+  });
+}
+
 /* ---------------- Accounting — simplified Chart of Accounts + Journal Entries (§74/§75) ---------------- */
 
 const ACCOUNT_NAMES: Record<AccountCode, string> = {
@@ -3217,18 +3335,54 @@ export interface AppNotification {
     "installment_due" | "installment_overdue" | "promise_failed" | "low_stock" | "expense_approval";
   message: string;
   severity: "info" | "warning" | "danger";
+  read: boolean;
+}
+
+function getReadNotificationIds(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    return JSON.parse(window.localStorage.getItem(KEYS.readNotificationIds) ?? "[]") as string[];
+  } catch {
+    return [];
+  }
+}
+
+/** Marks one notification id read. Since every notification id here is derived from the entity
+ * it describes (e.g. `inst_due_${installmentId}`), once the underlying situation changes (the
+ * installment moves from "due" to "overdue", say) its id changes too and this "read" mark simply
+ * stops matching anything — the new situation surfaces as unread again, which is correct, not a
+ * bug. */
+export function markNotificationRead(id: string): void {
+  const ids = getReadNotificationIds();
+  if (ids.includes(id)) return;
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(KEYS.readNotificationIds, JSON.stringify([...ids, id]));
+  }
+  emit();
+}
+
+export function markAllNotificationsRead(ids: string[]): void {
+  const existing = new Set(getReadNotificationIds());
+  ids.forEach((id) => existing.add(id));
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(KEYS.readNotificationIds, JSON.stringify([...existing]));
+  }
+  emit();
 }
 
 /**
- * §92 — every notification here is computed fresh from existing collections, never stored;
- * there's no read/unread state either (Mock-stage simplification — a real notification feed
- * needs its own dismissal/read tracking, out of scope until Supabase is connected). §93 — no
- * WhatsApp/SMS provider is wired up; `TenantSettings.whatsapp_notifications_enabled` is purely
- * an architecture placeholder and never causes a message to actually send.
+ * §92 — every notification here is still computed fresh from existing collections, never
+ * stored (the notification itself has no independent identity beyond the entity it describes).
+ * The read/unread flag is the one piece of real state, tracked separately by notification id
+ * (`getReadNotificationIds`) — see `markNotificationRead`'s comment for why that's safe without
+ * storing the notifications themselves. §93 — no WhatsApp/SMS provider is wired up;
+ * `TenantSettings.whatsapp_notifications_enabled` is purely an architecture placeholder and
+ * never causes a message to actually send.
  */
 export function getNotifications(): AppNotification[] {
+  const readIds = new Set(getReadNotificationIds());
   const settings = getCurrentTenantSettings();
-  const notifications: AppNotification[] = [];
+  const notifications: Array<Omit<AppNotification, "read">> = [];
 
   const contracts = getInstallmentContracts().filter(
     (c) => c.status !== "settled" && c.status !== "settled_early",
@@ -3297,7 +3451,7 @@ export function getNotifications(): AppNotification[] {
     }
   }
 
-  return notifications;
+  return notifications.map((n) => ({ ...n, read: readIds.has(n.id) }));
 }
 
 /* ----------------------------------------------------------------------------------------

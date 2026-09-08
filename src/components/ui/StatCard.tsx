@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 
+import type { CustomerRiskAssessment, CustomerRiskLevel } from "@/lib/data-store";
 import { cn } from "@/lib/utils";
 
 type Tone = "default" | "primary" | "success" | "warning" | "danger";
@@ -124,5 +125,28 @@ export function LinkCard({
       <p className="font-stat mt-2 text-3xl font-extrabold text-foreground">{value}</p>
       <p className="mt-2 text-xs font-extrabold text-primary">{cta}</p>
     </div>
+  );
+}
+
+const RISK_BADGE_CLASS: Record<CustomerRiskLevel, string> = {
+  excellent: "bg-success/15 text-success",
+  good: "bg-primary/15 text-primary",
+  watch: "bg-warning/15 text-warning",
+  critical: "bg-destructive/15 text-destructive",
+};
+
+/** §17 Risk Score badge — always pass the full assessment (not just the level) so `title`
+ * carries the "why" on hover instead of a bare, unexplained label. */
+export function RiskBadge({ assessment }: { assessment: CustomerRiskAssessment }) {
+  return (
+    <span
+      title={assessment.reasons.join(" — ")}
+      className={cn(
+        "rounded-full px-2 py-0.5 text-xs font-extrabold",
+        RISK_BADGE_CLASS[assessment.level],
+      )}
+    >
+      {assessment.label}
+    </span>
   );
 }

@@ -493,6 +493,12 @@ export interface Expense {
   needs_approval: boolean;
   user_id: string | null;
   created_at: string;
+  /** Real (if minimal) resolution for `needs_approval` — the money already left the account
+   * when the expense was recorded (§105 blocking approval is still deferred), but this closes
+   * the loop so a flagged expense is actually acted on instead of staying flagged forever. */
+  approved_by?: string | null;
+  approved_at?: string;
+  approval_note?: string;
 }
 
 /**
