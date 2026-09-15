@@ -15,9 +15,13 @@ import type {
   ProductCategory,
   ProductSerial,
   PromiseToPay,
+  Purchase,
+  PurchaseItem,
   RestructureEvent,
   Sale,
   SaleItem,
+  Supplier,
+  SupplierPayment,
   TenantSettings,
 } from "@/types";
 
@@ -512,6 +516,94 @@ export function computeProductStock(
     .reduce((sum, m) => sum + m.quantity, 0);
 }
 
+/** Shared by useReceiveStock and useCreatePurchase (Goods Receipt) — same function a manual
+ * "receive stock" click uses, so serial/ledger behavior can never drift between the two entry
+ * points, mirroring data-store.ts's own createPurchase-calls-receiveStock design. */
+async function performReceiveStock(
+  tenantId: string,
+  product: Product,
+  quantity: number,
+  serialNumbers: string[] | undefined,
+  actorUserId: string | null,
+  reference: string | undefined,
+): Promise<InventoryMovement> {
+  if (quantity <= 0) throw new Error("الكمية يجب أن تكون أكبر من صفر");
+
+  const numbers = (serialNumbers ?? []).map((s) => s.trim()).filter(Boolean);
+  if (product.serial_required && numbers.length !== quantity) {
+    throw new Error(`أدخل ${quantity} سيريال بالظبط (تم إدخال ${numbers.length})`);
+  }
+
+  let before: number;
+  if (product.serial_required) {
+    const { data: existingSerials, error: existingError } = await supabase
+      .from("product_serials")
+      .select("id, serial_number")
+      .eq("tenant_id", tenantId);
+    if (existingError) throw new Error(existingError.message);
+    const duplicate = numbers.find((n) =>
+      (existingSerials ?? []).some(
+        (s) => (s.serial_number as string).toLowerCase() === n.toLowerCase(),
+      ),
+    );
+    if (duplicate) throw new Error(`السيريال "${duplicate}" مسجّل بالفعل`);
+    const { count, error: countError } = await supabase
+      .from("product_serials")
+      .select("*", { count: "exact", head: true })
+      .eq("tenant_id", tenantId)
+      .eq("product_id", product.id)
+      .eq("status", "available");
+    if (countError) throw new Error(countError.message);
+    before = count ?? 0;
+  } else {
+    const { data: movements, error: movementsError } = await supabase
+      .from("inventory_movements")
+      .select("quantity")
+      .eq("tenant_id", tenantId)
+      .eq("product_id", product.id);
+    if (movementsError) throw new Error(movementsError.message);
+    before = (movements ?? []).reduce((sum, m) => sum + (m.quantity as number), 0);
+  }
+  const after = before + quantity;
+
+  if (product.serial_required) {
+    const { error: insertSerialsError } = await supabase.from("product_serials").insert(
+      numbers.map((serial_number) => ({
+        tenant_id: tenantId,
+        product_id: product.id,
+        serial_number,
+        status: "available",
+      })),
+    );
+    if (insertSerialsError) throw new Error(insertSerialsError.message);
+  }
+
+  const { data: movement, error: movementError } = await supabase
+    .from("inventory_movements")
+    .insert({
+      tenant_id: tenantId,
+      product_id: product.id,
+      type: "receipt",
+      quantity,
+      before,
+      after,
+      user_id: actorUserId,
+      ...(reference ? { reference } : {}),
+    })
+    .select()
+    .single();
+  if (movementError) throw new Error(movementError.message);
+  await insertAuditLog({
+    tenant_id: tenantId,
+    user_id: actorUserId,
+    action: "inventory.receive",
+    entity: "inventory_movements",
+    entity_id: movement.id as string,
+    new_value: movement,
+  });
+  return movement as InventoryMovement;
+}
+
 export function useReceiveStock(tenantId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -529,81 +621,14 @@ export function useReceiveStock(tenantId: string | undefined) {
       reference?: string | undefined;
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
-      if (quantity <= 0) throw new Error("الكمية يجب أن تكون أكبر من صفر");
-
-      const numbers = (serialNumbers ?? []).map((s) => s.trim()).filter(Boolean);
-      if (product.serial_required && numbers.length !== quantity) {
-        throw new Error(`أدخل ${quantity} سيريال بالظبط (تم إدخال ${numbers.length})`);
-      }
-
-      let before: number;
-      if (product.serial_required) {
-        const { data: existingSerials, error: existingError } = await supabase
-          .from("product_serials")
-          .select("id, serial_number")
-          .eq("tenant_id", tenantId);
-        if (existingError) throw new Error(existingError.message);
-        const duplicate = numbers.find((n) =>
-          (existingSerials ?? []).some(
-            (s) => (s.serial_number as string).toLowerCase() === n.toLowerCase(),
-          ),
-        );
-        if (duplicate) throw new Error(`السيريال "${duplicate}" مسجّل بالفعل`);
-        const { count, error: countError } = await supabase
-          .from("product_serials")
-          .select("*", { count: "exact", head: true })
-          .eq("tenant_id", tenantId)
-          .eq("product_id", product.id)
-          .eq("status", "available");
-        if (countError) throw new Error(countError.message);
-        before = count ?? 0;
-      } else {
-        const { data: movements, error: movementsError } = await supabase
-          .from("inventory_movements")
-          .select("quantity")
-          .eq("tenant_id", tenantId)
-          .eq("product_id", product.id);
-        if (movementsError) throw new Error(movementsError.message);
-        before = (movements ?? []).reduce((sum, m) => sum + (m.quantity as number), 0);
-      }
-      const after = before + quantity;
-
-      if (product.serial_required) {
-        const { error: insertSerialsError } = await supabase.from("product_serials").insert(
-          numbers.map((serial_number) => ({
-            tenant_id: tenantId,
-            product_id: product.id,
-            serial_number,
-            status: "available",
-          })),
-        );
-        if (insertSerialsError) throw new Error(insertSerialsError.message);
-      }
-
-      const { data: movement, error: movementError } = await supabase
-        .from("inventory_movements")
-        .insert({
-          tenant_id: tenantId,
-          product_id: product.id,
-          type: "receipt",
-          quantity,
-          before,
-          after,
-          user_id: actorUserId,
-          ...(reference ? { reference } : {}),
-        })
-        .select()
-        .single();
-      if (movementError) throw new Error(movementError.message);
-      await insertAuditLog({
-        tenant_id: tenantId,
-        user_id: actorUserId,
-        action: "inventory.receive",
-        entity: "inventory_movements",
-        entity_id: movement.id as string,
-        new_value: movement,
-      });
-      return movement as InventoryMovement;
+      return performReceiveStock(
+        tenantId,
+        product,
+        quantity,
+        serialNumbers,
+        actorUserId,
+        reference,
+      );
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["product_serials", tenantId] });
@@ -1653,6 +1678,371 @@ export function useRestructureContract(tenantId: string | undefined) {
       void queryClient.invalidateQueries({ queryKey: ["installments", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["installment_contracts", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["restructure_events", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+/* ---------------- Suppliers / Purchasing (§60-§65) ----------------
+ * Not yet converted: Treasury/Journal postings — a purchase here updates real stock+cost but
+ * does not yet post a payable to the (still Mock) accounting ledger, same documented gap as
+ * Sales/Installments. */
+
+export function useSuppliers(tenantId: string | undefined) {
+  return useTenantList<Supplier>("suppliers", tenantId, {
+    orderBy: "created_at",
+    ascending: false,
+  });
+}
+
+export function useCreateSupplier(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      input,
+      actorUserId,
+    }: {
+      input: Omit<Supplier, "id" | "tenant_id" | "code" | "active" | "created_at">;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const code = await nextTenantCode("suppliers", tenantId, "SUP");
+      const { data, error } = await supabase
+        .from("suppliers")
+        .insert({ ...input, tenant_id: tenantId, code, active: true })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "supplier.create",
+        entity: "suppliers",
+        entity_id: data.id as string,
+        new_value: data,
+      });
+      return data as Supplier;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["suppliers", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function useUpdateSupplier(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      patch,
+      actorUserId,
+    }: {
+      id: string;
+      patch: Partial<Omit<Supplier, "id" | "tenant_id" | "code" | "created_at">>;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data: before, error: beforeError } = await supabase
+        .from("suppliers")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (beforeError || !before) throw new Error(beforeError?.message ?? "المورد غير موجود");
+      const { data, error } = await supabase
+        .from("suppliers")
+        .update(patch)
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "supplier.update",
+        entity: "suppliers",
+        entity_id: id,
+        old_value: before,
+        new_value: data,
+      });
+      return data as Supplier;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["suppliers", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function usePurchases(tenantId: string | undefined) {
+  return useTenantList<Purchase>("purchases", tenantId, {
+    orderBy: "created_at",
+    ascending: false,
+  });
+}
+
+export function useSupplierPayments(tenantId: string | undefined) {
+  return useTenantList<SupplierPayment>("supplier_payments", tenantId, {
+    orderBy: "created_at",
+    ascending: false,
+  });
+}
+
+/** Mirrors data-store.ts's getSupplierBalance exactly. */
+export function computeSupplierBalance(
+  supplierId: string,
+  purchases: Purchase[],
+  payments: SupplierPayment[],
+): number {
+  const totalPurchased = purchases
+    .filter((p) => p.supplier_id === supplierId)
+    .reduce((sum, p) => sum + p.total, 0);
+  const totalPaid = payments
+    .filter((p) => p.supplier_id === supplierId)
+    .reduce((sum, p) => sum + p.amount, 0);
+  return Math.round((totalPurchased - totalPaid) * 100) / 100;
+}
+
+export interface CreatePurchaseInput {
+  supplier_id: string;
+  items: Array<{
+    product_id: string;
+    quantity: number;
+    unit_cost: number;
+    serial_numbers?: string[];
+  }>;
+}
+
+export function useCreatePurchase(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      input,
+      actorUserId,
+      costingMethod,
+    }: {
+      input: CreatePurchaseInput;
+      actorUserId: string | null;
+      costingMethod: TenantSettings["costing_method"];
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (input.items.length === 0) throw new Error("لازم تضيف صنف واحد على الأقل");
+
+      const { data: supplier, error: supplierError } = await supabase
+        .from("suppliers")
+        .select("*")
+        .eq("id", input.supplier_id)
+        .single();
+      if (supplierError || !supplier) throw new Error("المورد غير موجود");
+      if (!supplier.active) throw new Error("المورد غير نشط");
+
+      const { data: products, error: productsError } = await supabase
+        .from("products")
+        .select("*")
+        .eq("tenant_id", tenantId);
+      if (productsError) throw new Error(productsError.message);
+      const { data: existingSerials, error: serialsError } = await supabase
+        .from("product_serials")
+        .select("serial_number")
+        .eq("tenant_id", tenantId);
+      if (serialsError) throw new Error(serialsError.message);
+
+      const seenSerialsThisPurchase = new Set<string>();
+      const purchaseItems: PurchaseItem[] = [];
+      for (const line of input.items) {
+        const product = (products ?? []).find((p) => p.id === line.product_id) as
+          Product | undefined;
+        if (!product) throw new Error("منتج غير موجود");
+        if (!product.active) throw new Error(`المنتج "${product.name}" غير نشط`);
+        if (line.quantity <= 0) throw new Error(`كمية غير صحيحة للمنتج "${product.name}"`);
+        if (line.unit_cost < 0) throw new Error(`سعر تكلفة غير صحيح للمنتج "${product.name}"`);
+
+        const serials = (line.serial_numbers ?? []).map((s) => s.trim()).filter(Boolean);
+        if (product.serial_required) {
+          if (serials.length !== line.quantity) {
+            throw new Error(`أدخل ${line.quantity} سيريال بالظبط للمنتج "${product.name}"`);
+          }
+          for (const serial of serials) {
+            const key = serial.toLowerCase();
+            if (seenSerialsThisPurchase.has(key)) {
+              throw new Error(`السيريال "${serial}" مكرر في نفس أمر الشراء`);
+            }
+            if (
+              (existingSerials ?? []).some((s) => (s.serial_number as string).toLowerCase() === key)
+            ) {
+              throw new Error(`السيريال "${serial}" مسجّل بالفعل`);
+            }
+            seenSerialsThisPurchase.add(key);
+          }
+        }
+
+        purchaseItems.push({
+          product_id: product.id,
+          product_name: product.name,
+          serial_numbers: serials,
+          quantity: line.quantity,
+          unit_cost: line.unit_cost,
+          line_total: Math.round(line.unit_cost * line.quantity * 100) / 100,
+        });
+      }
+
+      const purchase_number = await nextInstallmentDocNumber(
+        "purchases",
+        "purchase_number",
+        tenantId,
+        "PUR",
+      );
+
+      // Every line already validated above, so applying effects here can't fail partway
+      // through — same discipline as data-store.ts's createPurchase.
+      for (const item of purchaseItems) {
+        const productBefore = (products ?? []).find((p) => p.id === item.product_id) as Product;
+        const { data: movements, error: movementsError } = await supabase
+          .from("inventory_movements")
+          .select("quantity")
+          .eq("tenant_id", tenantId)
+          .eq("product_id", item.product_id);
+        if (movementsError) throw new Error(movementsError.message);
+        const stockBefore = productBefore.serial_required
+          ? 0 // serial-tracked products don't use weighted-average cost math below anyway
+          : (movements ?? []).reduce((sum, m) => sum + (m.quantity as number), 0);
+
+        await performReceiveStock(
+          tenantId,
+          productBefore,
+          item.quantity,
+          item.serial_numbers.length > 0 ? item.serial_numbers : undefined,
+          actorUserId,
+          purchase_number,
+        );
+
+        const newCost =
+          costingMethod === "last_purchase"
+            ? item.unit_cost
+            : stockBefore + item.quantity > 0
+              ? Math.round(
+                  ((stockBefore * productBefore.cost_price + item.quantity * item.unit_cost) /
+                    (stockBefore + item.quantity)) *
+                    100,
+                ) / 100
+              : item.unit_cost;
+        const { data: updatedProduct, error: updateCostError } = await supabase
+          .from("products")
+          .update({ cost_price: newCost })
+          .eq("id", item.product_id)
+          .select()
+          .single();
+        if (updateCostError) throw new Error(updateCostError.message);
+        await insertAuditLog({
+          tenant_id: tenantId,
+          user_id: actorUserId,
+          action: "product.update",
+          entity: "products",
+          entity_id: item.product_id,
+          old_value: productBefore,
+          new_value: updatedProduct,
+        });
+      }
+
+      const total = Math.round(purchaseItems.reduce((sum, i) => sum + i.line_total, 0) * 100) / 100;
+      const { data: purchase, error: purchaseError } = await supabase
+        .from("purchases")
+        .insert({
+          tenant_id: tenantId,
+          purchase_number,
+          supplier_id: supplier.id as string,
+          supplier_name: supplier.name as string,
+          items: purchaseItems,
+          total,
+          user_id: actorUserId,
+        })
+        .select()
+        .single();
+      if (purchaseError) throw new Error(purchaseError.message);
+
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "purchase.create",
+        entity: "purchases",
+        entity_id: purchase.id as string,
+        new_value: purchase,
+      });
+
+      return purchase as Purchase;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["purchases", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["products", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["product_serials", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["inventory_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function useRecordSupplierPayment(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      supplierId,
+      amount,
+      actorUserId,
+    }: {
+      supplierId: string;
+      amount: number;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (amount <= 0) throw new Error("المبلغ يجب أن يكون أكبر من صفر");
+
+      const { data: supplier, error: supplierError } = await supabase
+        .from("suppliers")
+        .select("*")
+        .eq("id", supplierId)
+        .single();
+      if (supplierError || !supplier) throw new Error("المورد غير موجود");
+
+      const [{ data: purchases, error: purchasesError }, { data: payments, error: paymentsError }] =
+        await Promise.all([
+          supabase
+            .from("purchases")
+            .select("total")
+            .eq("tenant_id", tenantId)
+            .eq("supplier_id", supplierId),
+          supabase
+            .from("supplier_payments")
+            .select("amount")
+            .eq("tenant_id", tenantId)
+            .eq("supplier_id", supplierId),
+        ]);
+      if (purchasesError) throw new Error(purchasesError.message);
+      if (paymentsError) throw new Error(paymentsError.message);
+      const totalPurchased = (purchases ?? []).reduce((sum, p) => sum + (p.total as number), 0);
+      const totalPaid = (payments ?? []).reduce((sum, p) => sum + (p.amount as number), 0);
+      const balance = Math.round((totalPurchased - totalPaid) * 100) / 100;
+      if (amount > balance) {
+        throw new Error(`المبلغ أكبر من الرصيد المستحق للمورد (${balance} ج.م)`);
+      }
+
+      const { data, error } = await supabase
+        .from("supplier_payments")
+        .insert({ tenant_id: tenantId, supplier_id: supplierId, amount, user_id: actorUserId })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "supplier_payment.record",
+        entity: "supplier_payments",
+        entity_id: data.id as string,
+        new_value: data,
+      });
+      return data as SupplierPayment;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["supplier_payments", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
   });

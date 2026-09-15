@@ -2,14 +2,14 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { subscribeData } from "@/lib/data-store";
 import {
-  getPurchases,
-  getSupplierBalance,
-  getSupplierPayments,
-  getSuppliers,
-  recordSupplierPayment,
-  subscribeData,
-} from "@/lib/data-store";
+  computeSupplierBalance,
+  usePurchases,
+  useRecordSupplierPayment,
+  useSupplierPayments,
+  useSuppliers,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/suppliers_/$id")({
@@ -26,33 +26,44 @@ function SupplierDetailPage() {
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
+  const { data: suppliers = [], isLoading } = useSuppliers(session?.tenant_id);
+  const { data: allPurchases = [] } = usePurchases(session?.tenant_id);
+  const { data: allPayments = [] } = useSupplierPayments(session?.tenant_id);
+  const recordPaymentMutation = useRecordSupplierPayment(session?.tenant_id);
+
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const supplier = getSuppliers(session.tenant_id).find((s) => s.id === id);
+  const supplier = suppliers.find((s) => s.id === id);
   if (!supplier) {
     return (
       <div className="flex min-h-screen bg-background">
         <AppSidebar session={session} />
         <main className="flex-1 mx-auto max-w-5xl px-4 py-8 text-center text-muted-foreground">
-          المورد غير موجود.{" "}
-          <Link to="/suppliers" className="text-primary hover:underline">
-            العودة للموردين
-          </Link>
+          {isLoading ? (
+            "جارٍ التحميل..."
+          ) : (
+            <>
+              المورد غير موجود.{" "}
+              <Link to="/suppliers" className="text-primary hover:underline">
+                العودة للموردين
+              </Link>
+            </>
+          )}
         </main>
       </div>
     );
   }
 
   const supplierId = supplier.id;
-  const purchases = getPurchases(session.tenant_id)
+  const purchases = allPurchases
     .filter((p) => p.supplier_id === supplierId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const payments = getSupplierPayments(session.tenant_id)
+  const payments = allPayments
     .filter((p) => p.supplier_id === supplierId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const totalPurchased = purchases.reduce((sum, p) => sum + p.total, 0);
-  const balance = getSupplierBalance(supplierId);
+  const balance = computeSupplierBalance(supplierId, allPurchases, allPayments);
 
   function handleRecordPayment() {
     setPayError(null);
@@ -61,14 +72,17 @@ function SupplierDetailPage() {
       setPayError("أدخل مبلغ صحيح");
       return;
     }
-    try {
-      recordSupplierPayment(supplierId, amount, actorUserId);
-      setPayAmount("");
-      setPaySuccess(true);
-      setTimeout(() => setPaySuccess(false), 2000);
-    } catch (e) {
-      setPayError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+    recordPaymentMutation.mutate(
+      { supplierId, amount, actorUserId },
+      {
+        onSuccess: () => {
+          setPayAmount("");
+          setPaySuccess(true);
+          setTimeout(() => setPaySuccess(false), 2000);
+        },
+        onError: (e) => setPayError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   return (

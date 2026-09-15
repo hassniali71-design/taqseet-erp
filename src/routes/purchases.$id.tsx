@@ -2,7 +2,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import { getPurchases, getTenants, subscribeData } from "@/lib/data-store";
+import { getTenants, subscribeData } from "@/lib/data-store";
+import { usePurchases } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/purchases/$id")({
@@ -16,9 +17,11 @@ function PurchaseReceiptPage() {
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
+  const { data: purchases = [], isLoading } = usePurchases(session?.tenant_id);
+
   if (!session) return null;
 
-  const purchase = getPurchases(session.tenant_id).find((p) => p.id === id);
+  const purchase = purchases.find((p) => p.id === id);
   const tenant = getTenants().find((t) => t.id === session.tenant_id);
 
   if (!purchase) {
@@ -26,10 +29,16 @@ function PurchaseReceiptPage() {
       <div className="flex min-h-screen bg-background">
         <AppSidebar session={session} />
         <main className="flex-1 mx-auto max-w-2xl px-4 py-8 text-center text-muted-foreground">
-          أمر الشراء غير موجود.{" "}
-          <Link to="/purchases/new" className="text-primary hover:underline">
-            أمر شراء جديد
-          </Link>
+          {isLoading ? (
+            "جارٍ التحميل..."
+          ) : (
+            <>
+              أمر الشراء غير موجود.{" "}
+              <Link to="/purchases/new" className="text-primary hover:underline">
+                أمر شراء جديد
+              </Link>
+            </>
+          )}
         </main>
       </div>
     );

@@ -2,13 +2,15 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { subscribeData } from "@/lib/data-store";
 import {
-  createSupplier,
-  getSupplierBalance,
-  getSuppliers,
-  subscribeData,
-  updateSupplier,
-} from "@/lib/data-store";
+  computeSupplierBalance,
+  useCreateSupplier,
+  usePurchases,
+  useSupplierPayments,
+  useSuppliers,
+  useUpdateSupplier,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 import type { Supplier } from "@/types";
 
@@ -38,10 +40,14 @@ function SuppliersPage() {
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
+  const { data: suppliers = [] } = useSuppliers(session?.tenant_id);
+  const { data: allPurchases = [] } = usePurchases(session?.tenant_id);
+  const { data: allPayments = [] } = useSupplierPayments(session?.tenant_id);
+  const createSupplierMutation = useCreateSupplier(session?.tenant_id);
+  const updateSupplierMutation = useUpdateSupplier(session?.tenant_id);
+
   if (!session) return null;
   const actorUserId = session.user_id;
-
-  const suppliers = getSuppliers(session.tenant_id);
 
   function startCreate() {
     setForm(EMPTY_FORM);
@@ -67,16 +73,20 @@ function SuppliersPage() {
       ...(form.notes.trim() && { notes: form.notes.trim() }),
     };
     if (editingId === "new") {
-      createSupplier(payload, actorUserId);
+      createSupplierMutation.mutate({ input: payload, actorUserId });
     } else if (editingId) {
-      updateSupplier(editingId, payload, actorUserId);
+      updateSupplierMutation.mutate({ id: editingId, patch: payload, actorUserId });
     }
     setEditingId(null);
     setForm(EMPTY_FORM);
   }
 
   function toggleActive(supplier: Supplier) {
-    updateSupplier(supplier.id, { active: !supplier.active }, actorUserId);
+    updateSupplierMutation.mutate({
+      id: supplier.id,
+      patch: { active: !supplier.active },
+      actorUserId,
+    });
   }
 
   return (
@@ -191,7 +201,10 @@ function SuppliersPage() {
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{supplier.address ?? "—"}</td>
                   <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
-                    {getSupplierBalance(supplier.id).toLocaleString("ar-EG")} ج.م
+                    {computeSupplierBalance(supplier.id, allPurchases, allPayments).toLocaleString(
+                      "ar-EG",
+                    )}{" "}
+                    ج.م
                   </td>
                   <td className="px-4 py-3">
                     <span

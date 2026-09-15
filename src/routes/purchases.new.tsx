@@ -2,7 +2,12 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import { createPurchase, getProducts, getSuppliers } from "@/lib/data-store";
+import {
+  useCreatePurchase,
+  useCurrentTenantSettings,
+  useProducts,
+  useSuppliers,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/purchases/new")({
@@ -28,11 +33,16 @@ function NewPurchasePage() {
   const [serialInputs, setSerialInputs] = useState<string[]>([""]);
   const [error, setError] = useState<string | null>(null);
 
+  const { data: allSuppliers = [] } = useSuppliers(session?.tenant_id);
+  const { data: allProducts = [] } = useProducts(session?.tenant_id);
+  const { data: settings } = useCurrentTenantSettings(session?.tenant_id);
+  const createPurchaseMutation = useCreatePurchase(session?.tenant_id);
+
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const suppliers = getSuppliers(session.tenant_id).filter((s) => s.active);
-  const products = getProducts(session.tenant_id).filter((p) => p.active);
+  const suppliers = allSuppliers.filter((s) => s.active);
+  const products = allProducts.filter((p) => p.active);
   const selectedProduct = products.find((p) => p.id === selectedProductId);
 
   function onQuantityChange(value: string) {
@@ -98,9 +108,9 @@ function NewPurchasePage() {
       setError("اختر مورد");
       return;
     }
-    try {
-      const purchase = createPurchase(
-        {
+    createPurchaseMutation.mutate(
+      {
+        input: {
           supplier_id: supplierId,
           items: cart.map((l) => ({
             product_id: l.product_id,
@@ -110,11 +120,14 @@ function NewPurchasePage() {
           })),
         },
         actorUserId,
-      );
-      void navigate({ to: "/purchases/$id", params: { id: purchase.id } });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+        costingMethod: settings?.costing_method ?? "average",
+      },
+      {
+        onSuccess: (purchase) =>
+          void navigate({ to: "/purchases/$id", params: { id: purchase.id } }),
+        onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   return (
@@ -275,10 +288,10 @@ function NewPurchasePage() {
           </p>
           <button
             onClick={handleConfirm}
-            disabled={cart.length === 0}
+            disabled={cart.length === 0 || createPurchaseMutation.isPending}
             className="rounded-md bg-primary px-6 py-3 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            تأكيد أمر الشراء
+            {createPurchaseMutation.isPending ? "جارٍ الحفظ..." : "تأكيد أمر الشراء"}
           </button>
         </div>
       </main>
