@@ -5,13 +5,17 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { RiskBadge } from "@/components/ui/StatCard";
 import {
   createGuarantor,
-  getCustomerExposure,
   getCustomerRiskAssessment,
   getGuarantors,
-  getInstallmentContracts,
   subscribeData,
 } from "@/lib/data-store";
-import { useCustomers, useSales } from "@/lib/supabase-queries";
+import {
+  computeCustomerExposure,
+  useCustomers,
+  useInstallmentContracts,
+  useInstallments,
+  useSales,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/customers_/$id")({
@@ -31,6 +35,8 @@ function CustomerDetailPage() {
 
   const { data: customers = [], isLoading } = useCustomers(session?.tenant_id);
   const { data: allSales = [] } = useSales(session?.tenant_id);
+  const { data: allContracts = [] } = useInstallmentContracts(session?.tenant_id);
+  const { data: allInstallments = [] } = useInstallments(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
@@ -60,10 +66,10 @@ function CustomerDetailPage() {
     .filter((s) => s.customer_id === id)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const totalPurchases = sales.reduce((sum, s) => sum + s.total, 0);
-  const contracts = getInstallmentContracts(session.tenant_id)
+  const contracts = allContracts
     .filter((c) => c.customer_id === id)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const exposure = getCustomerExposure(id);
+  const exposure = computeCustomerExposure(id, allContracts, allInstallments);
 
   function handleAddGuarantor(event: FormEvent) {
     event.preventDefault();

@@ -2,15 +2,13 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { getDaysOverdue, getEffectiveInstallmentStatus, subscribeData } from "@/lib/data-store";
 import {
-  collectPayment,
-  getCurrentTenantSettings,
-  getDaysOverdue,
-  getEffectiveInstallmentStatus,
-  getInstallmentContracts,
-  getInstallments,
-  subscribeData,
-} from "@/lib/data-store";
+  useCollectPayment,
+  useCurrentTenantSettings,
+  useInstallmentContracts,
+  useInstallments,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 import type { Installment, InstallmentStatus } from "@/types";
 
@@ -58,14 +56,18 @@ function CollectionsWorkbenchPage() {
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
+  const { data: settingsData } = useCurrentTenantSettings(session?.tenant_id);
+  const { data: allContracts = [] } = useInstallmentContracts(session?.tenant_id);
+  const { data: allInstallments = [] } = useInstallments(session?.tenant_id);
+  const collectPaymentMutation = useCollectPayment(session?.tenant_id);
+
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const settings = getCurrentTenantSettings();
-  const contracts = getInstallmentContracts(session.tenant_id).filter(
+  const settings = settingsData ?? { grace_period_days: 3 };
+  const contracts = allContracts.filter(
     (c) => c.status !== "settled" && c.status !== "settled_early",
   );
-  const allInstallments = getInstallments(session.tenant_id);
 
   const rows: Row[] = [];
   for (const contract of contracts) {
@@ -116,19 +118,22 @@ function CollectionsWorkbenchPage() {
       setError(`المبلغ أكبر من المتبقي على العقد (${outstanding} ج.م)`);
       return;
     }
-    try {
-      const payment = collectPayment(contractId, amount, actorUserId);
-      setAmounts((prev) => ({ ...prev, [contractId]: "" }));
-      // A page-level message (not a per-row indicator) — a fully-collected overdue/due contract
-      // moves out of the current filter tab immediately, which would unmount a per-row "✓" before
-      // the user ever sees it.
-      setSuccessMessage(
-        `تم تحصيل ${amount.toLocaleString("ar-EG")} ج.م لعقد ${contractNumber} — إيصال ${payment.receipt_number}`,
-      );
-      setTimeout(() => setSuccessMessage(null), 4000);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+    collectPaymentMutation.mutate(
+      { contractId, amount, actorUserId },
+      {
+        onSuccess: (payment) => {
+          setAmounts((prev) => ({ ...prev, [contractId]: "" }));
+          // A page-level message (not a per-row indicator) — a fully-collected overdue/due
+          // contract moves out of the current filter tab immediately, which would unmount a
+          // per-row "✓" before the user ever sees it.
+          setSuccessMessage(
+            `تم تحصيل ${amount.toLocaleString("ar-EG")} ج.م لعقد ${contractNumber} — إيصال ${payment.receipt_number}`,
+          );
+          setTimeout(() => setSuccessMessage(null), 4000);
+        },
+        onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   return (

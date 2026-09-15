@@ -2,19 +2,22 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import {
-  createInstallmentContract,
-  getCurrentTenantSettings,
-  getCustomerExposure,
-  getCustomers,
-  getInstallmentPlans,
-  getProductSerials,
-  getProductStock,
-  getProducts,
-  isCustomerOnCreditHold,
-  subscribeData,
-} from "@/lib/data-store";
+import { subscribeData } from "@/lib/data-store";
 import { calculateFinance, generateSchedule } from "@/lib/finance-engine";
+import {
+  computeCustomerExposure,
+  computeCustomerOnCreditHold,
+  computeProductStock,
+  useCreateInstallmentContract,
+  useCurrentTenantSettings,
+  useCustomers,
+  useInstallmentContracts,
+  useInstallmentPlans,
+  useInstallments,
+  useInventoryMovements,
+  useProductSerials,
+  useProducts,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/sales/new-installment")({
@@ -46,25 +49,41 @@ function NewInstallmentSalePage() {
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
+  const { data: settingsData } = useCurrentTenantSettings(session?.tenant_id);
+  const { data: allCustomers = [] } = useCustomers(session?.tenant_id);
+  const { data: allProducts = [] } = useProducts(session?.tenant_id);
+  const { data: allPlans = [] } = useInstallmentPlans(session?.tenant_id);
+  const { data: allSerials = [] } = useProductSerials(session?.tenant_id);
+  const { data: allMovements = [] } = useInventoryMovements(session?.tenant_id);
+  const { data: allContracts = [] } = useInstallmentContracts(session?.tenant_id);
+  const { data: allInstallments = [] } = useInstallments(session?.tenant_id);
+  const createContractMutation = useCreateInstallmentContract(session?.tenant_id);
+
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const settings = getCurrentTenantSettings();
-  const customers = getCustomers(session.tenant_id).filter((c) => c.status === "active");
-  const products = getProducts(session.tenant_id).filter((p) => p.active);
-  const plans = getInstallmentPlans(session.tenant_id).filter((p) => p.active);
+  const settings = settingsData ?? {
+    min_down_payment_pct: 10,
+    credit_hold_days: 7,
+  };
+  const customers = allCustomers.filter((c) => c.status === "active");
+  const products = allProducts.filter((p) => p.active);
+  const plans = allPlans.filter((p) => p.active);
   const customer = customers.find((c) => c.id === customerId);
 
   const selectedProduct = products.find((p) => p.id === selectedProductId);
   const availableSerials = selectedProduct?.serial_required
-    ? getProductSerials(session.tenant_id).filter(
-        (s) => s.product_id === selectedProduct.id && s.status === "available",
-      )
+    ? allSerials.filter((s) => s.product_id === selectedProduct.id && s.status === "available")
     : [];
   const cartedSerialIds = new Set(cart.map((l) => l.serial_id).filter(Boolean));
   const usableSerials = availableSerials.filter((s) => !cartedSerialIds.has(s.id));
   const stockForSelected = selectedProduct
-    ? getProductStock(selectedProduct.id, selectedProduct)
+    ? computeProductStock(
+        selectedProduct.id,
+        selectedProduct.serial_required,
+        allSerials,
+        allMovements,
+      )
     : 0;
   const alreadyCartedQty = cart
     .filter((l) => l.product_id === selectedProductId)
@@ -133,10 +152,17 @@ function NewInstallmentSalePage() {
   const schedulePreview =
     plan && preview ? generateSchedule(preview.totalAmount, plan.duration_months) : [];
 
-  const exposure = customer ? getCustomerExposure(customer.id) : 0;
+  const exposure = customer
+    ? computeCustomerExposure(customer.id, allContracts, allInstallments)
+    : 0;
   const availableCredit = customer ? customer.credit_limit - exposure : 0;
   const onCreditHold = customer
-    ? isCustomerOnCreditHold(customer.id, settings.credit_hold_days)
+    ? computeCustomerOnCreditHold(
+        customer.id,
+        settings.credit_hold_days,
+        allContracts,
+        allInstallments,
+      )
     : false;
 
   function handleConfirm() {
@@ -149,9 +175,9 @@ function NewInstallmentSalePage() {
       setError("اختر خطة تقسيط");
       return;
     }
-    try {
-      const contract = createInstallmentContract(
-        {
+    createContractMutation.mutate(
+      {
+        input: {
           customer_id: customerId,
           items: cart.map((l) => ({
             product_id: l.product_id,
@@ -162,11 +188,15 @@ function NewInstallmentSalePage() {
           plan_id: planId,
         },
         actorUserId,
-      );
-      void navigate({ to: "/contracts/$id", params: { id: contract.id } });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+        minDownPaymentPct: settings.min_down_payment_pct,
+        creditHoldDays: settings.credit_hold_days,
+      },
+      {
+        onSuccess: (contract) =>
+          void navigate({ to: "/contracts/$id", params: { id: contract.id } }),
+        onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   return (
@@ -408,10 +438,10 @@ function NewInstallmentSalePage() {
 
         <button
           onClick={handleConfirm}
-          disabled={cart.length === 0}
+          disabled={cart.length === 0 || createContractMutation.isPending}
           className="mt-6 rounded-md bg-primary px-6 py-3 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          تأكيد عقد التقسيط
+          {createContractMutation.isPending ? "جارٍ الحفظ..." : "تأكيد عقد التقسيط"}
         </button>
       </main>
     </div>

@@ -1,14 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { calculateFinance, generateSchedule } from "@/lib/finance-engine";
 import { supabase } from "@/lib/supabase-client";
 import type {
   AuditLogEntry,
   Customer,
+  Installment,
+  InstallmentContract,
+  InstallmentPayment,
+  InstallmentPlan,
   InventoryMovement,
   Product,
   ProductBrand,
   ProductCategory,
   ProductSerial,
+  PromiseToPay,
+  RestructureEvent,
   Sale,
   SaleItem,
   TenantSettings,
@@ -821,6 +828,831 @@ export function useCreateSale(tenantId: string | undefined) {
       void queryClient.invalidateQueries({ queryKey: ["sales", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["product_serials", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["inventory_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+/* ---------------- Installments (§35-§57 — the product's central feature) ----------------
+ * Not yet converted: Treasury/Journal postings (a contract/payment here updates real
+ * stock+schedule but does not yet post a cashier movement or accounting entry, same
+ * documented gap as the Sales flow above). */
+
+export function useInstallmentPlans(tenantId: string | undefined) {
+  return useTenantList<InstallmentPlan>("installment_plans", tenantId, {
+    orderBy: "duration_months",
+  });
+}
+
+export function useCreateInstallmentPlan(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      durationMonths,
+      ratePct,
+      actorUserId,
+    }: {
+      durationMonths: number;
+      ratePct: number;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data, error } = await supabase
+        .from("installment_plans")
+        .insert({
+          tenant_id: tenantId,
+          duration_months: durationMonths,
+          rate_pct: ratePct,
+          active: true,
+        })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "installment_plan.create",
+        entity: "installment_plans",
+        entity_id: data.id as string,
+        new_value: data,
+      });
+      return data as InstallmentPlan;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["installment_plans", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function useSetInstallmentPlanActive(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      active,
+      actorUserId,
+    }: {
+      id: string;
+      active: boolean;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data: before } = await supabase
+        .from("installment_plans")
+        .select("*")
+        .eq("id", id)
+        .single();
+      const { data, error } = await supabase
+        .from("installment_plans")
+        .update({ active })
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "installment_plan.update",
+        entity: "installment_plans",
+        entity_id: id,
+        old_value: before,
+        new_value: data,
+      });
+      return data as InstallmentPlan;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["installment_plans", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function useInstallmentContracts(tenantId: string | undefined) {
+  return useTenantList<InstallmentContract>("installment_contracts", tenantId, {
+    orderBy: "created_at",
+    ascending: false,
+  });
+}
+
+export function useInstallments(tenantId: string | undefined) {
+  return useTenantList<Installment>("installments", tenantId);
+}
+
+export function useInstallmentPayments(tenantId: string | undefined) {
+  return useTenantList<InstallmentPayment>("installment_payments", tenantId, {
+    orderBy: "created_at",
+    ascending: false,
+  });
+}
+
+export function usePromisesToPay(tenantId: string | undefined) {
+  return useTenantList<PromiseToPay>("promises_to_pay", tenantId);
+}
+
+export function useRestructureEvents(tenantId: string | undefined) {
+  return useTenantList<RestructureEvent>("restructure_events", tenantId);
+}
+
+function daysOverdue(dueDate: string): number {
+  const diffMs = Date.now() - new Date(dueDate).getTime();
+  return Math.max(0, Math.floor(diffMs / (24 * 60 * 60 * 1000)));
+}
+
+/** Mirrors data-store.ts's getCustomerExposure exactly — sum of every non-waived
+ * outstanding balance across the customer's still-open contracts. */
+export function computeCustomerExposure(
+  customerId: string,
+  contracts: InstallmentContract[],
+  installments: Installment[],
+): number {
+  const relevant = contracts.filter(
+    (c) => c.customer_id === customerId && c.status !== "settled" && c.status !== "settled_early",
+  );
+  return relevant.reduce((sum, contract) => {
+    const outstanding = installments
+      .filter((i) => i.contract_id === contract.id && i.status !== "waived")
+      .reduce((s, i) => s + Math.max(0, i.amount - i.paid_amount), 0);
+    return sum + outstanding;
+  }, 0);
+}
+
+/** Mirrors data-store.ts's isCustomerOnCreditHold exactly. */
+export function computeCustomerOnCreditHold(
+  customerId: string,
+  creditHoldDays: number,
+  contracts: InstallmentContract[],
+  installments: Installment[],
+): boolean {
+  const contractIds = new Set(
+    contracts.filter((c) => c.customer_id === customerId).map((c) => c.id),
+  );
+  return installments.some(
+    (i) =>
+      contractIds.has(i.contract_id) &&
+      i.status !== "paid" &&
+      i.status !== "waived" &&
+      daysOverdue(i.due_date) > creditHoldDays,
+  );
+}
+
+async function nextInstallmentDocNumber(
+  table: string,
+  column: string,
+  tenantId: string,
+  prefix: string,
+) {
+  const yearPrefix = `${prefix}-${new Date().getFullYear()}-`;
+  const { count, error } = await supabase
+    .from(table)
+    .select("*", { count: "exact", head: true })
+    .eq("tenant_id", tenantId)
+    .ilike(column, `${yearPrefix}%`);
+  if (error) throw new Error(error.message);
+  return `${yearPrefix}${String((count ?? 0) + 1).padStart(6, "0")}`;
+}
+
+export interface CreateInstallmentContractInput {
+  customer_id: string;
+  items: Array<{ product_id: string; serial_id?: string; quantity: number }>;
+  down_payment: number;
+  plan_id: string;
+}
+
+export function useCreateInstallmentContract(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      input,
+      actorUserId,
+      minDownPaymentPct,
+      creditHoldDays,
+    }: {
+      input: CreateInstallmentContractInput;
+      actorUserId: string | null;
+      minDownPaymentPct: number;
+      creditHoldDays: number;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (input.items.length === 0) throw new Error("لازم تضيف صنف واحد على الأقل");
+
+      const [
+        { data: customerRow, error: customerError },
+        { data: planRow, error: planError },
+        { data: products, error: productsError },
+        { data: allSerials, error: serialsError },
+        { data: movements, error: movementsError },
+        { data: contracts, error: contractsError },
+        { data: installments, error: installmentsError },
+      ] = await Promise.all([
+        supabase.from("customers").select("*").eq("id", input.customer_id).single(),
+        supabase.from("installment_plans").select("*").eq("id", input.plan_id).single(),
+        supabase.from("products").select("*").eq("tenant_id", tenantId),
+        supabase.from("product_serials").select("*").eq("tenant_id", tenantId),
+        supabase
+          .from("inventory_movements")
+          .select("product_id, quantity")
+          .eq("tenant_id", tenantId),
+        supabase.from("installment_contracts").select("*").eq("tenant_id", tenantId),
+        supabase.from("installments").select("*").eq("tenant_id", tenantId),
+      ]);
+      if (customerError || !customerRow) throw new Error("العميل غير موجود");
+      if (planError || !planRow) throw new Error("خطة التقسيط غير موجودة");
+      if (productsError) throw new Error(productsError.message);
+      if (serialsError) throw new Error(serialsError.message);
+      if (movementsError) throw new Error(movementsError.message);
+      if (contractsError) throw new Error(contractsError.message);
+      if (installmentsError) throw new Error(installmentsError.message);
+
+      const customer = customerRow as Customer;
+      const plan = planRow as InstallmentPlan;
+      if (customer.status !== "active") throw new Error("العميل غير نشط");
+      if (!plan.active) throw new Error("خطة التقسيط غير مفعّلة");
+
+      if (
+        computeCustomerOnCreditHold(
+          customer.id,
+          creditHoldDays,
+          contracts as InstallmentContract[],
+          installments as Installment[],
+        )
+      ) {
+        throw new Error(
+          "العميل موقوف عن التقسيط لتأخره في السداد (Credit Hold) — راجع صفحة العميل",
+        );
+      }
+
+      const saleItems: SaleItem[] = [];
+      const soldSerialIds = new Set<string>();
+      const stockTracker = new Map<string, number>();
+      const movementDrafts: Array<{
+        product_id: string;
+        quantity: number;
+        before: number;
+        after: number;
+      }> = [];
+
+      for (const line of input.items) {
+        const product = (products ?? []).find((p) => p.id === line.product_id) as
+          Product | undefined;
+        if (!product) throw new Error("منتج غير موجود");
+        if (!product.active) throw new Error(`المنتج "${product.name}" غير نشط`);
+        const stock = stockTracker.has(product.id)
+          ? (stockTracker.get(product.id) as number)
+          : computeProductStock(
+              product.id,
+              product.serial_required,
+              (allSerials ?? []) as ProductSerial[],
+              (movements ?? []) as InventoryMovement[],
+            );
+
+        if (product.serial_required) {
+          if (line.quantity !== 1) {
+            throw new Error(`المنتج "${product.name}" يُباع سيريال واحد لكل سطر`);
+          }
+          if (!line.serial_id) throw new Error(`اختر سيريال للمنتج "${product.name}"`);
+          if (soldSerialIds.has(line.serial_id)) {
+            throw new Error("لا يمكن بيع نفس السيريال مرتين في نفس العقد");
+          }
+          const serial = (allSerials ?? []).find(
+            (s) => s.id === line.serial_id && s.product_id === product.id,
+          );
+          if (!serial) throw new Error("السيريال غير موجود");
+          if (serial.status !== "available") {
+            throw new Error(`السيريال "${serial.serial_number as string}" غير متاح للبيع`);
+          }
+          soldSerialIds.add(serial.id as string);
+          saleItems.push({
+            product_id: product.id,
+            product_name: product.name,
+            serial_id: serial.id as string,
+            serial_number: serial.serial_number as string,
+            quantity: 1,
+            unit_price: product.installment_price,
+            line_total: product.installment_price,
+          });
+          stockTracker.set(product.id, stock - 1);
+          movementDrafts.push({
+            product_id: product.id,
+            quantity: -1,
+            before: stock,
+            after: stock - 1,
+          });
+        } else {
+          if (line.quantity <= 0) throw new Error(`كمية غير صحيحة للمنتج "${product.name}"`);
+          if (line.quantity > stock) {
+            throw new Error(`المخزون غير كافٍ للمنتج "${product.name}" (متاح ${stock})`);
+          }
+          saleItems.push({
+            product_id: product.id,
+            product_name: product.name,
+            quantity: line.quantity,
+            unit_price: product.installment_price,
+            line_total: product.installment_price * line.quantity,
+          });
+          stockTracker.set(product.id, stock - line.quantity);
+          movementDrafts.push({
+            product_id: product.id,
+            quantity: -line.quantity,
+            before: stock,
+            after: stock - line.quantity,
+          });
+        }
+      }
+
+      const cash_subtotal = saleItems.reduce((sum, i) => sum + i.line_total, 0);
+      if (input.down_payment < 0) throw new Error("المقدّم لا يمكن أن يكون سالبًا");
+      const minDownPayment = Math.round(cash_subtotal * (minDownPaymentPct / 100) * 100) / 100;
+      if (input.down_payment < minDownPayment) {
+        throw new Error(
+          `الحد الأدنى للمقدّم ${minDownPayment} ج.م (${minDownPaymentPct}% من قيمة البضاعة)`,
+        );
+      }
+      if (input.down_payment >= cash_subtotal) {
+        throw new Error("المقدّم يغطي كامل القيمة — استخدم البيع النقدي بدلاً من التقسيط");
+      }
+
+      const principal = Math.round((cash_subtotal - input.down_payment) * 100) / 100;
+      const { financeAmount, totalAmount } = calculateFinance(principal, plan.rate_pct);
+
+      const exposure = computeCustomerExposure(
+        customer.id,
+        contracts as InstallmentContract[],
+        installments as Installment[],
+      );
+      const availableCredit = customer.credit_limit - exposure;
+      if (totalAmount > availableCredit) {
+        throw new Error(
+          `تجاوز حد الائتمان: المتاح ${availableCredit} ج.م، والعقد يحتاج ${totalAmount} ج.م (الحد الكلي ${customer.credit_limit} ج.م، المستحق حاليًا ${exposure} ج.م)`,
+        );
+      }
+
+      const schedule = generateSchedule(totalAmount, plan.duration_months);
+      const contract_number = await nextInstallmentDocNumber(
+        "installment_contracts",
+        "contract_number",
+        tenantId,
+        "CNT",
+      );
+
+      const { data: contract, error: contractError } = await supabase
+        .from("installment_contracts")
+        .insert({
+          tenant_id: tenantId,
+          contract_number,
+          customer_id: customer.id,
+          customer_name: customer.name,
+          items: saleItems,
+          cash_subtotal,
+          down_payment: input.down_payment,
+          principal,
+          plan_id: plan.id,
+          plan_duration_months: plan.duration_months,
+          plan_rate_pct: plan.rate_pct,
+          finance_amount: financeAmount,
+          total_amount: totalAmount,
+          installment_amount: schedule[0]?.amount ?? 0,
+          status: "active",
+          user_id: actorUserId,
+        })
+        .select()
+        .single();
+      if (contractError) throw new Error(contractError.message);
+
+      const { error: installmentsInsertError } = await supabase.from("installments").insert(
+        schedule.map((line) => ({
+          tenant_id: tenantId,
+          contract_id: contract.id as string,
+          seq: line.seq,
+          due_date: line.due_date,
+          amount: line.amount,
+          paid_amount: 0,
+          status: "scheduled",
+        })),
+      );
+      if (installmentsInsertError) throw new Error(installmentsInsertError.message);
+
+      if (soldSerialIds.size > 0) {
+        const { error: updateSerialsError } = await supabase
+          .from("product_serials")
+          .update({ status: "sold" })
+          .in("id", Array.from(soldSerialIds));
+        if (updateSerialsError) throw new Error(updateSerialsError.message);
+      }
+      if (movementDrafts.length > 0) {
+        const { error: movementsInsertError } = await supabase.from("inventory_movements").insert(
+          movementDrafts.map((m) => ({
+            tenant_id: tenantId,
+            product_id: m.product_id,
+            type: "sale",
+            quantity: m.quantity,
+            before: m.before,
+            after: m.after,
+            user_id: actorUserId,
+            reference: contract_number,
+          })),
+        );
+        if (movementsInsertError) throw new Error(movementsInsertError.message);
+      }
+
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "installment_contract.create",
+        entity: "installment_contracts",
+        entity_id: contract.id as string,
+        new_value: contract,
+      });
+
+      return contract as InstallmentContract;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["installment_contracts", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["installments", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["product_serials", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["inventory_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+/** Shared by useCollectPayment and useEarlySettleContract — same Oldest-Due-First allocation
+ * (§46), same receipt/status/promise side effects, just a different caller-supplied amount. */
+async function performCollectPayment(
+  tenantId: string,
+  contractId: string,
+  amount: number,
+  actorUserId: string | null,
+): Promise<InstallmentPayment> {
+  if (amount <= 0) throw new Error("المبلغ يجب أن يكون أكبر من صفر");
+  const { data: contract, error: contractError } = await supabase
+    .from("installment_contracts")
+    .select("*")
+    .eq("id", contractId)
+    .single();
+  if (contractError || !contract) throw new Error("العقد غير موجود");
+
+  const { data: allInstallments, error: installmentsError } = await supabase
+    .from("installments")
+    .select("*")
+    .eq("contract_id", contractId);
+  if (installmentsError) throw new Error(installmentsError.message);
+  const contractInstallments = (allInstallments ?? [])
+    .filter((i) => i.status !== "waived" && i.status !== "rescheduled")
+    .sort((a, b) => (a.seq as number) - (b.seq as number));
+
+  const totalOwed =
+    Math.round(
+      contractInstallments.reduce(
+        (sum, i) => sum + Math.max(0, (i.amount as number) - (i.paid_amount as number)),
+        0,
+      ) * 100,
+    ) / 100;
+  if (totalOwed <= 0) throw new Error("لا يوجد أقساط مستحقة على هذا العقد");
+  if (amount > totalOwed) {
+    throw new Error(`المبلغ (${amount}) أكبر من إجمالي المتبقي على العقد (${totalOwed} ج.م)`);
+  }
+
+  let remaining = amount;
+  const allocations: Array<{ installment_id: string; amount: number }> = [];
+  const updates: Array<{ id: string; paid_amount: number; status: string }> = [];
+  for (const inst of contractInstallments) {
+    if (remaining <= 0) break;
+    const owed = Math.round(((inst.amount as number) - (inst.paid_amount as number)) * 100) / 100;
+    if (owed <= 0) continue;
+    const apply = Math.min(owed, remaining);
+    allocations.push({ installment_id: inst.id as string, amount: apply });
+    const newPaid = Math.round(((inst.paid_amount as number) + apply) * 100) / 100;
+    updates.push({
+      id: inst.id as string,
+      paid_amount: newPaid,
+      status: newPaid >= (inst.amount as number) ? "paid" : "partially_paid",
+    });
+    remaining = Math.round((remaining - apply) * 100) / 100;
+  }
+
+  const receipt_number = await nextInstallmentDocNumber(
+    "installment_payments",
+    "receipt_number",
+    tenantId,
+    "RCT",
+  );
+  const { data: payment, error: paymentError } = await supabase
+    .from("installment_payments")
+    .insert({
+      tenant_id: tenantId,
+      contract_id: contractId,
+      receipt_number,
+      amount,
+      allocations,
+      user_id: actorUserId,
+    })
+    .select()
+    .single();
+  if (paymentError) throw new Error(paymentError.message);
+
+  for (const u of updates) {
+    const { error: updateError } = await supabase
+      .from("installments")
+      .update({ paid_amount: u.paid_amount, status: u.status })
+      .eq("id", u.id);
+    if (updateError) throw new Error(updateError.message);
+  }
+
+  const { data: refreshed, error: refreshedError } = await supabase
+    .from("installments")
+    .select("status, paid_amount")
+    .eq("contract_id", contractId)
+    .not("status", "in", "(waived,rescheduled)");
+  if (refreshedError) throw new Error(refreshedError.message);
+  const allPaid = (refreshed ?? []).every((i) => i.status === "paid");
+  const anyPaid = (refreshed ?? []).some((i) => (i.paid_amount as number) > 0);
+  const nextStatus = allPaid ? "settled" : anyPaid ? "partially_paid" : (contract.status as string);
+  if (nextStatus !== contract.status) {
+    const { error: statusError } = await supabase
+      .from("installment_contracts")
+      .update({ status: nextStatus })
+      .eq("id", contractId);
+    if (statusError) throw new Error(statusError.message);
+  }
+
+  const { data: keepablePromises, error: promisesError } = await supabase
+    .from("promises_to_pay")
+    .select("id, promise_date")
+    .eq("contract_id", contractId)
+    .eq("status", "pending");
+  if (promisesError) throw new Error(promisesError.message);
+  const nowIso = new Date().toISOString();
+  const keepableIds = (keepablePromises ?? [])
+    .filter((p) => nowIso <= (p.promise_date as string))
+    .map((p) => p.id as string);
+  if (keepableIds.length > 0) {
+    const { error: keepError } = await supabase
+      .from("promises_to_pay")
+      .update({ status: "kept" })
+      .in("id", keepableIds);
+    if (keepError) throw new Error(keepError.message);
+  }
+
+  await insertAuditLog({
+    tenant_id: tenantId,
+    user_id: actorUserId,
+    action: "installment_payment.collect",
+    entity: "installment_payments",
+    entity_id: payment.id as string,
+    new_value: payment,
+  });
+
+  return payment as InstallmentPayment;
+}
+
+export function useCollectPayment(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      contractId,
+      amount,
+      actorUserId,
+    }: {
+      contractId: string;
+      amount: number;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      return performCollectPayment(tenantId, contractId, amount, actorUserId);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["installments", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["installment_contracts", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["installment_payments", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["promises_to_pay", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function useRecordPromise(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      contractId,
+      promiseDate,
+      expectedAmount,
+      notes,
+      actorUserId,
+    }: {
+      contractId: string;
+      promiseDate: string;
+      expectedAmount: number;
+      notes?: string;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (expectedAmount <= 0) throw new Error("المبلغ المتوقع يجب أن يكون أكبر من صفر");
+      const { data, error } = await supabase
+        .from("promises_to_pay")
+        .insert({
+          tenant_id: tenantId,
+          contract_id: contractId,
+          promise_date: promiseDate,
+          expected_amount: expectedAmount,
+          ...(notes?.trim() && { notes: notes.trim() }),
+          user_id: actorUserId,
+          status: "pending",
+        })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "promise_to_pay.record",
+        entity: "promises_to_pay",
+        entity_id: data.id as string,
+        new_value: data,
+      });
+      return data as PromiseToPay;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["promises_to_pay", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function useEarlySettleContract(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      contractId,
+      actorUserId,
+    }: {
+      contractId: string;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data: contract, error: contractError } = await supabase
+        .from("installment_contracts")
+        .select("*")
+        .eq("id", contractId)
+        .single();
+      if (contractError || !contract) throw new Error("العقد غير موجود");
+      if (contract.status === "settled" || contract.status === "settled_early") {
+        throw new Error("العقد مسدد بالكامل بالفعل");
+      }
+
+      const { data: outstanding, error: outstandingError } = await supabase
+        .from("installments")
+        .select("amount, paid_amount")
+        .eq("contract_id", contractId)
+        .not("status", "in", "(waived,rescheduled)");
+      if (outstandingError) throw new Error(outstandingError.message);
+      const remaining =
+        Math.round(
+          (outstanding ?? []).reduce(
+            (sum, i) => sum + Math.max(0, (i.amount as number) - (i.paid_amount as number)),
+            0,
+          ) * 100,
+        ) / 100;
+      if (remaining <= 0) throw new Error("لا يوجد مبلغ متبقي لتسويته");
+
+      const payment = await performCollectPayment(tenantId, contractId, remaining, actorUserId);
+
+      const { error: statusError } = await supabase
+        .from("installment_contracts")
+        .update({ status: "settled_early" })
+        .eq("id", contractId);
+      if (statusError) throw new Error(statusError.message);
+
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "installment_contract.settle_early",
+        entity: "installment_contracts",
+        entity_id: contractId,
+        new_value: { remaining, payment_id: payment.id },
+      });
+
+      return payment;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["installments", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["installment_contracts", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["installment_payments", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function useRestructureContract(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      contractId,
+      newDurationMonths,
+      reason,
+      actorUserId,
+    }: {
+      contractId: string;
+      newDurationMonths: number;
+      reason: string;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (newDurationMonths <= 0) throw new Error("مدة إعادة الهيكلة يجب أن تكون أكبر من صفر");
+      if (!reason.trim()) throw new Error("سبب إعادة الهيكلة مطلوب");
+
+      const { data: contract, error: contractError } = await supabase
+        .from("installment_contracts")
+        .select("*")
+        .eq("id", contractId)
+        .single();
+      if (contractError || !contract) throw new Error("العقد غير موجود");
+      if (contract.status === "settled" || contract.status === "settled_early") {
+        throw new Error("العقد مسدد بالكامل، لا يمكن إعادة هيكلته");
+      }
+
+      const { data: contractInstallments, error: instError } = await supabase
+        .from("installments")
+        .select("*")
+        .eq("contract_id", contractId);
+      if (instError) throw new Error(instError.message);
+      const outstanding = (contractInstallments ?? []).filter(
+        (i) =>
+          i.status !== "waived" &&
+          i.status !== "rescheduled" &&
+          (i.amount as number) > (i.paid_amount as number),
+      );
+      if (outstanding.length === 0) throw new Error("لا يوجد أقساط متبقية لإعادة هيكلتها");
+
+      const remaining =
+        Math.round(
+          outstanding.reduce(
+            (sum, i) => sum + ((i.amount as number) - (i.paid_amount as number)),
+            0,
+          ) * 100,
+        ) / 100;
+      const oldInstallmentIds = outstanding.map((i) => i.id as string);
+
+      const schedule = generateSchedule(remaining, newDurationMonths);
+      const maxSeq = Math.max(0, ...(contractInstallments ?? []).map((i) => i.seq as number));
+
+      const { error: updateOldError } = await supabase
+        .from("installments")
+        .update({ status: "rescheduled" })
+        .in("id", oldInstallmentIds);
+      if (updateOldError) throw new Error(updateOldError.message);
+
+      const { error: insertNewError } = await supabase.from("installments").insert(
+        schedule.map((line, index) => ({
+          tenant_id: tenantId,
+          contract_id: contractId,
+          seq: maxSeq + index + 1,
+          due_date: line.due_date,
+          amount: line.amount,
+          paid_amount: 0,
+          status: "scheduled",
+        })),
+      );
+      if (insertNewError) throw new Error(insertNewError.message);
+
+      const { data: event, error: eventError } = await supabase
+        .from("restructure_events")
+        .insert({
+          tenant_id: tenantId,
+          contract_id: contractId,
+          old_installment_ids: oldInstallmentIds,
+          remaining_amount: remaining,
+          new_duration_months: newDurationMonths,
+          reason: reason.trim(),
+          user_id: actorUserId,
+        })
+        .select()
+        .single();
+      if (eventError) throw new Error(eventError.message);
+
+      const { error: statusError } = await supabase
+        .from("installment_contracts")
+        .update({ status: "restructured" })
+        .eq("id", contractId);
+      if (statusError) throw new Error(statusError.message);
+
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "installment_contract.restructure",
+        entity: "installment_contracts",
+        entity_id: contractId,
+        new_value: event,
+        reason: reason.trim(),
+      });
+
+      return event as RestructureEvent;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["installments", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["installment_contracts", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["restructure_events", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
   });

@@ -3,21 +3,23 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import {
-  collectPayment,
-  earlySettleContract,
-  getCurrentTenantSettings,
   getDaysOverdue,
   getEffectiveInstallmentStatus,
   getEffectivePromiseStatus,
-  getInstallmentContracts,
-  getInstallmentPayments,
-  getInstallments,
-  getPromisesToPay,
-  getRestructureEvents,
-  recordPromise,
-  restructureContract,
   subscribeData,
 } from "@/lib/data-store";
+import {
+  useCollectPayment,
+  useCurrentTenantSettings,
+  useEarlySettleContract,
+  useInstallmentContracts,
+  useInstallmentPayments,
+  useInstallments,
+  usePromisesToPay,
+  useRecordPromise,
+  useRestructureContract,
+  useRestructureEvents,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 import type { InstallmentStatus, PromiseToPay } from "@/types";
 
@@ -78,40 +80,59 @@ function ContractDetailPage() {
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
+  const { data: settingsData } = useCurrentTenantSettings(session?.tenant_id);
+  const { data: allContracts = [], isLoading: contractsLoading } = useInstallmentContracts(
+    session?.tenant_id,
+  );
+  const { data: allInstallments = [] } = useInstallments(session?.tenant_id);
+  const { data: allPayments = [] } = useInstallmentPayments(session?.tenant_id);
+  const { data: allPromises = [] } = usePromisesToPay(session?.tenant_id);
+  const { data: allRestructureEvents = [] } = useRestructureEvents(session?.tenant_id);
+  const collectPaymentMutation = useCollectPayment(session?.tenant_id);
+  const recordPromiseMutation = useRecordPromise(session?.tenant_id);
+  const earlySettleMutation = useEarlySettleContract(session?.tenant_id);
+  const restructureMutation = useRestructureContract(session?.tenant_id);
+
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const contract = getInstallmentContracts(session.tenant_id).find((c) => c.id === id);
+  const contract = allContracts.find((c) => c.id === id);
 
   if (!contract) {
     return (
       <div className="flex min-h-screen bg-background">
         <AppSidebar session={session} />
         <main className="flex-1 mx-auto max-w-3xl px-4 py-8 text-center text-muted-foreground">
-          العقد غير موجود.{" "}
-          <Link to="/sales/new-installment" className="text-primary hover:underline">
-            عقد تقسيط جديد
-          </Link>
+          {contractsLoading ? (
+            "جارٍ التحميل..."
+          ) : (
+            <>
+              العقد غير موجود.{" "}
+              <Link to="/sales/new-installment" className="text-primary hover:underline">
+                عقد تقسيط جديد
+              </Link>
+            </>
+          )}
         </main>
       </div>
     );
   }
 
   const contractId = contract.id;
-  const settings = getCurrentTenantSettings();
-  const installments = getInstallments(session.tenant_id)
+  const settings = settingsData ?? { grace_period_days: 3 };
+  const installments = allInstallments
     .filter((i) => i.contract_id === contractId)
     .sort((a, b) => a.seq - b.seq);
 
   const totalPaid = installments.reduce((sum, i) => sum + i.paid_amount, 0);
   const remaining = Math.max(0, contract.total_amount - totalPaid);
-  const payments = getInstallmentPayments(session.tenant_id)
+  const payments = allPayments
     .filter((p) => p.contract_id === contractId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const promises = getPromisesToPay(session.tenant_id)
+  const promises = allPromises
     .filter((p) => p.contract_id === contractId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const restructureEvents = getRestructureEvents(session.tenant_id)
+  const restructureEvents = allRestructureEvents
     .filter((r) => r.contract_id === contractId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const canAct = contract.status !== "settled" && contract.status !== "settled_early";
@@ -123,14 +144,17 @@ function ContractDetailPage() {
       setPayError("أدخل مبلغ صحيح");
       return;
     }
-    try {
-      collectPayment(contractId, amount, actorUserId);
-      setPayAmount("");
-      setPaySuccess(true);
-      setTimeout(() => setPaySuccess(false), 2000);
-    } catch (e) {
-      setPayError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+    collectPaymentMutation.mutate(
+      { contractId, amount, actorUserId },
+      {
+        onSuccess: () => {
+          setPayAmount("");
+          setPaySuccess(true);
+          setTimeout(() => setPaySuccess(false), 2000);
+        },
+        onError: (e) => setPayError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   function handleAddPromise(event: FormEvent) {
@@ -145,21 +169,24 @@ function ContractDetailPage() {
       setPromiseError("أدخل مبلغ متوقع صحيح");
       return;
     }
-    try {
-      recordPromise(
+    recordPromiseMutation.mutate(
+      {
         contractId,
-        new Date(promiseDate).toISOString(),
-        amount,
-        promiseNotes,
+        promiseDate: new Date(promiseDate).toISOString(),
+        expectedAmount: amount,
+        notes: promiseNotes,
         actorUserId,
-      );
-      setPromiseDate("");
-      setPromiseAmount("");
-      setPromiseNotes("");
-      setShowPromiseForm(false);
-    } catch (e) {
-      setPromiseError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+      },
+      {
+        onSuccess: () => {
+          setPromiseDate("");
+          setPromiseAmount("");
+          setPromiseNotes("");
+          setShowPromiseForm(false);
+        },
+        onError: (e) => setPromiseError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   function handleEarlySettle() {
@@ -169,13 +196,16 @@ function ContractDetailPage() {
     ) {
       return;
     }
-    try {
-      const payment = earlySettleContract(contractId, actorUserId);
-      setActionSuccess(`تمت التسوية المبكرة — إيصال ${payment.receipt_number}`);
-      setTimeout(() => setActionSuccess(null), 4000);
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+    earlySettleMutation.mutate(
+      { contractId, actorUserId },
+      {
+        onSuccess: (payment) => {
+          setActionSuccess(`تمت التسوية المبكرة — إيصال ${payment.receipt_number}`);
+          setTimeout(() => setActionSuccess(null), 4000);
+        },
+        onError: (e) => setActionError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   function handleRestructure(event: FormEvent) {
@@ -190,15 +220,18 @@ function ContractDetailPage() {
       setRestructureError("سبب إعادة الهيكلة مطلوب");
       return;
     }
-    try {
-      restructureContract(contractId, duration, restructureReason, actorUserId);
-      setRestructureReason("");
-      setShowRestructureForm(false);
-      setActionSuccess("تمت إعادة هيكلة العقد بجدول أقساط جديد");
-      setTimeout(() => setActionSuccess(null), 4000);
-    } catch (e) {
-      setRestructureError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+    restructureMutation.mutate(
+      { contractId, newDurationMonths: duration, reason: restructureReason, actorUserId },
+      {
+        onSuccess: () => {
+          setRestructureReason("");
+          setShowRestructureForm(false);
+          setActionSuccess("تمت إعادة هيكلة العقد بجدول أقساط جديد");
+          setTimeout(() => setActionSuccess(null), 4000);
+        },
+        onError: (e) => setRestructureError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   return (

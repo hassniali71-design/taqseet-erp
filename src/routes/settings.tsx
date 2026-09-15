@@ -2,18 +2,16 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { subscribeData } from "@/lib/data-store";
 import {
-  createInstallmentPlan,
-  getInstallmentPlans,
-  setInstallmentPlanActive,
-  subscribeData,
-} from "@/lib/data-store";
-import {
+  useCreateInstallmentPlan,
   useCurrentTenantSettings,
+  useInstallmentPlans,
   useProductBrands,
   useProductCategories,
   useRegisterProductBrand,
   useRegisterProductCategory,
+  useSetInstallmentPlanActive,
   useSetProductBrandActive,
   useSetProductCategoryActive,
   useUpdateTenantSettings,
@@ -63,6 +61,9 @@ function SettingsPage() {
   const registerBrandMutation = useRegisterProductBrand(session?.tenant_id);
   const setCategoryActiveMutation = useSetProductCategoryActive(session?.tenant_id);
   const setBrandActiveMutation = useSetProductBrandActive(session?.tenant_id);
+  const { data: plans = [] } = useInstallmentPlans(session?.tenant_id);
+  const createPlanMutation = useCreateInstallmentPlan(session?.tenant_id);
+  const setPlanActiveMutation = useSetInstallmentPlanActive(session?.tenant_id);
   const [form, setForm] = useState<FormState | null>(settings ? toFormState(settings) : null);
 
   useEffect(() => {
@@ -100,14 +101,13 @@ function SettingsPage() {
     );
   }
 
-  const plans = getInstallmentPlans(session.tenant_id);
-
   function handleAddPlan(event: FormEvent) {
     event.preventDefault();
-    createInstallmentPlan(
-      { duration_months: Number(planDuration) || 0, rate_pct: Number(planRate) || 0 },
+    createPlanMutation.mutate({
+      durationMonths: Number(planDuration) || 0,
+      ratePct: Number(planRate) || 0,
       actorUserId,
-    );
+    });
     setPlanDuration("6");
     setPlanRate("20");
     setShowPlanForm(false);
@@ -391,7 +391,13 @@ function SettingsPage() {
                     </td>
                     <td className="px-4 py-3 text-left">
                       <button
-                        onClick={() => setInstallmentPlanActive(plan.id, !plan.active, actorUserId)}
+                        onClick={() =>
+                          setPlanActiveMutation.mutate({
+                            id: plan.id,
+                            active: !plan.active,
+                            actorUserId,
+                          })
+                        }
                         className="text-xs font-medium text-primary hover:underline"
                       >
                         {plan.active ? "إيقاف" : "تفعيل"}
