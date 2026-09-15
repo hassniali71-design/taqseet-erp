@@ -8,6 +8,7 @@ import {
   useProductBrands,
   useProductCategories,
   useProducts,
+  useReceiveStock,
   useRegisterProductBrand,
   useRegisterProductCategory,
   useUpdateProduct,
@@ -32,6 +33,7 @@ type FormState = {
   max_stock: string;
   warranty_months: string;
   serial_required: boolean;
+  opening_stock: string;
 };
 
 const EMPTY_FORM: FormState = {
@@ -47,6 +49,7 @@ const EMPTY_FORM: FormState = {
   max_stock: "0",
   warranty_months: "",
   serial_required: true,
+  opening_stock: "0",
 };
 
 function toNumber(value: string): number {
@@ -59,6 +62,8 @@ function ProductsPage() {
   const [, forceRerender] = useState(0);
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [openingSerials, setOpeningSerials] = useState<string[]>([""]);
+  const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -69,6 +74,7 @@ function ProductsPage() {
   const updateProductMutation = useUpdateProduct(session?.tenant_id);
   const registerBrandMutation = useRegisterProductBrand(session?.tenant_id);
   const registerCategoryMutation = useRegisterProductCategory(session?.tenant_id);
+  const receiveStockMutation = useReceiveStock(session?.tenant_id);
 
   if (!session) return null;
   // Extracted so nested closures below see a plain `string`, not the `Session | null` union
@@ -80,6 +86,8 @@ function ProductsPage() {
 
   function startCreate() {
     setForm(EMPTY_FORM);
+    setOpeningSerials([""]);
+    setFormError(null);
     setEditingId("new");
   }
 
@@ -97,39 +105,69 @@ function ProductsPage() {
       max_stock: String(product.max_stock),
       warranty_months: product.warranty_months ? String(product.warranty_months) : "",
       serial_required: product.serial_required,
+      opening_stock: "0",
     });
+    setFormError(null);
     setEditingId(product.id);
+  }
+
+  function onOpeningStockChange(value: string) {
+    setForm({ ...form, opening_stock: value });
+    if (form.serial_required) {
+      const n = Math.max(0, Number(value) || 0);
+      setOpeningSerials((prev) => {
+        const next = [...prev];
+        while (next.length < n) next.push("");
+        return next.slice(0, Math.max(n, 1));
+      });
+    }
   }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    if (form.brand.trim()) {
-      await registerBrandMutation.mutateAsync({ name: form.brand.trim(), actorUserId });
+    setFormError(null);
+    try {
+      if (form.brand.trim()) {
+        await registerBrandMutation.mutateAsync({ name: form.brand.trim(), actorUserId });
+      }
+      if (form.category.trim()) {
+        await registerCategoryMutation.mutateAsync({ name: form.category.trim(), actorUserId });
+      }
+      const payload = {
+        name: form.name.trim(),
+        ...(form.brand.trim() && { brand: form.brand.trim() }),
+        ...(form.model.trim() && { model: form.model.trim() }),
+        ...(form.category.trim() && { category: form.category.trim() }),
+        unit: form.unit.trim() || "قطعة",
+        cost_price: toNumber(form.cost_price),
+        cash_price: toNumber(form.cash_price),
+        installment_price: toNumber(form.installment_price),
+        min_stock: toNumber(form.min_stock),
+        max_stock: toNumber(form.max_stock),
+        ...(form.warranty_months && { warranty_months: toNumber(form.warranty_months) }),
+        serial_required: form.serial_required,
+      };
+      if (editingId === "new") {
+        const openingQty = toNumber(form.opening_stock);
+        const product = await createProductMutation.mutateAsync({ input: payload, actorUserId });
+        if (openingQty > 0) {
+          await receiveStockMutation.mutateAsync({
+            product,
+            quantity: openingQty,
+            serialNumbers: form.serial_required ? openingSerials : undefined,
+            actorUserId,
+            reference: "رصيد افتتاحي",
+          });
+        }
+      } else if (editingId) {
+        await updateProductMutation.mutateAsync({ id: editingId, patch: payload, actorUserId });
+      }
+      setEditingId(null);
+      setForm(EMPTY_FORM);
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : "حدث خطأ");
+      return;
     }
-    if (form.category.trim()) {
-      await registerCategoryMutation.mutateAsync({ name: form.category.trim(), actorUserId });
-    }
-    const payload = {
-      name: form.name.trim(),
-      ...(form.brand.trim() && { brand: form.brand.trim() }),
-      ...(form.model.trim() && { model: form.model.trim() }),
-      ...(form.category.trim() && { category: form.category.trim() }),
-      unit: form.unit.trim() || "قطعة",
-      cost_price: toNumber(form.cost_price),
-      cash_price: toNumber(form.cash_price),
-      installment_price: toNumber(form.installment_price),
-      min_stock: toNumber(form.min_stock),
-      max_stock: toNumber(form.max_stock),
-      ...(form.warranty_months && { warranty_months: toNumber(form.warranty_months) }),
-      serial_required: form.serial_required,
-    };
-    if (editingId === "new") {
-      createProductMutation.mutate({ input: payload, actorUserId });
-    } else if (editingId) {
-      updateProductMutation.mutate({ id: editingId, patch: payload, actorUserId });
-    }
-    setEditingId(null);
-    setForm(EMPTY_FORM);
   }
 
   function toggleActive(product: Product) {
@@ -280,6 +318,48 @@ function ProductsPage() {
                 يحتاج سيريال (جهاز فردي)
               </label>
             </div>
+
+            {editingId === "new" && (
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <Field label="المخزون الافتتاحي (اختياري — تقدر تستلم كمية لاحقًا من صفحة الجهاز)">
+                  <input
+                    type="number"
+                    min="0"
+                    value={form.opening_stock}
+                    onChange={(e) => onOpeningStockChange(e.target.value)}
+                    className="form-input max-w-xs"
+                    dir="ltr"
+                  />
+                </Field>
+                {form.serial_required && toNumber(form.opening_stock) > 0 && (
+                  <div className="mt-3 space-y-2">
+                    <span className="text-xs font-medium text-foreground">
+                      أرقام السيريال ({openingSerials.length})
+                    </span>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {openingSerials.map((value, i) => (
+                        <input
+                          key={i}
+                          required
+                          value={value}
+                          onChange={(e) => {
+                            const next = [...openingSerials];
+                            next[i] = e.target.value;
+                            setOpeningSerials(next);
+                          }}
+                          placeholder={`سيريال #${i + 1}`}
+                          className="form-input"
+                          dir="ltr"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {formError && <p className="text-sm text-destructive">{formError}</p>}
+
             <div className="flex gap-2">
               <button
                 type="submit"
@@ -292,6 +372,7 @@ function ProductsPage() {
                 onClick={() => {
                   setEditingId(null);
                   setForm(EMPTY_FORM);
+                  setFormError(null);
                 }}
                 className="rounded-md border border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
               >
