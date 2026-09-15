@@ -2,17 +2,16 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { getProductStock, subscribeData } from "@/lib/data-store";
 import {
-  createProduct,
-  getProductBrands,
-  getProductCategories,
-  getProductStock,
-  getProducts,
-  registerProductBrand,
-  registerProductCategory,
-  subscribeData,
-  updateProduct,
-} from "@/lib/data-store";
+  useCreateProduct,
+  useProductBrands,
+  useProductCategories,
+  useProducts,
+  useRegisterProductBrand,
+  useRegisterProductCategory,
+  useUpdateProduct,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 import type { Product } from "@/types";
 
@@ -63,14 +62,21 @@ function ProductsPage() {
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
+  const { data: products = [], isLoading } = useProducts(session?.tenant_id);
+  const { data: allCategories = [] } = useProductCategories(session?.tenant_id);
+  const { data: allBrands = [] } = useProductBrands(session?.tenant_id);
+  const createProductMutation = useCreateProduct(session?.tenant_id);
+  const updateProductMutation = useUpdateProduct(session?.tenant_id);
+  const registerBrandMutation = useRegisterProductBrand(session?.tenant_id);
+  const registerCategoryMutation = useRegisterProductCategory(session?.tenant_id);
+
   if (!session) return null;
   // Extracted so nested closures below see a plain `string`, not the `Session | null` union
   // TypeScript falls back to for a captured outer variable inside a function body.
   const actorUserId = session.user_id;
 
-  const products = getProducts(session.tenant_id);
-  const categories = getProductCategories(session.tenant_id).filter((c) => c.active);
-  const brands = getProductBrands(session.tenant_id).filter((b) => b.active);
+  const categories = allCategories.filter((c) => c.active);
+  const brands = allBrands.filter((b) => b.active);
 
   function startCreate() {
     setForm(EMPTY_FORM);
@@ -95,10 +101,14 @@ function ProductsPage() {
     setEditingId(product.id);
   }
 
-  function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    if (form.brand.trim()) registerProductBrand(form.brand.trim(), actorUserId);
-    if (form.category.trim()) registerProductCategory(form.category.trim(), actorUserId);
+    if (form.brand.trim()) {
+      await registerBrandMutation.mutateAsync({ name: form.brand.trim(), actorUserId });
+    }
+    if (form.category.trim()) {
+      await registerCategoryMutation.mutateAsync({ name: form.category.trim(), actorUserId });
+    }
     const payload = {
       name: form.name.trim(),
       ...(form.brand.trim() && { brand: form.brand.trim() }),
@@ -114,16 +124,20 @@ function ProductsPage() {
       serial_required: form.serial_required,
     };
     if (editingId === "new") {
-      createProduct(payload, actorUserId);
+      createProductMutation.mutate({ input: payload, actorUserId });
     } else if (editingId) {
-      updateProduct(editingId, payload, actorUserId);
+      updateProductMutation.mutate({ id: editingId, patch: payload, actorUserId });
     }
     setEditingId(null);
     setForm(EMPTY_FORM);
   }
 
   function toggleActive(product: Product) {
-    updateProduct(product.id, { active: !product.active }, actorUserId);
+    updateProductMutation.mutate({
+      id: product.id,
+      patch: { active: !product.active },
+      actorUserId,
+    });
   }
 
   return (
@@ -358,7 +372,7 @@ function ProductsPage() {
               {products.length === 0 && (
                 <tr>
                   <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">
-                    لا يوجد أجهزة بعد.
+                    {isLoading ? "جارٍ التحميل..." : "لا يوجد أجهزة بعد."}
                   </td>
                 </tr>
               )}

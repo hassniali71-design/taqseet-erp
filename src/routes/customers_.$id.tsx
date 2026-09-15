@@ -7,12 +7,12 @@ import {
   createGuarantor,
   getCustomerExposure,
   getCustomerRiskAssessment,
-  getCustomers,
   getGuarantors,
   getInstallmentContracts,
   getSales,
   subscribeData,
 } from "@/lib/data-store";
+import { useCustomers } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/customers_/$id")({
@@ -30,19 +30,26 @@ function CustomerDetailPage() {
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
+  const { data: customers = [], isLoading } = useCustomers(session?.tenant_id);
+
   if (!session) return null;
   const actorUserId = session.user_id;
-
-  const customer = getCustomers(session.tenant_id).find((c) => c.id === id);
+  const customer = customers.find((c) => c.id === id);
   if (!customer) {
     return (
       <div className="flex min-h-screen bg-background">
         <AppSidebar session={session} />
         <main className="flex-1 mx-auto max-w-5xl px-4 py-8 text-center text-muted-foreground">
-          العميل غير موجود.{" "}
-          <Link to="/customers" className="text-primary hover:underline">
-            العودة للعملاء
-          </Link>
+          {isLoading ? (
+            "جارٍ التحميل..."
+          ) : (
+            <>
+              العميل غير موجود.{" "}
+              <Link to="/customers" className="text-primary hover:underline">
+                العودة للعملاء
+              </Link>
+            </>
+          )}
         </main>
       </div>
     );

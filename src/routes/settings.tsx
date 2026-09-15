@@ -5,16 +5,19 @@ import { AppSidebar } from "@/components/AppSidebar";
 import {
   createInstallmentPlan,
   getInstallmentPlans,
-  getProductBrands,
-  getProductCategories,
-  registerProductBrand,
-  registerProductCategory,
   setInstallmentPlanActive,
-  setProductBrandActive,
-  setProductCategoryActive,
   subscribeData,
 } from "@/lib/data-store";
-import { useCurrentTenantSettings, useUpdateTenantSettings } from "@/lib/supabase-queries";
+import {
+  useCurrentTenantSettings,
+  useProductBrands,
+  useProductCategories,
+  useRegisterProductBrand,
+  useRegisterProductCategory,
+  useSetProductBrandActive,
+  useSetProductCategoryActive,
+  useUpdateTenantSettings,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 import type { TenantSettings } from "@/types";
 
@@ -54,6 +57,12 @@ function SettingsPage() {
 
   const { data: settings } = useCurrentTenantSettings(session?.tenant_id);
   const updateSettingsMutation = useUpdateTenantSettings(session?.tenant_id);
+  const { data: categories = [] } = useProductCategories(session?.tenant_id);
+  const { data: brands = [] } = useProductBrands(session?.tenant_id);
+  const registerCategoryMutation = useRegisterProductCategory(session?.tenant_id);
+  const registerBrandMutation = useRegisterProductBrand(session?.tenant_id);
+  const setCategoryActiveMutation = useSetProductCategoryActive(session?.tenant_id);
+  const setBrandActiveMutation = useSetProductBrandActive(session?.tenant_id);
   const [form, setForm] = useState<FormState | null>(settings ? toFormState(settings) : null);
 
   useEffect(() => {
@@ -92,8 +101,6 @@ function SettingsPage() {
   }
 
   const plans = getInstallmentPlans(session.tenant_id);
-  const categories = getProductCategories(session.tenant_id);
-  const brands = getProductBrands(session.tenant_id);
 
   function handleAddPlan(event: FormEvent) {
     event.preventDefault();
@@ -109,14 +116,14 @@ function SettingsPage() {
   function handleAddCategory(event: FormEvent) {
     event.preventDefault();
     if (!newCategory.trim()) return;
-    registerProductCategory(newCategory.trim(), actorUserId);
+    registerCategoryMutation.mutate({ name: newCategory.trim(), actorUserId });
     setNewCategory("");
   }
 
   function handleAddBrand(event: FormEvent) {
     event.preventDefault();
     if (!newBrand.trim()) return;
-    registerProductBrand(newBrand.trim(), actorUserId);
+    registerBrandMutation.mutate({ name: newBrand.trim(), actorUserId });
     setNewBrand("");
   }
 
@@ -432,7 +439,13 @@ function SettingsPage() {
                       {c.name}
                     </span>
                     <button
-                      onClick={() => setProductCategoryActive(c.id, !c.active, actorUserId)}
+                      onClick={() =>
+                        setCategoryActiveMutation.mutate({
+                          id: c.id,
+                          active: !c.active,
+                          actorUserId,
+                        })
+                      }
                       className="text-xs font-medium text-primary hover:underline"
                     >
                       {c.active ? "إيقاف" : "تفعيل"}
@@ -472,7 +485,9 @@ function SettingsPage() {
                       {b.name}
                     </span>
                     <button
-                      onClick={() => setProductBrandActive(b.id, !b.active, actorUserId)}
+                      onClick={() =>
+                        setBrandActiveMutation.mutate({ id: b.id, active: !b.active, actorUserId })
+                      }
                       className="text-xs font-medium text-primary hover:underline"
                     >
                       {b.active ? "إيقاف" : "تفعيل"}

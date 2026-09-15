@@ -3,13 +3,8 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import { RiskBadge } from "@/components/ui/StatCard";
-import {
-  createCustomer,
-  getCustomerRiskAssessment,
-  getCustomers,
-  subscribeData,
-  updateCustomer,
-} from "@/lib/data-store";
+import { getCustomerRiskAssessment, subscribeData } from "@/lib/data-store";
+import { useCreateCustomer, useCustomers, useUpdateCustomer } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 import type { Customer } from "@/types";
 
@@ -43,12 +38,14 @@ function CustomersPage() {
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
+  const { data: customers = [], isLoading } = useCustomers(session?.tenant_id);
+  const createCustomerMutation = useCreateCustomer(session?.tenant_id);
+  const updateCustomerMutation = useUpdateCustomer(session?.tenant_id);
+
   if (!session) return null;
   // Extracted so nested closures below see a plain `string`, not the `Session | null` union
   // TypeScript falls back to for a captured outer variable inside a function body.
   const actorUserId = session.user_id;
-
-  const customers = getCustomers(session.tenant_id);
 
   function startCreate() {
     setForm(EMPTY_FORM);
@@ -78,20 +75,20 @@ function CustomersPage() {
       ...(form.notes.trim() && { notes: form.notes.trim() }),
     };
     if (editingId === "new") {
-      createCustomer(payload, actorUserId);
+      createCustomerMutation.mutate({ input: payload, actorUserId });
     } else if (editingId) {
-      updateCustomer(editingId, payload, actorUserId);
+      updateCustomerMutation.mutate({ id: editingId, patch: payload, actorUserId });
     }
     setEditingId(null);
     setForm(EMPTY_FORM);
   }
 
   function toggleStatus(customer: Customer) {
-    updateCustomer(
-      customer.id,
-      { status: customer.status === "active" ? "inactive" : "active" },
+    updateCustomerMutation.mutate({
+      id: customer.id,
+      patch: { status: customer.status === "active" ? "inactive" : "active" },
       actorUserId,
-    );
+    });
   }
 
   return (
@@ -260,7 +257,7 @@ function CustomersPage() {
               {customers.length === 0 && (
                 <tr>
                   <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">
-                    لا يوجد عملاء بعد.
+                    {isLoading ? "جارٍ التحميل..." : "لا يوجد عملاء بعد."}
                   </td>
                 </tr>
               )}
