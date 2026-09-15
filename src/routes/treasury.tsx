@@ -1,18 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { subscribeData } from "@/lib/data-store";
 import {
-  closeShift,
-  getAccountBalance,
-  getShifts,
-  getTreasuryAccounts,
-  getTreasuryMovements,
-  openShift,
-  subscribeData,
-} from "@/lib/data-store";
+  computeAccountBalance,
+  useCloseShift,
+  useCreateTreasuryAccount,
+  useOpenShift,
+  useShifts,
+  useTreasuryAccounts,
+  useTreasuryMovements,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
-import type { TreasuryMovement } from "@/types";
+import type { TreasuryAccount, TreasuryMovement } from "@/types";
 
 export const Route = createFileRoute("/treasury")({
   component: TreasuryPage,
@@ -38,6 +39,13 @@ function isToday(isoDate: string): boolean {
   );
 }
 
+const ACCOUNT_KIND_LABELS: Record<TreasuryAccount["kind"], string> = {
+  main: "خزينة رئيسية",
+  cashier: "كاشير",
+  bank: "بنك",
+  wallet: "محفظة إلكترونية",
+};
+
 function TreasuryPage() {
   const session = useRequireSession();
   const [, forceRerender] = useState(0);
@@ -45,26 +53,46 @@ function TreasuryPage() {
   const [countedAmount, setCountedAmount] = useState("");
   const [closeReason, setCloseReason] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [showAccountForm, setShowAccountForm] = useState(false);
+  const [newAccountName, setNewAccountName] = useState("");
+  const [newAccountKind, setNewAccountKind] = useState<TreasuryAccount["kind"]>("cashier");
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
+
+  const { data: allAccounts = [] } = useTreasuryAccounts(session?.tenant_id);
+  const { data: allMovements = [] } = useTreasuryMovements(session?.tenant_id);
+  const { data: allShifts = [] } = useShifts(session?.tenant_id);
+  const createAccountMutation = useCreateTreasuryAccount(session?.tenant_id);
+  const openShiftMutation = useOpenShift(session?.tenant_id);
+  const closeShiftMutation = useCloseShift(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const accounts = getTreasuryAccounts(session.tenant_id).filter((a) => a.active);
+  const accounts = allAccounts.filter((a) => a.active);
   const cashierAccount = accounts.find((a) => a.kind === "cashier");
   const openShiftRow = cashierAccount
-    ? getShifts(session.tenant_id).find(
-        (s) => s.account_id === cashierAccount.id && s.status === "open",
-      )
+    ? allShifts.find((s) => s.account_id === cashierAccount.id && s.status === "open")
     : undefined;
-  const closedShifts = getShifts(session.tenant_id)
+  const closedShifts = allShifts
     .filter((s) => s.status === "closed")
     .sort((a, b) => (b.closed_at ?? "").localeCompare(a.closed_at ?? ""));
 
-  const movements = getTreasuryMovements(session.tenant_id).sort((a, b) =>
-    b.created_at.localeCompare(a.created_at),
-  );
+  const movements = [...allMovements].sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+  function handleCreateAccount(event: FormEvent) {
+    event.preventDefault();
+    if (!newAccountName.trim()) return;
+    createAccountMutation.mutate(
+      { name: newAccountName.trim(), kind: newAccountKind, actorUserId },
+      {
+        onSuccess: () => {
+          setNewAccountName("");
+          setShowAccountForm(false);
+        },
+      },
+    );
+  }
   const todayMovements = movements.filter((m) => isToday(m.created_at));
   const todaySales = todayMovements
     .filter((m) => m.type === "sale")
@@ -83,12 +111,13 @@ function TreasuryPage() {
   function handleOpenShift() {
     setError(null);
     if (!cashierAccount) return;
-    try {
-      openShift(cashierAccount.id, Number(openingBalance) || 0, actorUserId);
-      setOpeningBalance("0");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+    openShiftMutation.mutate(
+      { accountId: cashierAccount.id, openingBalance: Number(openingBalance) || 0, actorUserId },
+      {
+        onSuccess: () => setOpeningBalance("0"),
+        onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   function handleCloseShift() {
@@ -99,31 +128,100 @@ function TreasuryPage() {
       setError("أدخل المبلغ المعدود فعليًا");
       return;
     }
-    try {
-      closeShift(openShiftRow.id, counted, closeReason, actorUserId);
-      setCountedAmount("");
-      setCloseReason("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+    closeShiftMutation.mutate(
+      { shiftId: openShiftRow.id, countedAmount: counted, reason: closeReason, actorUserId },
+      {
+        onSuccess: () => {
+          setCountedAmount("");
+          setCloseReason("");
+        },
+        onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   return (
     <div className="flex min-h-screen bg-background">
       <AppSidebar session={session} />
       <main className="flex-1 mx-auto max-w-5xl px-4 py-8">
-        <h1 className="text-2xl font-bold text-foreground">الخزينة</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          §68 — الرصيد هنا محسوب دائمًا من مجموع الحركات، مش رقم مخزّن لوحده. §70 وردية الكاشير لازم
-          سبب موثّق لأي فرق عند الإقفال.
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">الخزينة</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              §68 — الرصيد هنا محسوب دائمًا من مجموع الحركات، مش رقم مخزّن لوحده. §70 وردية الكاشير
+              لازم سبب موثّق لأي فرق عند الإقفال.
+            </p>
+          </div>
+          {!showAccountForm && (
+            <button
+              onClick={() => setShowAccountForm(true)}
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              + إضافة خزينة
+            </button>
+          )}
+        </div>
+
+        {showAccountForm && (
+          <form
+            onSubmit={handleCreateAccount}
+            className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-5 shadow-sm"
+          >
+            <label className="block space-y-1">
+              <span className="text-xs font-medium text-foreground">الاسم *</span>
+              <input
+                required
+                value={newAccountName}
+                onChange={(e) => setNewAccountName(e.target.value)}
+                className="form-input"
+                placeholder="الخزينة الرئيسية"
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium text-foreground">النوع</span>
+              <select
+                value={newAccountKind}
+                onChange={(e) => setNewAccountKind(e.target.value as TreasuryAccount["kind"])}
+                className="form-input"
+              >
+                {(Object.keys(ACCOUNT_KIND_LABELS) as TreasuryAccount["kind"][]).map((kind) => (
+                  <option key={kind} value={kind}>
+                    {ACCOUNT_KIND_LABELS[kind]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="submit"
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              حفظ
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAccountForm(false)}
+              className="rounded-md border border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
+            >
+              إلغاء
+            </button>
+          </form>
+        )}
+
+        {accounts.length === 0 && !showAccountForm && (
+          <p className="mt-4 text-sm text-muted-foreground">
+            لا توجد خزينة بعد — أضف خزينة كاشير علشان تقدر تفتح وردية، وخزينة رئيسية لدفعات
+            الموردين.
+          </p>
+        )}
 
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
           {accounts.map((account) => (
             <div key={account.id} className="rounded-xl border border-border bg-card p-4">
-              <p className="text-xs text-muted-foreground">{account.name}</p>
+              <p className="text-xs text-muted-foreground">
+                {account.name} ({ACCOUNT_KIND_LABELS[account.kind]})
+              </p>
               <p className="mt-1 text-2xl font-bold text-foreground" dir="ltr">
-                {getAccountBalance(account.id).toLocaleString("ar-EG")} ج.م
+                {computeAccountBalance(account.id, allMovements).toLocaleString("ar-EG")} ج.م
               </p>
             </div>
           ))}

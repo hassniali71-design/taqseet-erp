@@ -3,13 +3,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { calculateFinance, generateSchedule } from "@/lib/finance-engine";
 import { supabase } from "@/lib/supabase-client";
 import type {
+  AccountCode,
   AuditLogEntry,
   Customer,
+  Expense,
   Installment,
   InstallmentContract,
   InstallmentPayment,
   InstallmentPlan,
   InventoryMovement,
+  JournalEntry,
+  JournalLine,
   Product,
   ProductBrand,
   ProductCategory,
@@ -20,9 +24,12 @@ import type {
   RestructureEvent,
   Sale,
   SaleItem,
+  Shift,
   Supplier,
   SupplierPayment,
   TenantSettings,
+  TreasuryAccount,
+  TreasuryMovement,
 } from "@/types";
 
 /** Tenant-scoped reads/writes for the Foundation layer, going straight through the browser
@@ -847,12 +854,30 @@ export function useCreateSale(tenantId: string | undefined) {
         new_value: sale,
       });
 
+      await postFinancials(
+        tenantId,
+        "cashier",
+        "sale",
+        total,
+        actorUserId,
+        invoice_number,
+        [
+          { account_code: "1000", account_name: ACCOUNT_NAMES["1000"], debit: total, credit: 0 },
+          { account_code: "3000", account_name: ACCOUNT_NAMES["3000"], debit: 0, credit: total },
+        ],
+        `بيع نقدي ${invoice_number}`,
+        "sale",
+        sale.id as string,
+      );
+
       return sale as Sale;
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["sales", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["product_serials", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["inventory_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["treasury_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["journal_entries", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
   });
@@ -1289,6 +1314,63 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
         new_value: contract,
       });
 
+      // §75 — Product Profit (cash_subtotal) kept separate from Financing Revenue
+      // (finance_amount): Dr Cash (down payment, if any) + Dr Customers (what's still owed)
+      // balances against Cr Sales Revenue (goods value) + Cr Financing Revenue.
+      try {
+        if (input.down_payment > 0) {
+          const cashierId = await findAccountIdByKind(tenantId, "cashier");
+          if (cashierId) {
+            await performPostTreasuryMovement(
+              tenantId,
+              cashierId,
+              input.down_payment,
+              "sale",
+              actorUserId,
+              contract_number,
+            );
+          }
+        }
+        await performPostJournalEntry(
+          tenantId,
+          [
+            ...(input.down_payment > 0
+              ? [
+                  {
+                    account_code: "1000" as const,
+                    account_name: ACCOUNT_NAMES["1000"],
+                    debit: input.down_payment,
+                    credit: 0,
+                  },
+                ]
+              : []),
+            {
+              account_code: "1100",
+              account_name: ACCOUNT_NAMES["1100"],
+              debit: totalAmount,
+              credit: 0,
+            },
+            {
+              account_code: "3000",
+              account_name: ACCOUNT_NAMES["3000"],
+              debit: 0,
+              credit: cash_subtotal,
+            },
+            {
+              account_code: "3100",
+              account_name: ACCOUNT_NAMES["3100"],
+              debit: 0,
+              credit: financeAmount,
+            },
+          ],
+          `عقد تقسيط ${contract_number}`,
+          "installment_contract",
+          contract.id as string,
+        );
+      } catch (e) {
+        console.warn("فشل ترحيل الحركة المالية:", e instanceof Error ? e.message : e);
+      }
+
       return contract as InstallmentContract;
     },
     onSuccess: () => {
@@ -1296,6 +1378,8 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
       void queryClient.invalidateQueries({ queryKey: ["installments", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["product_serials", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["inventory_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["treasury_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["journal_entries", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
   });
@@ -1428,6 +1512,22 @@ async function performCollectPayment(
     new_value: payment,
   });
 
+  await postFinancials(
+    tenantId,
+    "cashier",
+    "collection",
+    amount,
+    actorUserId,
+    payment.receipt_number as string,
+    [
+      { account_code: "1000", account_name: ACCOUNT_NAMES["1000"], debit: amount, credit: 0 },
+      { account_code: "1100", account_name: ACCOUNT_NAMES["1100"], debit: 0, credit: amount },
+    ],
+    `تحصيل ${payment.receipt_number as string}`,
+    "installment_payment",
+    payment.id as string,
+  );
+
   return payment as InstallmentPayment;
 }
 
@@ -1451,6 +1551,8 @@ export function useCollectPayment(tenantId: string | undefined) {
       void queryClient.invalidateQueries({ queryKey: ["installment_contracts", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["installment_payments", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["promises_to_pay", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["treasury_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["journal_entries", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
   });
@@ -1564,6 +1666,8 @@ export function useEarlySettleContract(tenantId: string | undefined) {
       void queryClient.invalidateQueries({ queryKey: ["installments", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["installment_contracts", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["installment_payments", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["treasury_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["journal_entries", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
   });
@@ -1969,6 +2073,23 @@ export function useCreatePurchase(tenantId: string | undefined) {
         new_value: purchase,
       });
 
+      // No treasury movement here — a purchase creates a payable, it doesn't pay cash
+      // immediately; useRecordSupplierPayment is what moves money later.
+      try {
+        await performPostJournalEntry(
+          tenantId,
+          [
+            { account_code: "1200", account_name: ACCOUNT_NAMES["1200"], debit: total, credit: 0 },
+            { account_code: "2000", account_name: ACCOUNT_NAMES["2000"], debit: 0, credit: total },
+          ],
+          `أمر شراء ${purchase_number}`,
+          "purchase",
+          purchase.id as string,
+        );
+      } catch (e) {
+        console.warn("فشل ترحيل قيد الشراء:", e instanceof Error ? e.message : e);
+      }
+
       return purchase as Purchase;
     },
     onSuccess: () => {
@@ -1976,6 +2097,7 @@ export function useCreatePurchase(tenantId: string | undefined) {
       void queryClient.invalidateQueries({ queryKey: ["products", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["product_serials", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["inventory_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["journal_entries", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
   });
@@ -2039,11 +2161,547 @@ export function useRecordSupplierPayment(tenantId: string | undefined) {
         entity_id: data.id as string,
         new_value: data,
       });
+
+      await postFinancials(
+        tenantId,
+        "main",
+        "purchase_payment",
+        -amount,
+        actorUserId,
+        data.id as string,
+        [
+          { account_code: "2000", account_name: ACCOUNT_NAMES["2000"], debit: amount, credit: 0 },
+          { account_code: "1000", account_name: ACCOUNT_NAMES["1000"], debit: 0, credit: amount },
+        ],
+        `دفعة لمورد ${supplier.name as string}`,
+        "supplier_payment",
+        data.id as string,
+      );
+
       return data as SupplierPayment;
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["supplier_payments", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["treasury_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["journal_entries", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
+  });
+}
+
+/* ---------------- Treasury (§68) / Shifts (§70) / Expenses (§73) / Accounting (§74-§75) ----
+ * The last layer — this is what finally posts a cashier movement + journal entry for sales,
+ * installment collections, and supplier payments (createSale/createInstallmentContract/
+ * collectPayment/recordSupplierPayment above only ever updated stock/schedule/balance until
+ * now, exactly as documented in each of their own comments). Posting looks up the tenant's
+ * "cashier"/"main" account by `kind` (best-effort, mirroring data-store.ts's hardcoded
+ * MAIN_ACCOUNT_ID/CASHIER_ACCOUNT_ID Mock IDs, which don't exist as real rows) — if the tenant
+ * hasn't created that account yet from /treasury, the sale/collection/payment itself still
+ * succeeds and only the treasury posting is skipped (logged to console), so this layer can
+ * never retroactively break the flows already shipped and tested in earlier commits. */
+
+const ACCOUNT_NAMES: Record<AccountCode, string> = {
+  "1000": "الخزينة/النقدية",
+  "1100": "عملاء (ذمم مدينة)",
+  "1200": "المخزون",
+  "2000": "موردون (ذمم دائنة)",
+  "3000": "إيرادات المبيعات",
+  "3100": "إيرادات التمويل",
+  "5000": "المصروفات",
+};
+
+export function useTreasuryAccounts(tenantId: string | undefined) {
+  return useTenantList<TreasuryAccount>("treasury_accounts", tenantId, { orderBy: "created_at" });
+}
+
+export function useCreateTreasuryAccount(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      name,
+      kind,
+      actorUserId,
+    }: {
+      name: string;
+      kind: TreasuryAccount["kind"];
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data, error } = await supabase
+        .from("treasury_accounts")
+        .insert({ tenant_id: tenantId, name: name.trim(), kind, active: true })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "treasury_account.create",
+        entity: "treasury_accounts",
+        entity_id: data.id as string,
+        new_value: data,
+      });
+      return data as TreasuryAccount;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["treasury_accounts", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function useSetTreasuryAccountActive(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      active,
+      actorUserId,
+    }: {
+      id: string;
+      active: boolean;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data: before } = await supabase
+        .from("treasury_accounts")
+        .select("*")
+        .eq("id", id)
+        .single();
+      const { data, error } = await supabase
+        .from("treasury_accounts")
+        .update({ active })
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "treasury_account.update",
+        entity: "treasury_accounts",
+        entity_id: id,
+        old_value: before,
+        new_value: data,
+      });
+      return data as TreasuryAccount;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["treasury_accounts", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function useTreasuryMovements(tenantId: string | undefined) {
+  return useTenantList<TreasuryMovement>("treasury_movements", tenantId, {
+    orderBy: "created_at",
+    ascending: false,
+  });
+}
+
+/** Mirrors data-store.ts's getAccountBalance exactly — an account's balance is never stored,
+ * always the sum of its movements. */
+export function computeAccountBalance(accountId: string, movements: TreasuryMovement[]): number {
+  return (
+    Math.round(
+      movements.filter((m) => m.account_id === accountId).reduce((sum, m) => sum + m.amount, 0) *
+        100,
+    ) / 100
+  );
+}
+
+async function performPostTreasuryMovement(
+  tenantId: string,
+  accountId: string,
+  amount: number,
+  type: TreasuryMovement["type"],
+  actorUserId: string | null,
+  reference?: string,
+  reason?: string,
+): Promise<TreasuryMovement> {
+  const { data: movements, error: movementsError } = await supabase
+    .from("treasury_movements")
+    .select("amount")
+    .eq("tenant_id", tenantId)
+    .eq("account_id", accountId);
+  if (movementsError) throw new Error(movementsError.message);
+  const before =
+    Math.round((movements ?? []).reduce((sum, m) => sum + (m.amount as number), 0) * 100) / 100;
+  const after = Math.round((before + amount) * 100) / 100;
+  const { data: movement, error } = await supabase
+    .from("treasury_movements")
+    .insert({
+      tenant_id: tenantId,
+      account_id: accountId,
+      type,
+      amount,
+      before,
+      after,
+      user_id: actorUserId,
+      ...(reference ? { reference } : {}),
+      ...(reason ? { reason } : {}),
+    })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  return movement as TreasuryMovement;
+}
+
+async function nextJournalEntryNumber(tenantId: string) {
+  return nextInstallmentDocNumber("journal_entries", "entry_number", tenantId, "JE");
+}
+
+/** The only place a JournalEntry is ever created — mirrors data-store.ts's postJournalEntry,
+ * including the debit=credit invariant check. */
+async function performPostJournalEntry(
+  tenantId: string,
+  lines: JournalLine[],
+  description: string,
+  referenceType: string,
+  referenceId: string,
+): Promise<JournalEntry> {
+  const totalDebit = Math.round(lines.reduce((sum, l) => sum + l.debit, 0) * 100) / 100;
+  const totalCredit = Math.round(lines.reduce((sum, l) => sum + l.credit, 0) * 100) / 100;
+  if (totalDebit !== totalCredit) {
+    throw new Error(`قيد غير متوازن: مدين ${totalDebit} ≠ دائن ${totalCredit}`);
+  }
+  const entry_number = await nextJournalEntryNumber(tenantId);
+  const { data: entry, error } = await supabase
+    .from("journal_entries")
+    .insert({
+      tenant_id: tenantId,
+      entry_number,
+      lines,
+      description,
+      reference_type: referenceType,
+      reference_id: referenceId,
+    })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  return entry as JournalEntry;
+}
+
+async function findAccountIdByKind(
+  tenantId: string,
+  kind: TreasuryAccount["kind"],
+): Promise<string | undefined> {
+  const { data, error } = await supabase
+    .from("treasury_accounts")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("kind", kind)
+    .eq("active", true)
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return undefined;
+  return data.id as string;
+}
+
+/** Best-effort: never throws, never blocks the caller's own success — a sale/collection/
+ * payment already succeeded by the time this runs, same reasoning as insertAuditLog. Wraps a
+ * treasury movement + its matching journal entry as one unit so callers (useCreateSale,
+ * useCollectPayment, ...) stay short. */
+async function postFinancials(
+  tenantId: string,
+  accountKind: TreasuryAccount["kind"],
+  movementType: TreasuryMovement["type"],
+  amount: number,
+  actorUserId: string | null,
+  movementReference: string,
+  lines: JournalLine[],
+  description: string,
+  referenceType: string,
+  referenceId: string,
+) {
+  try {
+    const accountId = await findAccountIdByKind(tenantId, accountKind);
+    if (!accountId) {
+      console.warn(`لا توجد خزينة من نوع "${accountKind}" — تخطّي ترحيل الحركة المالية`);
+      return;
+    }
+    await performPostTreasuryMovement(
+      tenantId,
+      accountId,
+      amount,
+      movementType,
+      actorUserId,
+      movementReference,
+    );
+    await performPostJournalEntry(tenantId, lines, description, referenceType, referenceId);
+  } catch (e) {
+    console.warn("فشل ترحيل الحركة المالية:", e instanceof Error ? e.message : e);
+  }
+}
+
+export function useShifts(tenantId: string | undefined) {
+  return useTenantList<Shift>("shifts", tenantId, { orderBy: "opened_at", ascending: false });
+}
+
+export function useOpenShift(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      accountId,
+      openingBalance,
+      actorUserId,
+    }: {
+      accountId: string;
+      openingBalance: number;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (openingBalance < 0) throw new Error("الرصيد الافتتاحي لا يمكن أن يكون سالبًا");
+      const { data: existingOpen, error: existingError } = await supabase
+        .from("shifts")
+        .select("id")
+        .eq("account_id", accountId)
+        .eq("status", "open");
+      if (existingError) throw new Error(existingError.message);
+      if ((existingOpen ?? []).length > 0) {
+        throw new Error("يوجد وردية مفتوحة بالفعل على هذه الخزينة");
+      }
+      const { data, error } = await supabase
+        .from("shifts")
+        .insert({
+          tenant_id: tenantId,
+          account_id: accountId,
+          opening_balance: openingBalance,
+          opened_by: actorUserId,
+          status: "open",
+        })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "shift.open",
+        entity: "shifts",
+        entity_id: data.id as string,
+        new_value: data,
+      });
+      return data as Shift;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["shifts", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function useCloseShift(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      shiftId,
+      countedAmount,
+      reason,
+      actorUserId,
+    }: {
+      shiftId: string;
+      countedAmount: number;
+      reason?: string;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data: shift, error: shiftError } = await supabase
+        .from("shifts")
+        .select("*")
+        .eq("id", shiftId)
+        .single();
+      if (shiftError || !shift) throw new Error("الوردية غير موجودة");
+      if (shift.status === "closed") throw new Error("الوردية مقفلة بالفعل");
+
+      const { data: movements, error: movementsError } = await supabase
+        .from("treasury_movements")
+        .select("amount")
+        .eq("account_id", shift.account_id as string)
+        .gte("created_at", shift.opened_at as string);
+      if (movementsError) throw new Error(movementsError.message);
+      const netMovement = (movements ?? []).reduce((sum, m) => sum + (m.amount as number), 0);
+      const expected = Math.round(((shift.opening_balance as number) + netMovement) * 100) / 100;
+      const diff = Math.round((countedAmount - expected) * 100) / 100;
+      if (diff !== 0 && !reason?.trim()) {
+        throw new Error("لازم تكتب سبب الفرق قبل إقفال الوردية");
+      }
+
+      const { data, error } = await supabase
+        .from("shifts")
+        .update({
+          status: "closed",
+          closing_counted_amount: countedAmount,
+          closing_expected_amount: expected,
+          closing_diff: diff,
+          ...(reason?.trim() && { closing_reason: reason.trim() }),
+          closed_by: actorUserId,
+          closed_at: new Date().toISOString(),
+        })
+        .eq("id", shiftId)
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "shift.close",
+        entity: "shifts",
+        entity_id: shiftId,
+        old_value: shift,
+        new_value: data,
+        ...(reason?.trim() && { reason: reason.trim() }),
+      });
+      return data as Shift;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["shifts", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function useExpenses(tenantId: string | undefined) {
+  return useTenantList<Expense>("expenses", tenantId, { orderBy: "created_at", ascending: false });
+}
+
+export function useRecordExpense(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      accountId,
+      category,
+      amount,
+      reason,
+      actorUserId,
+      expenseApprovalThreshold,
+    }: {
+      accountId: string;
+      category: string;
+      amount: number;
+      reason: string;
+      actorUserId: string | null;
+      expenseApprovalThreshold: number;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (amount <= 0) throw new Error("المبلغ يجب أن يكون أكبر من صفر");
+      if (!category.trim()) throw new Error("نوع المصروف مطلوب");
+      if (!reason.trim()) throw new Error("سبب المصروف مطلوب");
+
+      const { data: expense, error } = await supabase
+        .from("expenses")
+        .insert({
+          tenant_id: tenantId,
+          account_id: accountId,
+          category: category.trim(),
+          amount,
+          reason: reason.trim(),
+          needs_approval: amount > expenseApprovalThreshold,
+          user_id: actorUserId,
+        })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "expense.record",
+        entity: "expenses",
+        entity_id: expense.id as string,
+        new_value: expense,
+        reason: expense.reason as string,
+      });
+
+      try {
+        await performPostTreasuryMovement(
+          tenantId,
+          accountId,
+          -amount,
+          "expense",
+          actorUserId,
+          category.trim(),
+          reason.trim(),
+        );
+        await performPostJournalEntry(
+          tenantId,
+          [
+            { account_code: "5000", account_name: ACCOUNT_NAMES["5000"], debit: amount, credit: 0 },
+            { account_code: "1000", account_name: ACCOUNT_NAMES["1000"], debit: 0, credit: amount },
+          ],
+          `مصروف: ${category.trim()} — ${reason.trim()}`,
+          "expense",
+          expense.id as string,
+        );
+      } catch (e) {
+        console.warn("فشل ترحيل قيد المصروف:", e instanceof Error ? e.message : e);
+      }
+
+      return expense as Expense;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["expenses", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["treasury_accounts", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["treasury_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["journal_entries", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function useApproveExpense(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      expenseId,
+      note,
+      actorUserId,
+    }: {
+      expenseId: string;
+      note: string;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data: before, error: beforeError } = await supabase
+        .from("expenses")
+        .select("*")
+        .eq("id", expenseId)
+        .single();
+      if (beforeError || !before) throw new Error("المصروف غير موجود");
+      if (!before.needs_approval) throw new Error("هذا المصروف لا يحتاج اعتماد أصلاً");
+      const { data, error } = await supabase
+        .from("expenses")
+        .update({
+          needs_approval: false,
+          approved_by: actorUserId,
+          approved_at: new Date().toISOString(),
+          approval_note: note.trim(),
+        })
+        .eq("id", expenseId)
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "expense.approve",
+        entity: "expenses",
+        entity_id: expenseId,
+        old_value: { needs_approval: true },
+        new_value: { needs_approval: false, approval_note: data.approval_note },
+        reason: note,
+      });
+      return data as Expense;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["expenses", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function useJournalEntries(tenantId: string | undefined) {
+  return useTenantList<JournalEntry>("journal_entries", tenantId, {
+    orderBy: "created_at",
+    ascending: false,
   });
 }

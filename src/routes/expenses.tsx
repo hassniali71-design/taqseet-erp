@@ -2,15 +2,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { getUsers, subscribeData } from "@/lib/data-store";
 import {
-  approveExpense,
-  getCurrentTenantSettings,
-  getExpenses,
-  getTreasuryAccounts,
-  getUsers,
-  recordExpense,
-  subscribeData,
-} from "@/lib/data-store";
+  useApproveExpense,
+  useCurrentTenantSettings,
+  useExpenses,
+  useRecordExpense,
+  useTreasuryAccounts,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/expenses")({
@@ -28,20 +27,24 @@ function ExpensesPage() {
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
+  const { data: settingsData } = useCurrentTenantSettings(session?.tenant_id);
+  const { data: allAccounts = [] } = useTreasuryAccounts(session?.tenant_id);
+  const { data: allExpenses = [] } = useExpenses(session?.tenant_id);
+  const recordExpenseMutation = useRecordExpense(session?.tenant_id);
+  const approveExpenseMutation = useApproveExpense(session?.tenant_id);
+
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const settings = getCurrentTenantSettings();
-  const accounts = getTreasuryAccounts(session.tenant_id).filter((a) => a.active);
-  const expenses = getExpenses(session.tenant_id).sort((a, b) =>
-    b.created_at.localeCompare(a.created_at),
-  );
+  const settings = settingsData ?? { expense_approval_threshold: 2000 };
+  const accounts = allAccounts.filter((a) => a.active);
+  const expenses = [...allExpenses].sort((a, b) => b.created_at.localeCompare(a.created_at));
   const users = getUsers(session.tenant_id);
 
   function handleApprove(expenseId: string) {
     const note = window.prompt("ملاحظة الاعتماد (اختياري):", "");
     if (note === null) return;
-    approveExpense(expenseId, actorUserId, note);
+    approveExpenseMutation.mutate({ expenseId, note, actorUserId });
   }
 
   function handleSubmit(event: FormEvent) {
@@ -51,14 +54,24 @@ function ExpensesPage() {
       setError("اختر الخزينة اللي هيتم الصرف منها");
       return;
     }
-    try {
-      recordExpense(accountId, category, Number(amount) || 0, reason, actorUserId);
-      setCategory("");
-      setAmount("");
-      setReason("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+    recordExpenseMutation.mutate(
+      {
+        accountId,
+        category,
+        amount: Number(amount) || 0,
+        reason,
+        actorUserId,
+        expenseApprovalThreshold: settings.expense_approval_threshold,
+      },
+      {
+        onSuccess: () => {
+          setCategory("");
+          setAmount("");
+          setReason("");
+        },
+        onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   return (

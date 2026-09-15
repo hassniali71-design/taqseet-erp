@@ -2,7 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import { getJournalEntries, subscribeData } from "@/lib/data-store";
+import { subscribeData } from "@/lib/data-store";
+import { useJournalEntries } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 import type { AccountCode } from "@/types";
 
@@ -26,11 +27,11 @@ function AccountingPage() {
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
+  const { data: allEntries = [] } = useJournalEntries(session?.tenant_id);
+
   if (!session) return null;
 
-  const entries = getJournalEntries(session.tenant_id).sort((a, b) =>
-    b.created_at.localeCompare(a.created_at),
-  );
+  const entries = [...allEntries].sort((a, b) => b.created_at.localeCompare(a.created_at));
 
   return (
     <div className="flex min-h-screen bg-background">
