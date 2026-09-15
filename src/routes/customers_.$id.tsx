@@ -9,10 +9,9 @@ import {
   getCustomerRiskAssessment,
   getGuarantors,
   getInstallmentContracts,
-  getSales,
   subscribeData,
 } from "@/lib/data-store";
-import { useCustomers } from "@/lib/supabase-queries";
+import { useCustomers, useSales } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/customers_/$id")({
@@ -31,6 +30,7 @@ function CustomerDetailPage() {
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
   const { data: customers = [], isLoading } = useCustomers(session?.tenant_id);
+  const { data: allSales = [] } = useSales(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
@@ -56,7 +56,7 @@ function CustomerDetailPage() {
   }
 
   const guarantors = getGuarantors(session.tenant_id).filter((g) => g.customer_id === id);
-  const sales = getSales(session.tenant_id)
+  const sales = allSales
     .filter((s) => s.customer_id === id)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const totalPurchases = sales.reduce((sum, s) => sum + s.total, 0);

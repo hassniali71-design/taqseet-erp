@@ -2,13 +2,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import {
-  createReturn,
-  getSaleReturns,
-  getSales,
-  getTenants,
-  subscribeData,
-} from "@/lib/data-store";
+import { createReturn, getSaleReturns, getTenants, subscribeData } from "@/lib/data-store";
+import { useSales } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/sales/$id")({
@@ -27,10 +22,12 @@ function SaleReceiptPage() {
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
+  const { data: sales = [], isLoading } = useSales(session?.tenant_id);
+
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const sale = getSales(session.tenant_id).find((s) => s.id === id);
+  const sale = sales.find((s) => s.id === id);
   const tenant = getTenants().find((t) => t.id === session.tenant_id);
 
   if (!sale) {
@@ -38,10 +35,16 @@ function SaleReceiptPage() {
       <div className="flex min-h-screen bg-background">
         <AppSidebar session={session} />
         <main className="flex-1 mx-auto max-w-2xl px-4 py-8 text-center text-muted-foreground">
-          الفاتورة غير موجودة.{" "}
-          <Link to="/sales/new" className="text-primary hover:underline">
-            بيع جديد
-          </Link>
+          {isLoading ? (
+            "جارٍ التحميل..."
+          ) : (
+            <>
+              الفاتورة غير موجودة.{" "}
+              <Link to="/sales/new" className="text-primary hover:underline">
+                بيع جديد
+              </Link>
+            </>
+          )}
         </main>
       </div>
     );

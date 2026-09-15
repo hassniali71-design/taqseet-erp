@@ -1,28 +1,25 @@
-import { createFileRoute, Link, notFound } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { subscribeData } from "@/lib/data-store";
 import {
-  getInventoryMovements,
-  getProductSerials,
-  getProductStock,
-  getProducts,
-  receiveStock,
-  subscribeData,
-} from "@/lib/data-store";
+  computeProductStock,
+  useInventoryMovements,
+  useProductSerials,
+  useProducts,
+  useReceiveStock,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 import type { SerialStatus } from "@/types";
 
 export const Route = createFileRoute("/products_/$id")({
   component: ProductDetailPage,
-  loader: ({ params }) => {
-    // Router loader — runs outside React/session context, so this is only an existence check
-    // (unfiltered by design). The component below re-looks-up the product scoped to the
-    // signed-in session's tenant and renders its own "not found" state for a foreign-tenant id.
-    const product = getProducts().find((p) => p.id === params.id);
-    if (!product) throw notFound();
-    return null;
-  },
+  // No loader existence-check here on purpose — the product list is now a real Supabase table
+  // (src/lib/supabase-queries.ts useProducts), fetched client-side after the session resolves,
+  // so a router loader running before that can't tell a real product from a missing one. The
+  // component below does its own lookup once the query settles and renders its own "not found"
+  // state, same as the customer detail page.
 });
 
 const SERIAL_STATUS_LABELS: Record<SerialStatus, string> = {
@@ -59,30 +56,41 @@ function ProductDetailPage() {
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
+  const { data: products = [], isLoading } = useProducts(session?.tenant_id);
+  const { data: allSerials = [] } = useProductSerials(session?.tenant_id);
+  const { data: allMovements = [] } = useInventoryMovements(session?.tenant_id);
+  const receiveStockMutation = useReceiveStock(session?.tenant_id);
+
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const product = getProducts(session.tenant_id).find((p) => p.id === id);
+  const product = products.find((p) => p.id === id);
   if (!product) {
     return (
       <div className="flex min-h-screen bg-background">
         <AppSidebar session={session} />
         <main className="flex-1 mx-auto max-w-5xl px-4 py-8 text-center text-muted-foreground">
-          المنتج غير موجود.{" "}
-          <Link to="/products" className="text-primary hover:underline">
-            العودة للأجهزة
-          </Link>
+          {isLoading ? (
+            "جارٍ التحميل..."
+          ) : (
+            <>
+              المنتج غير موجود.{" "}
+              <Link to="/products" className="text-primary hover:underline">
+                العودة للأجهزة
+              </Link>
+            </>
+          )}
         </main>
       </div>
     );
   }
 
   const serialRequired = product.serial_required;
-  const stock = getProductStock(id, product);
-  const serials = getProductSerials(session.tenant_id)
+  const stock = computeProductStock(id, serialRequired, allSerials, allMovements);
+  const serials = allSerials
     .filter((s) => s.product_id === id)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const movements = getInventoryMovements(session.tenant_id)
+  const movements = allMovements
     .filter((m) => m.product_id === id)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
 
@@ -108,18 +116,20 @@ function ProductDetailPage() {
   function handleReceive(event: FormEvent) {
     event.preventDefault();
     setError(null);
-    try {
-      receiveStock(
-        id,
-        Number(quantity) || 0,
-        serialRequired ? serialInputs : undefined,
+    if (!product) return;
+    receiveStockMutation.mutate(
+      {
+        product,
+        quantity: Number(quantity) || 0,
+        serialNumbers: serialRequired ? serialInputs : undefined,
         actorUserId,
-        "استلام يدوي",
-      );
-      setShowReceive(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+        reference: "استلام يدوي",
+      },
+      {
+        onSuccess: () => setShowReceive(false),
+        onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   return (

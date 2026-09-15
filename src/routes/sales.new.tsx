@@ -2,15 +2,16 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { subscribeData } from "@/lib/data-store";
 import {
-  createSale,
-  getCurrentTenantSettings,
-  getCustomers,
-  getProductSerials,
-  getProductStock,
-  getProducts,
-  subscribeData,
-} from "@/lib/data-store";
+  computeProductStock,
+  useCreateSale,
+  useCurrentTenantSettings,
+  useCustomers,
+  useInventoryMovements,
+  useProductSerials,
+  useProducts,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/sales/new")({
@@ -41,22 +42,32 @@ function NewSalePage() {
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
+  const { data: settings } = useCurrentTenantSettings(session?.tenant_id);
+  const { data: allCustomers = [] } = useCustomers(session?.tenant_id);
+  const { data: allProducts = [] } = useProducts(session?.tenant_id);
+  const { data: allSerials = [] } = useProductSerials(session?.tenant_id);
+  const { data: allMovements = [] } = useInventoryMovements(session?.tenant_id);
+  const createSaleMutation = useCreateSale(session?.tenant_id);
+
   if (!session) return null;
   const actorUserId = session.user_id;
+  const employeeDiscountLimitPct = settings?.employee_discount_limit_pct ?? 5;
 
-  const settings = getCurrentTenantSettings();
-  const customers = getCustomers(session.tenant_id).filter((c) => c.status === "active");
-  const products = getProducts(session.tenant_id).filter((p) => p.active);
+  const customers = allCustomers.filter((c) => c.status === "active");
+  const products = allProducts.filter((p) => p.active);
   const selectedProduct = products.find((p) => p.id === selectedProductId);
   const availableSerials = selectedProduct?.serial_required
-    ? getProductSerials(session.tenant_id).filter(
-        (s) => s.product_id === selectedProduct.id && s.status === "available",
-      )
+    ? allSerials.filter((s) => s.product_id === selectedProduct.id && s.status === "available")
     : [];
   const cartedSerialIds = new Set(cart.map((l) => l.serial_id).filter(Boolean));
   const usableSerials = availableSerials.filter((s) => !cartedSerialIds.has(s.id));
   const stockForSelected = selectedProduct
-    ? getProductStock(selectedProduct.id, selectedProduct)
+    ? computeProductStock(
+        selectedProduct.id,
+        selectedProduct.serial_required,
+        allSerials,
+        allMovements,
+      )
     : 0;
   const alreadyCartedQty = cart
     .filter((l) => l.product_id === selectedProductId)
@@ -121,9 +132,9 @@ function NewSalePage() {
 
   function handleConfirm() {
     setError(null);
-    try {
-      const sale = createSale(
-        {
+    createSaleMutation.mutate(
+      {
+        input: {
           customer_id: customerId || null,
           items: cart.map((l) => ({
             product_id: l.product_id,
@@ -133,11 +144,13 @@ function NewSalePage() {
           discount_pct: Number(discountPct) || 0,
         },
         actorUserId,
-      );
-      void navigate({ to: "/sales/$id", params: { id: sale.id } });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+        employeeDiscountLimitPct,
+      },
+      {
+        onSuccess: (sale) => void navigate({ to: "/sales/$id", params: { id: sale.id } }),
+        onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   return (
@@ -282,12 +295,12 @@ function NewSalePage() {
         <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
           <label className="block max-w-xs space-y-1">
             <span className="text-xs font-medium text-foreground">
-              نسبة الخصم % (الحد الأقصى {settings.employee_discount_limit_pct}%)
+              نسبة الخصم % (الحد الأقصى {employeeDiscountLimitPct}%)
             </span>
             <input
               type="number"
               min="0"
-              max={settings.employee_discount_limit_pct}
+              max={employeeDiscountLimitPct}
               value={discountPct}
               onChange={(e) => setDiscountPct(e.target.value)}
               className="form-input"
@@ -310,10 +323,10 @@ function NewSalePage() {
 
         <button
           onClick={handleConfirm}
-          disabled={cart.length === 0}
+          disabled={cart.length === 0 || createSaleMutation.isPending}
           className="mt-4 rounded-md bg-primary px-6 py-3 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          تأكيد البيع
+          {createSaleMutation.isPending ? "جارٍ الحفظ..." : "تأكيد البيع"}
         </button>
       </main>
     </div>
