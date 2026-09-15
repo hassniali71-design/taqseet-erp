@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { calculateFinance, generateSchedule } from "@/lib/finance-engine";
+import {
+  getEffectiveInstallmentStatus,
+  getEffectivePromiseStatus,
+  RISK_LEVEL_LABEL_AR,
+} from "@/lib/data-store";
+import type { CustomerRiskAssessment } from "@/lib/data-store";
 import { supabase } from "@/lib/supabase-client";
 import type {
   AccountCode,
@@ -9,6 +15,7 @@ import type {
   DeliveryOrder,
   Expense,
   ExchangeTransaction,
+  Guarantor,
   Installment,
   InstallmentContract,
   InstallmentPayment,
@@ -415,6 +422,57 @@ export function useUpdateCustomer(tenantId: string | undefined) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["customers", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+/* ---------------- Guarantors (§15) ---------------- */
+
+export function useGuarantors(tenantId: string | undefined) {
+  return useTenantList<Guarantor>("guarantors", tenantId, {
+    orderBy: "created_at",
+    ascending: false,
+  });
+}
+
+export function useCreateGuarantor(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      input,
+      actorUserId,
+    }: {
+      input: { customer_id: string; name: string; phone: string; relationship?: string };
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (!input.name.trim()) throw new Error("اسم الضامن مطلوب");
+      if (!input.phone.trim()) throw new Error("رقم هاتف الضامن مطلوب");
+      const { data, error } = await supabase
+        .from("guarantors")
+        .insert({
+          tenant_id: tenantId,
+          customer_id: input.customer_id,
+          name: input.name.trim(),
+          phone: input.phone.trim(),
+          ...(input.relationship?.trim() && { relationship: input.relationship.trim() }),
+        })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "guarantor.create",
+        entity: "guarantors",
+        entity_id: data.id as string,
+        new_value: data,
+      });
+      return data as Guarantor;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["guarantors", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
   });
@@ -1288,6 +1346,79 @@ export function computeCustomerOnCreditHold(
       i.status !== "waived" &&
       daysOverdue(i.due_date) > creditHoldDays,
   );
+}
+
+/** Mirrors data-store.ts's getCustomerRiskAssessment exactly — derived on read from the
+ * customer's actual installment history (on-time vs late payments, currently-overdue lines,
+ * broken promises to pay), never stored. A customer with no installment history at all is
+ * "good" by default (no negative signal yet), not "excellent" (no positive signal either). */
+export function computeCustomerRiskAssessment(
+  customerId: string,
+  contracts: InstallmentContract[],
+  installments: Installment[],
+  payments: InstallmentPayment[],
+  promises: PromiseToPay[],
+  gracePeriodDays: number,
+): CustomerRiskAssessment {
+  const customerContracts = contracts.filter((c) => c.customer_id === customerId);
+  if (customerContracts.length === 0) {
+    return { level: "good", label: RISK_LEVEL_LABEL_AR.good, reasons: ["لا يوجد سجل تقسيط بعد"] };
+  }
+
+  const contractIds = new Set(customerContracts.map((c) => c.id));
+  const customerInstallments = installments.filter((i) => contractIds.has(i.contract_id));
+  const customerPayments = payments.filter((p) => contractIds.has(p.contract_id));
+
+  let paidOnTime = 0;
+  let paidLate = 0;
+  let currentlyOverdue = 0;
+
+  for (const installment of customerInstallments) {
+    const effective = getEffectiveInstallmentStatus(installment, gracePeriodDays);
+    if (effective === "overdue") currentlyOverdue += 1;
+    if (installment.status === "paid") {
+      const lastPaymentAt = customerPayments
+        .filter((p) => p.allocations.some((a) => a.installment_id === installment.id))
+        .map((p) => p.created_at)
+        .sort()
+        .at(-1);
+      if (lastPaymentAt && new Date(lastPaymentAt) > new Date(installment.due_date)) {
+        paidLate += 1;
+      } else {
+        paidOnTime += 1;
+      }
+    }
+  }
+
+  const failedPromises = promises.filter(
+    (p) => contractIds.has(p.contract_id) && getEffectivePromiseStatus(p) === "failed",
+  ).length;
+
+  const reasons: string[] = [];
+  let riskPoints = 0;
+  if (currentlyOverdue > 0) {
+    riskPoints += currentlyOverdue * 3;
+    reasons.push(`${currentlyOverdue} قسط متأخر حالياً`);
+  }
+  if (paidLate > 0) {
+    riskPoints += paidLate;
+    reasons.push(`${paidLate} قسط دُفع بعد موعده سابقاً`);
+  }
+  if (failedPromises > 0) {
+    riskPoints += failedPromises * 2;
+    reasons.push(`${failedPromises} وعد بالدفع لم يُنفَّذ`);
+  }
+  if (riskPoints === 0) {
+    reasons.push(paidOnTime > 0 ? `${paidOnTime} قسط مدفوع في موعده` : "لا يوجد تأخير حتى الآن");
+  }
+
+  let level: CustomerRiskAssessment["level"];
+  if (riskPoints === 0) level = paidOnTime >= 3 ? "excellent" : "good";
+  else if (riskPoints <= 2) level = "good";
+  else if (riskPoints <= 5) level = "watch";
+  else level = "critical";
+
+  return { level, label: RISK_LEVEL_LABEL_AR[level], reasons };
 }
 
 async function nextInstallmentDocNumber(

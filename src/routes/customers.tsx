@@ -1,10 +1,19 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import { RiskBadge } from "@/components/ui/StatCard";
-import { getCustomerRiskAssessment, subscribeData } from "@/lib/data-store";
-import { useCreateCustomer, useCustomers, useUpdateCustomer } from "@/lib/supabase-queries";
+import {
+  computeCustomerRiskAssessment,
+  useCreateCustomer,
+  useCurrentTenantSettings,
+  useCustomers,
+  useInstallmentContracts,
+  useInstallmentPayments,
+  useInstallments,
+  usePromisesToPay,
+  useUpdateCustomer,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 import type { Customer } from "@/types";
 
@@ -32,17 +41,20 @@ const EMPTY_FORM: FormState = {
 
 function CustomersPage() {
   const session = useRequireSession();
-  const [, forceRerender] = useState(0);
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
 
-  useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
-
   const { data: customers = [], isLoading } = useCustomers(session?.tenant_id);
+  const { data: settingsData } = useCurrentTenantSettings(session?.tenant_id);
+  const { data: contracts = [] } = useInstallmentContracts(session?.tenant_id);
+  const { data: installments = [] } = useInstallments(session?.tenant_id);
+  const { data: payments = [] } = useInstallmentPayments(session?.tenant_id);
+  const { data: promises = [] } = usePromisesToPay(session?.tenant_id);
   const createCustomerMutation = useCreateCustomer(session?.tenant_id);
   const updateCustomerMutation = useUpdateCustomer(session?.tenant_id);
 
   if (!session) return null;
+  const gracePeriodDays = settingsData?.grace_period_days ?? 3;
   // Extracted so nested closures below see a plain `string`, not the `Session | null` union
   // TypeScript falls back to for a captured outer variable inside a function body.
   const actorUserId = session.user_id;
@@ -225,7 +237,16 @@ function CustomersPage() {
                     {customer.credit_limit.toLocaleString("ar-EG")} ج.م
                   </td>
                   <td className="px-4 py-3">
-                    <RiskBadge assessment={getCustomerRiskAssessment(customer.id)} />
+                    <RiskBadge
+                      assessment={computeCustomerRiskAssessment(
+                        customer.id,
+                        contracts,
+                        installments,
+                        payments,
+                        promises,
+                        gracePeriodDays,
+                      )}
+                    />
                   </td>
                   <td className="px-4 py-3">
                     <span

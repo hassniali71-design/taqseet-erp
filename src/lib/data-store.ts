@@ -934,7 +934,7 @@ export interface CustomerRiskAssessment {
   reasons: string[];
 }
 
-const RISK_LEVEL_LABEL_AR: Record<CustomerRiskLevel, string> = {
+export const RISK_LEVEL_LABEL_AR: Record<CustomerRiskLevel, string> = {
   excellent: "ممتاز",
   good: "جيد",
   watch: "تحت المراقبة",

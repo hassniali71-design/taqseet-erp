@@ -1,10 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import { getTenants, subscribeData } from "@/lib/data-store";
 import {
   useCreateReturn,
+  useCurrentTenant,
   useCurrentTenantSettings,
   useSaleReturns,
   useSales,
@@ -18,25 +18,22 @@ export const Route = createFileRoute("/sales/$id")({
 function SaleReceiptPage() {
   const session = useRequireSession();
   const { id } = Route.useParams();
-  const [, forceRerender] = useState(0);
   const [showReturnForm, setShowReturnForm] = useState(false);
   const [returnQuantities, setReturnQuantities] = useState<Record<number, string>>({});
   const [returnReason, setReturnReason] = useState("");
   const [returnError, setReturnError] = useState<string | null>(null);
   const [returnSuccess, setReturnSuccess] = useState(false);
 
-  useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
-
   const { data: sales = [], isLoading } = useSales(session?.tenant_id);
   const { data: allReturns = [] } = useSaleReturns(session?.tenant_id);
   const { data: settings } = useCurrentTenantSettings(session?.tenant_id);
+  const { data: tenant } = useCurrentTenant(session?.tenant_id);
   const createReturnMutation = useCreateReturn(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
 
   const sale = sales.find((s) => s.id === id);
-  const tenant = getTenants().find((t) => t.id === session.tenant_id);
 
   if (!sale) {
     return (

@@ -1,9 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import { getTenants, subscribeData } from "@/lib/data-store";
-import { usePurchases } from "@/lib/supabase-queries";
+import { useCurrentTenant, usePurchases } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/purchases/$id")({
@@ -13,16 +11,13 @@ export const Route = createFileRoute("/purchases/$id")({
 function PurchaseReceiptPage() {
   const session = useRequireSession();
   const { id } = Route.useParams();
-  const [, forceRerender] = useState(0);
-
-  useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
   const { data: purchases = [], isLoading } = usePurchases(session?.tenant_id);
+  const { data: tenant } = useCurrentTenant(session?.tenant_id);
 
   if (!session) return null;
 
   const purchase = purchases.find((p) => p.id === id);
-  const tenant = getTenants().find((t) => t.id === session.tenant_id);
 
   if (!purchase) {
     return (

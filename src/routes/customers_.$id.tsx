@@ -1,19 +1,19 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import { RiskBadge } from "@/components/ui/StatCard";
 import {
-  createGuarantor,
-  getCustomerRiskAssessment,
-  getGuarantors,
-  subscribeData,
-} from "@/lib/data-store";
-import {
   computeCustomerExposure,
+  computeCustomerRiskAssessment,
+  useCreateGuarantor,
+  useCurrentTenantSettings,
   useCustomers,
+  useGuarantors,
   useInstallmentContracts,
+  useInstallmentPayments,
   useInstallments,
+  usePromisesToPay,
   useSales,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
@@ -25,21 +25,24 @@ export const Route = createFileRoute("/customers_/$id")({
 function CustomerDetailPage() {
   const session = useRequireSession();
   const { id } = Route.useParams();
-  const [, forceRerender] = useState(0);
   const [showGuarantorForm, setShowGuarantorForm] = useState(false);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [relationship, setRelationship] = useState("");
 
-  useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
-
   const { data: customers = [], isLoading } = useCustomers(session?.tenant_id);
   const { data: allSales = [] } = useSales(session?.tenant_id);
   const { data: allContracts = [] } = useInstallmentContracts(session?.tenant_id);
   const { data: allInstallments = [] } = useInstallments(session?.tenant_id);
+  const { data: allPayments = [] } = useInstallmentPayments(session?.tenant_id);
+  const { data: allPromises = [] } = usePromisesToPay(session?.tenant_id);
+  const { data: settingsData } = useCurrentTenantSettings(session?.tenant_id);
+  const { data: allGuarantors = [] } = useGuarantors(session?.tenant_id);
+  const createGuarantorMutation = useCreateGuarantor(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
+  const gracePeriodDays = settingsData?.grace_period_days ?? 3;
   const customer = customers.find((c) => c.id === id);
   if (!customer) {
     return (
@@ -61,7 +64,7 @@ function CustomerDetailPage() {
     );
   }
 
-  const guarantors = getGuarantors(session.tenant_id).filter((g) => g.customer_id === id);
+  const guarantors = allGuarantors.filter((g) => g.customer_id === id);
   const sales = allSales
     .filter((s) => s.customer_id === id)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -73,19 +76,25 @@ function CustomerDetailPage() {
 
   function handleAddGuarantor(event: FormEvent) {
     event.preventDefault();
-    createGuarantor(
+    createGuarantorMutation.mutate(
       {
-        customer_id: id,
-        name: name.trim(),
-        phone: phone.trim(),
-        ...(relationship.trim() && { relationship: relationship.trim() }),
+        input: {
+          customer_id: id,
+          name: name.trim(),
+          phone: phone.trim(),
+          ...(relationship.trim() && { relationship: relationship.trim() }),
+        },
+        actorUserId,
       },
-      actorUserId,
+      {
+        onSuccess: () => {
+          setName("");
+          setPhone("");
+          setRelationship("");
+          setShowGuarantorForm(false);
+        },
+      },
     );
-    setName("");
-    setPhone("");
-    setRelationship("");
-    setShowGuarantorForm(false);
   }
 
   return (
@@ -104,7 +113,16 @@ function CustomerDetailPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <RiskBadge assessment={getCustomerRiskAssessment(customer.id)} />
+            <RiskBadge
+              assessment={computeCustomerRiskAssessment(
+                customer.id,
+                allContracts,
+                allInstallments,
+                allPayments,
+                allPromises,
+                gracePeriodDays,
+              )}
+            />
             <span
               className={
                 customer.status === "active"
