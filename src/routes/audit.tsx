@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import { getAuditLogs, getUsers, subscribeData } from "@/lib/data-store";
+import { getUsers } from "@/lib/data-store";
+import { useAuditLogs } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/audit")({
@@ -25,16 +25,11 @@ const ACTION_LABELS: Record<string, string> = {
 
 function AuditPage() {
   const session = useRequireSession();
-  const [, forceRerender] = useState(0);
-
-  useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
+  const { data: logs = [], isLoading, error } = useAuditLogs(session?.tenant_id);
 
   if (!session) return null;
 
   const users = getUsers(session.tenant_id);
-  const logs = [...getAuditLogs(session.tenant_id)].sort((a, b) =>
-    b.created_at.localeCompare(a.created_at),
-  );
 
   function userName(userId: string | null): string {
     if (!userId) return "النظام";
@@ -49,6 +44,13 @@ function AuditPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           سجل غير قابل للتعديل أو الحذف — كل عملية حساسة في النظام تُسجَّل هنا تلقائيًا (§12).
         </p>
+
+        {error && (
+          <p className="mt-4 text-sm text-destructive">
+            تعذّر تحميل السجل: {error instanceof Error ? error.message : "خطأ غير معروف"}
+          </p>
+        )}
+        {isLoading && <p className="mt-4 text-sm text-muted-foreground">جارٍ التحميل...</p>}
 
         <div className="mt-6 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-right text-sm">

@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
   CheckCircle2,
@@ -19,16 +20,18 @@ import { Logo } from "@/components/Logo";
 import { Panel } from "@/components/ui/StatCard";
 import { useSession } from "@/hooks/use-session";
 import {
-  extendTenantSubscription,
-  getManagedTenants,
   getUsers,
   provisionTenant,
-  recordAudit,
-  setTenantStatus,
   signOut,
   subscribeData,
   type ProvisionTenantResult,
 } from "@/lib/data-store";
+import {
+  extendTenantSubscriptionServer,
+  fetchManagedTenants,
+  recordCrossTenantAudit,
+  setTenantStatusServer,
+} from "@/lib/platform-server";
 import type { Tenant, TenantStatus } from "@/types";
 
 export const Route = createFileRoute("/platform")({
@@ -56,6 +59,7 @@ function daysLeft(iso: string): number {
 function PlatformControlRoom() {
   const session = useSession();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [, forceRerender] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
   const [justCreated, setJustCreated] = useState<ProvisionTenantResult | null>(null);
@@ -77,9 +81,43 @@ function PlatformControlRoom() {
     }
   }, [session, currentUser, navigate]);
 
+  const { data: tenants = [], isLoading: tenantsLoading } = useQuery({
+    queryKey: ["managed-tenants"],
+    queryFn: () => fetchManagedTenants(),
+    enabled: Boolean(currentUser?.is_platform_owner),
+  });
+
+  const setTenantStatusMutation = useMutation({
+    mutationFn: (vars: {
+      tenantId: string;
+      status: TenantStatus;
+      actorUserId: string | null;
+      reason: string;
+    }) => setTenantStatusServer({ data: vars }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["managed-tenants"] }),
+    onError: (e) => toast.error(e instanceof Error ? e.message : "حدث خطأ"),
+  });
+
+  const extendSubscriptionMutation = useMutation({
+    mutationFn: (vars: { tenantId: string; days: number; actorUserId: string | null }) =>
+      extendTenantSubscriptionServer({ data: vars }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["managed-tenants"] }),
+    onError: (e) => toast.error(e instanceof Error ? e.message : "حدث خطأ"),
+  });
+
+  const recordSupportAccessMutation = useMutation({
+    mutationFn: (vars: {
+      tenantId: string;
+      userId: string | null;
+      action: string;
+      entity: string;
+      entityId: string | null;
+      reason: string;
+    }) => recordCrossTenantAudit({ data: vars }),
+  });
+
   if (!session || !currentUser?.is_platform_owner) return null;
 
-  const tenants = getManagedTenants();
   const totalCustomers = tenants.length;
   const activeCount = tenants.filter((t) => t.status === "active" || t.status === "trial").length;
   const expiringCount = tenants.filter(
@@ -107,18 +145,25 @@ function PlatformControlRoom() {
    * every time the platform team looked at their data and why. */
   function handleSupportAccess() {
     if (!supportTarget || !supportReason.trim()) return;
-    recordAudit({
-      tenant_id: supportTarget.id,
-      user_id: session?.user_id ?? null,
-      action: "support_access.use",
-      entity: "tenant",
-      entity_id: supportTarget.id,
-      reason: supportReason.trim(),
-    });
     const tenantId = supportTarget.id;
-    setSupportTarget(null);
-    setSupportReason("");
-    void navigate({ to: "/platform/support/$tenantId", params: { tenantId } });
+    recordSupportAccessMutation.mutate(
+      {
+        tenantId,
+        userId: session?.user_id ?? null,
+        action: "support_access.use",
+        entity: "tenant",
+        entityId: tenantId,
+        reason: supportReason.trim(),
+      },
+      {
+        onSuccess: () => {
+          setSupportTarget(null);
+          setSupportReason("");
+          void navigate({ to: "/platform/support/$tenantId", params: { tenantId } });
+        },
+        onError: (e) => toast.error(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   return (
@@ -271,6 +316,10 @@ function PlatformControlRoom() {
         {showCreate && (
           <div className="mt-6 rounded-2xl border-2 border-sidebar-border bg-sidebar-accent/20 p-5">
             <h2 className="text-sm font-extrabold text-sidebar-foreground">إنشاء عميل جديد</h2>
+            <p className="mt-1 text-xs font-bold text-warning">
+              ⚠️ لسه بيعمل حساب Mock بس (تخزين محلي في متصفحك) — مش هيظهر في جدول "العملاء" تحت
+              (اللي بقى بيقرأ من Supabase حقيقي)، ومش هيقدر يسجّل دخول حقيقي. الخطوة دي لسه مؤجَّلة.
+            </p>
             <form onSubmit={handleCreate} className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field
                 label="اسم المحل"
@@ -358,15 +407,18 @@ function PlatformControlRoom() {
                           {tenant.status === "suspended" ? (
                             <button
                               onClick={() => {
-                                setTenantStatus(
-                                  tenant.id,
-                                  "active",
-                                  session?.user_id ?? null,
-                                  "إعادة تفعيل من غرفة تحكم المنصة",
+                                setTenantStatusMutation.mutate(
+                                  {
+                                    tenantId: tenant.id,
+                                    status: "active",
+                                    actorUserId: session?.user_id ?? null,
+                                    reason: "إعادة تفعيل من غرفة تحكم المنصة",
+                                  },
+                                  { onSuccess: () => toast.success("تم تفعيل المحل") },
                                 );
-                                toast.success("تم تفعيل المحل");
                               }}
-                              className="flex items-center gap-1 rounded-md border border-success/40 px-2 py-1 text-xs font-bold text-success hover:bg-success/10"
+                              disabled={setTenantStatusMutation.isPending}
+                              className="flex items-center gap-1 rounded-md border border-success/40 px-2 py-1 text-xs font-bold text-success hover:bg-success/10 disabled:opacity-50"
                             >
                               <Play className="h-3 w-3" />
                               تفعيل
@@ -374,15 +426,18 @@ function PlatformControlRoom() {
                           ) : (
                             <button
                               onClick={() => {
-                                setTenantStatus(
-                                  tenant.id,
-                                  "suspended",
-                                  session?.user_id ?? null,
-                                  "تعليق من غرفة تحكم المنصة",
+                                setTenantStatusMutation.mutate(
+                                  {
+                                    tenantId: tenant.id,
+                                    status: "suspended",
+                                    actorUserId: session?.user_id ?? null,
+                                    reason: "تعليق من غرفة تحكم المنصة",
+                                  },
+                                  { onSuccess: () => toast.success("تم تعليق المحل") },
                                 );
-                                toast.success("تم تعليق المحل");
                               }}
-                              className="flex items-center gap-1 rounded-md border border-destructive/40 px-2 py-1 text-xs font-bold text-destructive hover:bg-destructive/10"
+                              disabled={setTenantStatusMutation.isPending}
+                              className="flex items-center gap-1 rounded-md border border-destructive/40 px-2 py-1 text-xs font-bold text-destructive hover:bg-destructive/10 disabled:opacity-50"
                             >
                               <Pause className="h-3 w-3" />
                               تعليق
@@ -390,10 +445,17 @@ function PlatformControlRoom() {
                           )}
                           <button
                             onClick={() => {
-                              extendTenantSubscription(tenant.id, 30, session?.user_id ?? null);
-                              toast.success("تم تمديد الاشتراك ٣٠ يوم");
+                              extendSubscriptionMutation.mutate(
+                                {
+                                  tenantId: tenant.id,
+                                  days: 30,
+                                  actorUserId: session?.user_id ?? null,
+                                },
+                                { onSuccess: () => toast.success("تم تمديد الاشتراك ٣٠ يوم") },
+                              );
                             }}
-                            className="flex items-center gap-1 rounded-md border border-primary/40 px-2 py-1 text-xs font-bold text-primary hover:bg-primary/10"
+                            disabled={extendSubscriptionMutation.isPending}
+                            className="flex items-center gap-1 rounded-md border border-primary/40 px-2 py-1 text-xs font-bold text-primary hover:bg-primary/10 disabled:opacity-50"
                           >
                             <RefreshCw className="h-3 w-3" />
                             تجديد ٣٠ يوم
@@ -412,7 +474,17 @@ function PlatformControlRoom() {
                       </td>
                     </tr>
                   ))}
-                  {tenants.length === 0 && (
+                  {tenantsLoading && (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="py-6 text-center font-bold text-sidebar-foreground/60"
+                      >
+                        جارٍ التحميل...
+                      </td>
+                    </tr>
+                  )}
+                  {!tenantsLoading && tenants.length === 0 && (
                     <tr>
                       <td
                         colSpan={6}
@@ -429,10 +501,10 @@ function PlatformControlRoom() {
         </div>
 
         <div className="mt-6 rounded-2xl border-2 border-sidebar-border bg-sidebar-accent/20 p-5 text-sm font-bold text-sidebar-foreground/80">
-          ملاحظة صريحة: كل محل جديد معزول فعلياً عن باقي المحلات (عملاؤه، منتجاته، مبيعاته، تقسيطه،
-          خزينته...) — تعديل بيانات محل واحد لا يظهر أبداً عند محل آخر. هذا العزل تطبيقي
-          (Application-layer) داخل طبقة الـMock الحالية؛ عند ربط Supabase حقيقي، لازم تفعيل RLS على
-          مستوى قاعدة البيانات كطبقة حماية ثانية، مش الاعتماد على هذا العزل وحده.
+          ملاحظة صريحة: جدول العملاء فوق، والتفعيل/التعليق/التجديد، وسجل دخول الدعم الفني — كلهم
+          بقوا حقيقيين فعليًا على Supabase (RLS + service role حسب الحالة). أما بيانات كل محل
+          التشغيلية (عملاؤه، منتجاته، مبيعاته، تقسيطه، خزينته) فلسه Mock في متصفح كل مستخدم — مرحلة
+          تحويل لاحقة منفصلة. "عميل جديد" فوق لسه بيعمل حساب Mock بس، مش حساب حقيقي.
         </div>
       </main>
     </div>

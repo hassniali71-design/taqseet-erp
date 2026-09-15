@@ -4,7 +4,6 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import {
   createInstallmentPlan,
-  getCurrentTenantSettings,
   getInstallmentPlans,
   getProductBrands,
   getProductCategories,
@@ -14,8 +13,8 @@ import {
   setProductBrandActive,
   setProductCategoryActive,
   subscribeData,
-  updateTenantSettings,
 } from "@/lib/data-store";
+import { useCurrentTenantSettings, useUpdateTenantSettings } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 import type { TenantSettings } from "@/types";
 
@@ -53,7 +52,8 @@ function SettingsPage() {
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
-  const settings = session ? getCurrentTenantSettings() : null;
+  const { data: settings } = useCurrentTenantSettings(session?.tenant_id);
+  const updateSettingsMutation = useUpdateTenantSettings(session?.tenant_id);
   const [form, setForm] = useState<FormState | null>(settings ? toFormState(settings) : null);
 
   useEffect(() => {
@@ -68,7 +68,7 @@ function SettingsPage() {
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!form) return;
-    updateTenantSettings(
+    updateSettingsMutation.mutate(
       {
         currency: form.currency,
         timezone: form.timezone,
@@ -82,10 +82,13 @@ function SettingsPage() {
         expense_approval_threshold: Number(form.expense_approval_threshold) || 0,
         whatsapp_notifications_enabled: form.whatsapp_notifications_enabled === "true",
       },
-      actorUserId,
+      {
+        onSuccess: () => {
+          setSaved(true);
+          setTimeout(() => setSaved(false), 2000);
+        },
+      },
     );
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
   }
 
   const plans = getInstallmentPlans(session.tenant_id);

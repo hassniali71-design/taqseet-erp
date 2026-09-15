@@ -6,7 +6,8 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useState, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { Toaster } from "../components/ui/sonner";
@@ -110,11 +111,19 @@ function RootShell({ children }: { children: ReactNode }) {
 }
 
 function RootComponent() {
+  /** First real use of @tanstack/react-query in this project — the Foundation layer
+   * (tenants/users/roles/permissions/audit_logs, see src/lib/supabase-queries.ts) is the
+   * first slice reading from real Supabase instead of the Mock data-store. `useState` (not a
+   * module-level singleton) keeps this instance scoped per component tree, matching
+   * TanStack Start's SSR guidance — a shared client would leak cached data between requests
+   * on the server. */
+  const [queryClient] = useState(() => new QueryClient());
+
   return (
-    <>
+    <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
       <Toaster richColors position="top-center" dir="rtl" />
-    </>
+    </QueryClientProvider>
   );
 }

@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ArrowRight,
@@ -15,17 +16,16 @@ import { Panel, StatCard } from "@/components/ui/StatCard";
 import { useSession } from "@/hooks/use-session";
 import {
   getAccountBalance,
-  getAuditLogs,
   getCustomers,
   getInstallmentContracts,
   getInstallments,
-  getManagedTenants,
   getProducts,
   getSales,
   getTreasuryAccounts,
   getUsers,
   subscribeData,
 } from "@/lib/data-store";
+import { fetchManagedTenants, fetchTenantAuditLog } from "@/lib/platform-server";
 
 export const Route = createFileRoute("/platform_/support/$tenantId")({
   component: SupportAccessPage,
@@ -58,10 +58,29 @@ function SupportAccessPage() {
     }
   }, [session, currentUser, navigate]);
 
+  const { data: managedTenants = [], isLoading: tenantsLoading } = useQuery({
+    queryKey: ["managed-tenants"],
+    queryFn: () => fetchManagedTenants(),
+    enabled: Boolean(currentUser?.is_platform_owner),
+  });
+  const { data: accessLog = [] } = useQuery({
+    queryKey: ["tenant-audit-log", tenantId, "support_access.use"],
+    queryFn: () =>
+      fetchTenantAuditLog({ data: { tenantId, action: "support_access.use", limit: 10 } }),
+    enabled: Boolean(currentUser?.is_platform_owner) && Boolean(tenantId),
+  });
+
   if (!session || !currentUser?.is_platform_owner) return null;
 
-  const tenant = getManagedTenants().find((t) => t.id === tenantId);
+  const tenant = managedTenants.find((t) => t.id === tenantId);
   if (!tenant) {
+    if (tenantsLoading) {
+      return (
+        <div className="min-h-screen bg-sidebar p-8 text-center font-bold text-sidebar-foreground">
+          جارٍ التحميل...
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen bg-sidebar p-8 text-center font-bold text-sidebar-foreground">
         العميل غير موجود.{" "}
@@ -85,10 +104,6 @@ function SupportAccessPage() {
     (sum, acc) => sum + getAccountBalance(acc.id),
     0,
   );
-  const accessLog = getAuditLogs(tenantId)
-    .filter((a) => a.action === "support_access.use")
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .slice(0, 10);
 
   return (
     <div className="min-h-screen bg-sidebar">
