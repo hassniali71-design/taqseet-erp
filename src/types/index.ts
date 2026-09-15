@@ -90,9 +90,15 @@ export interface User {
   password?: string;
   active: boolean;
   created_at: string;
-  /** Phase 9 — marks the platform-operator account (tenant_id = the reserved "platform" tenant).
+  /** Phase 9 — marks the platform-operator account (tenant_id = the reserved platform tenant).
    * Not a `role`; this is orthogonal to the tenant's own role system. */
   is_platform_owner?: boolean;
+  /** Links this business user row to the real Supabase Auth identity (auth.users.id) that
+   * `signIn()` in data-store.ts authenticates against — set once per account directly in
+   * Supabase, never written by any Mock mutation function. Undefined for a Mock-only user
+   * that has no matching real Auth account yet (e.g. a tenant provisioned via
+   * `/platform` before that flow is itself converted to create a real Auth user). */
+  auth_user_id?: string;
 }
 
 export interface UserRoleAssignment {

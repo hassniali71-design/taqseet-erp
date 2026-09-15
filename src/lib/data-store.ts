@@ -41,6 +41,7 @@ import type {
   UserRoleAssignment,
 } from "@/types";
 import { calculateFinance, generateSchedule } from "@/lib/finance-engine";
+import { supabase } from "@/lib/supabase-client";
 
 /**
  * Foundation Mock data layer — Phase 0.
@@ -136,13 +137,19 @@ function genId(prefix: string): string {
 
 /* ---------------- Seed (first run only — never re-seeds once a key exists) ---------------- */
 
-const DEMO_TENANT_ID = "tenant_demo";
+/** Real Supabase Auth is now live for the two demo accounts (signIn() in this file) — these
+ * two constants MUST equal the actual `tenants.id` UUIDs seeded in the real database (see the
+ * INSERT script from the Supabase-connection work), not arbitrary strings, so that a real
+ * login's `session.tenant_id` still matches what the (still-Mock) business-data getters below
+ * filter by. This is a deliberate bridge: only Auth is real so far, business data is still
+ * localStorage, tagged with these same ids so nothing looks broken for the demo tenant. */
+const DEMO_TENANT_ID = "00000000-0000-0000-0000-000000000002";
 
 /** Phase 9 — reserved sentinel tenant id for the platform operator's own account. Never shown
  * in the platform control room's tenant list (filtered out explicitly there), never a real
  * customer. Mirrors the same "magic tenant id marks the super-admin" pattern used elsewhere in
  * this codebase's sibling projects. */
-const PLATFORM_TENANT_ID = "platform";
+const PLATFORM_TENANT_ID = "00000000-0000-0000-0000-000000000001";
 
 /**
  * §133 tenant isolation — the tenant every mutation should tag new rows with, and every getter
@@ -278,10 +285,16 @@ function seedRolePermissions(): RolePermission[] {
   return PERMISSION_SEED.map((p) => ({ role_id: "role_owner", permission_id: `perm_${p.key}` }));
 }
 
+/** These two ids MUST equal the real `users.id` values seeded in Supabase (INSERT script from
+ * the Supabase-connection work), matching the `DEMO_TENANT_ID`/`PLATFORM_TENANT_ID` bridge
+ * above — a real signIn() now returns these exact ids as `session.user_id`. */
+const PLATFORM_OWNER_USER_ID = "00000000-0000-0000-0000-000000000011";
+const DEMO_OWNER_USER_ID = "00000000-0000-0000-0000-000000000012";
+
 function seedUsers(): User[] {
   return [
     {
-      id: "user_platform_owner",
+      id: PLATFORM_OWNER_USER_ID,
       tenant_id: PLATFORM_TENANT_ID,
       full_name: "مشغّل منصة حسبة",
       email: "platform@hesba.local",
@@ -291,7 +304,7 @@ function seedUsers(): User[] {
       is_platform_owner: true,
     },
     {
-      id: "user_demo_owner",
+      id: DEMO_OWNER_USER_ID,
       tenant_id: DEMO_TENANT_ID,
       full_name: "مالك المحل",
       email: "owner@demo.local",
@@ -303,7 +316,7 @@ function seedUsers(): User[] {
 }
 
 function seedUserRoles(): UserRoleAssignment[] {
-  return [{ user_id: "user_demo_owner", role_id: "role_owner" }];
+  return [{ user_id: DEMO_OWNER_USER_ID, role_id: "role_owner" }];
 }
 
 /** §14 — a couple of demo rows so the Customers page isn't empty on first run. */
@@ -3679,17 +3692,22 @@ export function getNotifications(): AppNotification[] {
 }
 
 /* ----------------------------------------------------------------------------------------
- * Session (Mock — dev-testing aid only)
+ * Session — Auth is real Supabase Auth now (signIn/signOut below); everything else in this
+ * file (customers, products, sales, installments...) is still the Mock localStorage layer
+ * and will be migrated in later, separate steps. `Session` itself stays a plain localStorage-
+ * cached `{user_id, tenant_id, is_platform_owner}` object so the ~28 route files calling
+ * `useSession`/`useRequireSession` need zero changes — signIn() just now populates it from a
+ * real, password-verified Supabase Auth session instead of a plaintext Mock comparison.
  *
- * ⚠️ This is NOT Supabase Auth and never will be — it is a throwaway local-testing shim so
- * `/login` has something real to check against before Phase 1 wires up real Supabase Auth +
- * JWT (§8). No hashing, no server-side verification, no RLS. Do not build any real feature
- * on top of this beyond letting a developer click through the app locally.
+ * Known limitation, not yet closed: this cached session isn't re-validated against a live
+ * Supabase Auth session on every page load, so a revoked/expired Supabase session wouldn't be
+ * caught until the next explicit sign-in. Acceptable for this step, flagged for a follow-up.
  * -------------------------------------------------------------------------------------- */
 
 export interface Session {
   user_id: string;
   tenant_id: string;
+  is_platform_owner: boolean;
 }
 
 function readSession(): Session | null {
@@ -3709,13 +3727,34 @@ export function getSession(): Session | null {
 
 export type SignInResult = { ok: true; session: Session } | { ok: false; error: string };
 
-export function signIn(email: string, password: string): SignInResult {
+/** Real Supabase Auth: `supabase.auth.signInWithPassword` does the actual password check
+ * (hashed server-side by Supabase, never compared as plaintext here). The business
+ * `tenant_id`/`is_platform_owner` then come from this account's linked row in the `users`
+ * table (`auth_user_id` — set up once per account in Supabase, not by this function), which
+ * RLS only lets an authenticated user read for their own `auth_user_id`. */
+export async function signIn(email: string, password: string): Promise<SignInResult> {
   const normalizedEmail = email.trim().toLowerCase();
-  const user = getUsers().find((u) => u.email.toLowerCase() === normalizedEmail);
-  if (!user || !user.active || user.password !== password) {
+  const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+    email: normalizedEmail,
+    password,
+  });
+  if (authError || !authData.user) {
     return { ok: false, error: "البريد الإلكتروني أو كلمة السر غير صحيحة" };
   }
-  const session: Session = { user_id: user.id, tenant_id: user.tenant_id };
+  const { data: userRow, error: userError } = await supabase
+    .from("users")
+    .select("id, tenant_id, active, is_platform_owner")
+    .eq("auth_user_id", authData.user.id)
+    .maybeSingle();
+  if (userError || !userRow || !userRow.active) {
+    await supabase.auth.signOut();
+    return { ok: false, error: "الحساب غير مفعّل أو غير مرتبط بمستخدم في النظام" };
+  }
+  const session: Session = {
+    user_id: userRow.id as string,
+    tenant_id: userRow.tenant_id as string,
+    is_platform_owner: (userRow.is_platform_owner as boolean | null) ?? false,
+  };
   if (typeof window !== "undefined") {
     window.localStorage.setItem(KEYS.session, JSON.stringify(session));
   }
@@ -3726,6 +3765,7 @@ export function signIn(email: string, password: string): SignInResult {
 export function signOut(): void {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(KEYS.session);
+  void supabase.auth.signOut();
   emit();
 }
 

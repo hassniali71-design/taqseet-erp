@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
 
 import { Logo } from "@/components/Logo";
-import { getUsers, signIn, signOut } from "@/lib/data-store";
+import { signIn, signOut } from "@/lib/data-store";
 
 export const Route = createFileRoute("/platform_/login")({
   component: PlatformLoginPage,
@@ -14,15 +14,14 @@ function PlatformLoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    const result = signIn(email, password);
+    const result = await signIn(email, password);
     if (!result.ok) {
       setError(result.error);
       return;
     }
-    const user = getUsers().find((u) => u.id === result.session.user_id);
-    if (!user?.is_platform_owner) {
+    if (!result.session.is_platform_owner) {
       signOut();
       setError("هذا الحساب ليس حساب مشغّل منصة — استخدم دخول العملاء بدلاً منه.");
       return;
