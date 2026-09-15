@@ -6,6 +6,17 @@
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
+// Nitro defaults compatibility_date to "today" computed from THIS MACHINE'S LOCAL CLOCK
+// (not UTC) — see node_modules/nitro/dist/_libs/compatx.mjs. If the build machine's local
+// date rolls to the next day before UTC does, `wrangler deploy` rejects it as "in the
+// future" (code 10021). A plain `.env` entry never reaches here: nothing in this pipeline
+// loads `.env` into `process.env` for Node-side config (only VITE_*-prefixed client defines
+// are injected). Pin a fixed, already-past date instead of trusting the moving default —
+// bump it deliberately when adopting newer Workers runtime features, not automatically.
+if (!process.env["NITRO_COMPATIBILITY_DATE"]) {
+  process.env["NITRO_COMPATIBILITY_DATE"] = "2026-09-15";
+}
+
 export default defineConfig({
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
