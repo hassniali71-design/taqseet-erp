@@ -137,3 +137,78 @@ export const fetchTenantAuditLog = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     return (rows ?? []) as TenantAuditLogRow[];
   });
+
+/** Support Access's read-only summary — same service-role reasoning as above: counting another
+ * tenant's customers/products/sales/contracts/installments/treasury is a cross-tenant read the
+ * anon-key RLS policies never allow, so it has to run here. Head-count queries (`count: "exact",
+ * head: true`) instead of fetching full rows — the page only needs totals. */
+export interface TenantSummary {
+  ownerEmail: string | null;
+  customersCount: number;
+  productsCount: number;
+  salesCount: number;
+  activeContractsCount: number;
+  overdueInstallmentsCount: number;
+  treasuryBalance: number;
+}
+
+export const fetchTenantSummary = createServerFn({ method: "GET" })
+  .validator((input: { tenantId: string }) => input)
+  .handler(async ({ data }): Promise<TenantSummary> => {
+    const supabaseAdmin = getSupabaseAdmin();
+    const tenantId = data.tenantId;
+
+    const [
+      { data: owner },
+      { count: customersCount },
+      { count: productsCount },
+      { count: salesCount },
+      { count: activeContractsCount },
+      { count: overdueInstallmentsCount },
+      { data: movements },
+    ] = await Promise.all([
+      supabaseAdmin
+        .from("users")
+        .select("email")
+        .eq("tenant_id", tenantId)
+        .eq("is_platform_owner", false)
+        .limit(1)
+        .maybeSingle(),
+      supabaseAdmin
+        .from("customers")
+        .select("*", { count: "exact", head: true })
+        .eq("tenant_id", tenantId),
+      supabaseAdmin
+        .from("products")
+        .select("*", { count: "exact", head: true })
+        .eq("tenant_id", tenantId),
+      supabaseAdmin
+        .from("sales")
+        .select("*", { count: "exact", head: true })
+        .eq("tenant_id", tenantId),
+      supabaseAdmin
+        .from("installment_contracts")
+        .select("*", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .in("status", ["active", "partially_paid"]),
+      supabaseAdmin
+        .from("installments")
+        .select("*", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("status", "overdue"),
+      supabaseAdmin.from("treasury_movements").select("amount").eq("tenant_id", tenantId),
+    ]);
+
+    const treasuryBalance =
+      Math.round((movements ?? []).reduce((sum, m) => sum + (m.amount as number), 0) * 100) / 100;
+
+    return {
+      ownerEmail: (owner?.email as string | undefined) ?? null,
+      customersCount: customersCount ?? 0,
+      productsCount: productsCount ?? 0,
+      salesCount: salesCount ?? 0,
+      activeContractsCount: activeContractsCount ?? 0,
+      overdueInstallmentsCount: overdueInstallmentsCount ?? 0,
+      treasuryBalance,
+    };
+  });

@@ -2,7 +2,12 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import { createExchange, getProductSerials, getProducts, getSales } from "@/lib/data-store";
+import {
+  useCreateExchange,
+  useProducts,
+  useProductSerials,
+  useSales,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/exchanges/new")({
@@ -41,21 +46,24 @@ function NewExchangePage() {
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  const { data: allSales = [] } = useSales(session?.tenant_id);
+  const { data: allProducts = [] } = useProducts(session?.tenant_id);
+  const { data: allSerials = [] } = useProductSerials(session?.tenant_id);
+  const createExchangeMutation = useCreateExchange(session?.tenant_id);
+
   if (!session) return null;
   const actorUserId = session.user_id;
 
   const matchingSales = invoiceQuery.trim()
-    ? getSales(session.tenant_id).filter((s) =>
+    ? allSales.filter((s) =>
         s.invoice_number.toLowerCase().includes(invoiceQuery.trim().toLowerCase()),
       )
     : [];
-  const sale = getSales(session.tenant_id).find((s) => s.id === saleId);
-  const products = getProducts(session.tenant_id).filter((p) => p.active);
+  const sale = allSales.find((s) => s.id === saleId);
+  const products = allProducts.filter((p) => p.active);
   const newProduct = products.find((p) => p.id === selectedNewProductId);
   const availableSerials = newProduct?.serial_required
-    ? getProductSerials(session.tenant_id).filter(
-        (s) => s.product_id === newProduct.id && s.status === "available",
-      )
+    ? allSerials.filter((s) => s.product_id === newProduct.id && s.status === "available")
     : [];
 
   function selectSale(id: string) {
@@ -150,9 +158,9 @@ function NewExchangePage() {
       setError("سبب الاستبدال مطلوب");
       return;
     }
-    try {
-      createExchange(
-        {
+    createExchangeMutation.mutate(
+      {
+        input: {
           original_sale_id: sale.id,
           returned_items: returnedLines.map((l) => ({
             product_id: l.product_id,
@@ -167,11 +175,12 @@ function NewExchangePage() {
           reason,
         },
         actorUserId,
-      );
-      void navigate({ to: "/sales/$id", params: { id: sale.id } });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+      },
+      {
+        onSuccess: () => void navigate({ to: "/sales/$id", params: { id: sale.id } }),
+        onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   return (

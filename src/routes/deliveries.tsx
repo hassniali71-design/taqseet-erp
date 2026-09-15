@@ -1,14 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import {
-  advanceDeliveryStatus,
-  getDeliveryOrders,
-  getSales,
-  scheduleDelivery,
-  subscribeData,
-} from "@/lib/data-store";
+  useAdvanceDeliveryStatus,
+  useDeliveryOrders,
+  useScheduleDelivery,
+  useSales,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 import type { DeliveryOrder } from "@/types";
 
@@ -36,21 +35,20 @@ const NEXT_STATUS: Record<DeliveryOrder["status"], DeliveryOrder["status"] | nul
 
 function DeliveriesPage() {
   const session = useRequireSession();
-  const [, forceRerender] = useState(0);
   const [saleId, setSaleId] = useState("");
   const [address, setAddress] = useState("");
   const [scheduledDate, setScheduledDate] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
+  const { data: sales = [] } = useSales(session?.tenant_id);
+  const { data: allOrders = [] } = useDeliveryOrders(session?.tenant_id);
+  const scheduleDeliveryMutation = useScheduleDelivery(session?.tenant_id);
+  const advanceDeliveryStatusMutation = useAdvanceDeliveryStatus(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const sales = getSales(session.tenant_id);
-  const orders = getDeliveryOrders(session.tenant_id).sort((a, b) =>
-    b.created_at.localeCompare(a.created_at),
-  );
+  const orders = [...allOrders].sort((a, b) => b.created_at.localeCompare(a.created_at));
 
   function handleSchedule() {
     setError(null);
@@ -58,24 +56,26 @@ function DeliveriesPage() {
       setError("اختر فاتورة");
       return;
     }
-    try {
-      scheduleDelivery(saleId, address, scheduledDate, actorUserId);
-      setSaleId("");
-      setAddress("");
-      setScheduledDate("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+    scheduleDeliveryMutation.mutate(
+      { saleId, address, scheduledDate, actorUserId },
+      {
+        onSuccess: () => {
+          setSaleId("");
+          setAddress("");
+          setScheduledDate("");
+        },
+        onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   function handleAdvance(order: DeliveryOrder) {
     const next = NEXT_STATUS[order.status];
     if (!next) return;
-    try {
-      advanceDeliveryStatus(order.id, next, actorUserId);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+    advanceDeliveryStatusMutation.mutate(
+      { id: order.id, nextStatus: next, actorUserId },
+      { onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ") },
+    );
   }
 
   return (

@@ -1,17 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import {
-  getCustomers,
-  getInstallmentContracts,
-  getInstallmentPayments,
-  getInstallments,
-  getProducts,
-  getSaleReturns,
-  getSales,
-  subscribeData,
-} from "@/lib/data-store";
+  useCustomers,
+  useInstallmentContracts,
+  useInstallmentPayments,
+  useInstallments,
+  useProducts,
+  useSaleReturns,
+  useSales,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/reports")({
@@ -35,13 +34,10 @@ function daysAgo(days: number): Date {
 
 function ReportsPage() {
   const session = useRequireSession();
-  const [, forceRerender] = useState(0);
   const [tab, setTab] = useState<Tab>("sales");
   const [fromDate, setFromDate] = useState(() => daysAgo(30).toISOString().slice(0, 10));
   const [toDate, setToDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [statementCustomerId, setStatementCustomerId] = useState("");
-
-  useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
   if (!session) return null;
 
@@ -113,7 +109,8 @@ function ReportsPage() {
 }
 
 function SalesReport({ from, to, tenantId }: { from: number; to: number; tenantId: string }) {
-  const sales = getSales(tenantId)
+  const { data: allSales = [] } = useSales(tenantId);
+  const sales = allSales
     .filter((s) => {
       const t = new Date(s.created_at).getTime();
       return t >= from && t <= to && s.status === "completed";
@@ -169,10 +166,9 @@ function SalesReport({ from, to, tenantId }: { from: number; to: number; tenantI
 }
 
 function ContractsReport({ tenantId }: { tenantId: string }) {
-  const contracts = getInstallmentContracts(tenantId).sort((a, b) =>
-    b.created_at.localeCompare(a.created_at),
-  );
-  const allInstallments = getInstallments(tenantId);
+  const { data: contractsData = [] } = useInstallmentContracts(tenantId);
+  const { data: allInstallments = [] } = useInstallments(tenantId);
+  const contracts = [...contractsData].sort((a, b) => b.created_at.localeCompare(a.created_at));
 
   return (
     <section className="mt-6">
@@ -231,18 +227,18 @@ function StatementReport({
   onCustomerChange: (id: string) => void;
   tenantId: string;
 }) {
-  const customers = getCustomers(tenantId);
+  const { data: customers = [] } = useCustomers(tenantId);
+  const { data: allSales = [] } = useSales(tenantId);
+  const { data: allContracts = [] } = useInstallmentContracts(tenantId);
+  const { data: allPayments = [] } = useInstallmentPayments(tenantId);
+  const { data: allReturns = [] } = useSaleReturns(tenantId);
   const customer = customers.find((c) => c.id === customerId);
 
-  const sales = customer ? getSales(tenantId).filter((s) => s.customer_id === customer.id) : [];
-  const contracts = customer
-    ? getInstallmentContracts(tenantId).filter((c) => c.customer_id === customer.id)
-    : [];
+  const sales = customer ? allSales.filter((s) => s.customer_id === customer.id) : [];
+  const contracts = customer ? allContracts.filter((c) => c.customer_id === customer.id) : [];
   const contractIds = new Set(contracts.map((c) => c.id));
-  const payments = getInstallmentPayments(tenantId).filter((p) => contractIds.has(p.contract_id));
-  const returns = customer
-    ? getSaleReturns(tenantId).filter((r) => r.customer_id === customer.id)
-    : [];
+  const payments = allPayments.filter((p) => contractIds.has(p.contract_id));
+  const returns = customer ? allReturns.filter((r) => r.customer_id === customer.id) : [];
 
   type Row = { date: string; label: string; amount: number };
   const rows: Row[] = [
@@ -338,12 +334,15 @@ function StatementReport({
 }
 
 function SlowMovingReport({ from, to, tenantId }: { from: number; to: number; tenantId: string }) {
-  const products = getProducts(tenantId).filter((p) => p.active);
-  const sales = getSales(tenantId).filter((s) => {
+  const { data: allProducts = [] } = useProducts(tenantId);
+  const { data: allSales = [] } = useSales(tenantId);
+  const { data: allContracts = [] } = useInstallmentContracts(tenantId);
+  const products = allProducts.filter((p) => p.active);
+  const sales = allSales.filter((s) => {
     const t = new Date(s.created_at).getTime();
     return t >= from && t <= to;
   });
-  const contracts = getInstallmentContracts(tenantId).filter((c) => {
+  const contracts = allContracts.filter((c) => {
     const t = new Date(c.created_at).getTime();
     return t >= from && t <= to;
   });

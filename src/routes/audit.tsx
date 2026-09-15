@@ -1,8 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import { getUsers } from "@/lib/data-store";
-import { useAuditLogs } from "@/lib/supabase-queries";
+import { useAuditLogs, useUsers } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/audit")({
@@ -26,10 +25,9 @@ const ACTION_LABELS: Record<string, string> = {
 function AuditPage() {
   const session = useRequireSession();
   const { data: logs = [], isLoading, error } = useAuditLogs(session?.tenant_id);
+  const { data: users = [] } = useUsers(session?.tenant_id);
 
   if (!session) return null;
-
-  const users = getUsers(session.tenant_id);
 
   function userName(userId: string | null): string {
     if (!userId) return "النظام";

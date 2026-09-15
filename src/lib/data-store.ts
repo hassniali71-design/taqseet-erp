@@ -3574,7 +3574,7 @@ export interface AppNotification {
   read: boolean;
 }
 
-function getReadNotificationIds(): string[] {
+export function getReadNotificationIds(): string[] {
   if (typeof window === "undefined") return [];
   try {
     return JSON.parse(window.localStorage.getItem(KEYS.readNotificationIds) ?? "[]") as string[];

@@ -6,7 +6,9 @@ import type {
   AccountCode,
   AuditLogEntry,
   Customer,
+  DeliveryOrder,
   Expense,
+  ExchangeTransaction,
   Installment,
   InstallmentContract,
   InstallmentPayment,
@@ -22,14 +24,20 @@ import type {
   Purchase,
   PurchaseItem,
   RestructureEvent,
+  ReturnItem,
+  Role,
   Sale,
   SaleItem,
+  SaleReturn,
   Shift,
   Supplier,
   SupplierPayment,
+  Tenant,
   TenantSettings,
   TreasuryAccount,
   TreasuryMovement,
+  User,
+  UserRoleAssignment,
 } from "@/types";
 
 /** Tenant-scoped reads/writes for the Foundation layer, going straight through the browser
@@ -37,6 +45,22 @@ import type {
  * is what actually restricts these to the signed-in user's own tenant, not application code.
  * Cross-tenant reads/writes (the Platform Control Room) go through src/lib/platform-server.ts
  * instead, which uses the service role key from a server function. */
+
+export function useCurrentTenant(tenantId: string | undefined) {
+  return useQuery({
+    queryKey: ["tenant", tenantId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("tenants")
+        .select("*")
+        .eq("id", tenantId as string)
+        .single();
+      if (error) throw new Error(error.message);
+      return data as Tenant;
+    },
+    enabled: Boolean(tenantId),
+  });
+}
 
 export function useCurrentTenantSettings(tenantId: string | undefined) {
   return useQuery({
@@ -85,6 +109,168 @@ export function useAuditLogs(tenantId: string | undefined) {
       return (data ?? []) as AuditLogEntry[];
     },
     enabled: Boolean(tenantId),
+  });
+}
+
+/* ---------------- Users & Roles (§8-§11) ----------------
+ * Creating a user here only ever writes the `users` table row — it deliberately does NOT create
+ * a real Supabase Auth account (that stays out of scope for this batch, same call already made
+ * for /platform's tenant provisioning). The created row has no `auth_user_id` and can't sign in
+ * for real yet; only an admin manually linking it in Supabase Auth (or a future dedicated step)
+ * turns it into a working login, exactly like the Foundation layer's two seeded accounts. */
+
+export function useUsers(tenantId: string | undefined) {
+  return useTenantList<User>("users", tenantId, { orderBy: "created_at", ascending: true });
+}
+
+export function useRoles(tenantId: string | undefined) {
+  return useTenantList<Role>("roles", tenantId, { orderBy: "name", ascending: true });
+}
+
+/** user_roles has no tenant_id column — RLS (joined through users.tenant_id) is what actually
+ * restricts this to the signed-in tenant, so this reads the whole table unfiltered. */
+export function useUserRoles(tenantId: string | undefined) {
+  return useQuery({
+    queryKey: ["user_roles", tenantId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("user_roles").select("*");
+      if (error) throw new Error(error.message);
+      return (data ?? []) as UserRoleAssignment[];
+    },
+    enabled: Boolean(tenantId),
+  });
+}
+
+export interface CreateUserInput {
+  full_name: string;
+  email: string;
+  roleId?: string;
+}
+
+export function useCreateUserRecord(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      input,
+      actorUserId,
+    }: {
+      input: CreateUserInput;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (!input.full_name.trim()) throw new Error("الاسم مطلوب");
+      if (!input.email.trim()) throw new Error("البريد الإلكتروني مطلوب");
+
+      const { data: user, error } = await supabase
+        .from("users")
+        .insert({
+          tenant_id: tenantId,
+          full_name: input.full_name.trim(),
+          email: input.email.trim(),
+          active: true,
+        })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+
+      if (input.roleId) {
+        const { error: roleError } = await supabase
+          .from("user_roles")
+          .insert({ user_id: user.id as string, role_id: input.roleId });
+        if (roleError) throw new Error(roleError.message);
+      }
+
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "user.create",
+        entity: "users",
+        entity_id: user.id as string,
+        new_value: user,
+      });
+      return user as User;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["users", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["user_roles", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function useSetUserRole(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      userId,
+      roleId,
+      actorUserId,
+    }: {
+      userId: string;
+      roleId: string;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { error: deleteError } = await supabase
+        .from("user_roles")
+        .delete()
+        .eq("user_id", userId);
+      if (deleteError) throw new Error(deleteError.message);
+      const { error: insertError } = await supabase
+        .from("user_roles")
+        .insert({ user_id: userId, role_id: roleId });
+      if (insertError) throw new Error(insertError.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "user_role.set",
+        entity: "user_roles",
+        entity_id: userId,
+        new_value: { user_id: userId, role_id: roleId },
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["user_roles", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function useSetUserActive(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      userId,
+      active,
+      actorUserId,
+    }: {
+      userId: string;
+      active: boolean;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data: before, error: beforeError } = await supabase
+        .from("users")
+        .select("active")
+        .eq("id", userId)
+        .single();
+      if (beforeError || !before) throw new Error("المستخدم غير موجود");
+      const { error } = await supabase.from("users").update({ active }).eq("id", userId);
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "user.status_change",
+        entity: "users",
+        entity_id: userId,
+        old_value: { active: before.active },
+        new_value: { active },
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["users", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
   });
 }
 
@@ -487,11 +673,7 @@ export function useSetProductBrandActive(tenantId: string | undefined) {
   });
 }
 
-/* ---------------- Inventory (§21 Serial lifecycle, §29 Movement ledger) ----------------
- * Not yet converted: Stock Count (§30) and Purchasing's Goods Receipt still call the Mock
- * `receiveStock`/`adjustStock` in data-store.ts against the old localStorage arrays — only the
- * product detail page's manual "استلام كمية" and the POS sale flow below go through these real
- * hooks so far. */
+/* ---------------- Inventory (§21 Serial lifecycle, §29 Movement ledger, §30 Stock Count) ---------------- */
 
 export function useProductSerials(tenantId: string | undefined) {
   return useTenantList<ProductSerial>("product_serials", tenantId, {
@@ -639,6 +821,68 @@ export function useReceiveStock(tenantId: string | undefined) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["product_serials", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["inventory_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+/** Mirrors data-store.ts's adjustStock exactly (§30 Stock Count — non-serial products only). */
+export function useAdjustStock(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      product,
+      actualQuantity,
+      reason,
+      actorUserId,
+    }: {
+      product: Product;
+      actualQuantity: number;
+      reason: string;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (product.serial_required) throw new Error("منتجات السيريال لا تُجرد بهذه الطريقة");
+
+      const { data: movements, error: movementsError } = await supabase
+        .from("inventory_movements")
+        .select("quantity")
+        .eq("tenant_id", tenantId)
+        .eq("product_id", product.id);
+      if (movementsError) throw new Error(movementsError.message);
+      const before = (movements ?? []).reduce((sum, m) => sum + (m.quantity as number), 0);
+      const diff = actualQuantity - before;
+      if (diff === 0) return { before, after: before, diff: 0 };
+      if (!reason.trim()) throw new Error("لازم تكتب سبب الفرق قبل الحفظ");
+
+      const { data: movement, error: movementError } = await supabase
+        .from("inventory_movements")
+        .insert({
+          tenant_id: tenantId,
+          product_id: product.id,
+          type: "adjustment",
+          quantity: diff,
+          before,
+          after: actualQuantity,
+          user_id: actorUserId,
+          reason: reason.trim(),
+        })
+        .select()
+        .single();
+      if (movementError) throw new Error(movementError.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "inventory.adjust",
+        entity: "inventory_movements",
+        entity_id: movement.id as string,
+        new_value: movement,
+        reason: reason.trim(),
+      });
+      return { before, after: actualQuantity, diff };
+    },
+    onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["inventory_movements", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
@@ -2704,4 +2948,757 @@ export function useJournalEntries(tenantId: string | undefined) {
     orderBy: "created_at",
     ascending: false,
   });
+}
+
+/* ---------------- Returns (§79/§81) / Exchange (§82) ---------------- */
+
+export function useSaleReturns(tenantId: string | undefined) {
+  return useTenantList<SaleReturn>("sale_returns", tenantId, {
+    orderBy: "created_at",
+    ascending: false,
+  });
+}
+
+export interface CreateReturnInput {
+  sale_id: string;
+  items: Array<{ product_id: string; serial_id?: string; quantity: number }>;
+  reason: string;
+}
+
+export function useCreateReturn(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      input,
+      actorUserId,
+      returnPeriodDays,
+    }: {
+      input: CreateReturnInput;
+      actorUserId: string | null;
+      returnPeriodDays: number;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (input.items.length === 0) throw new Error("لازم تختار صنف واحد على الأقل للإرجاع");
+      if (!input.reason.trim()) throw new Error("سبب الإرجاع مطلوب");
+
+      const { data: sale, error: saleError } = await supabase
+        .from("sales")
+        .select("*")
+        .eq("id", input.sale_id)
+        .single();
+      if (saleError || !sale) throw new Error("الفاتورة غير موجودة");
+      if (sale.status === "cancelled") throw new Error("لا يمكن إرجاع فاتورة ملغاة");
+      const saleAgeDays =
+        (Date.now() - new Date(sale.created_at as string).getTime()) / (24 * 60 * 60 * 1000);
+      if (saleAgeDays > returnPeriodDays) {
+        throw new Error(`انتهت فترة السماح بالإرجاع (${returnPeriodDays} يوم)`);
+      }
+
+      const [
+        { data: previousReturns, error: previousReturnsError },
+        { data: products, error: productsError },
+        { data: allSerials, error: serialsError },
+      ] = await Promise.all([
+        supabase.from("sale_returns").select("items").eq("sale_id", input.sale_id),
+        supabase.from("products").select("*").eq("tenant_id", tenantId),
+        supabase.from("product_serials").select("*").eq("tenant_id", tenantId),
+      ]);
+      if (previousReturnsError) throw new Error(previousReturnsError.message);
+      if (productsError) throw new Error(productsError.message);
+      if (serialsError) throw new Error(serialsError.message);
+
+      const saleItems = sale.items as SaleItem[];
+      const priorReturnItems = (previousReturns ?? []).flatMap((r) => r.items as ReturnItem[]);
+
+      const returnItems: ReturnItem[] = [];
+      const serialIdsToInspect = new Set<string>();
+
+      for (const line of input.items) {
+        const saleLine = saleItems.find(
+          (i) =>
+            i.product_id === line.product_id &&
+            (line.serial_id ? i.serial_id === line.serial_id : !i.serial_id),
+        );
+        if (!saleLine) throw new Error("الصنف غير موجود في هذه الفاتورة");
+        const product = (products ?? []).find((p) => p.id === line.product_id) as
+          Product | undefined;
+        if (!product) throw new Error("منتج غير موجود");
+
+        if (product.serial_required) {
+          if (line.quantity !== 1 || !line.serial_id) {
+            throw new Error(`إرجاع منتج السيريال "${product.name}" لازم سيريال واحد محدد`);
+          }
+          if (serialIdsToInspect.has(line.serial_id)) {
+            throw new Error("نفس السيريال اتكرر في طلب الإرجاع");
+          }
+          if (priorReturnItems.some((ri) => ri.serial_id === line.serial_id)) {
+            throw new Error(`السيريال "${saleLine.serial_number}" اتُرجع قبل كده`);
+          }
+          const serial = (allSerials ?? []).find((s) => s.id === line.serial_id);
+          if (!serial || serial.status !== "sold") {
+            throw new Error("السيريال مش في حالة تسمح بالإرجاع");
+          }
+          serialIdsToInspect.add(line.serial_id);
+          returnItems.push({
+            product_id: product.id,
+            product_name: product.name,
+            serial_id: serial.id as string,
+            serial_number: serial.serial_number as string,
+            quantity: 1,
+            unit_price: saleLine.unit_price,
+            line_total: saleLine.unit_price,
+          });
+        } else {
+          const alreadyReturnedQty = priorReturnItems
+            .filter((ri) => ri.product_id === product.id && !ri.serial_id)
+            .reduce((s, ri) => s + ri.quantity, 0);
+          const remaining = saleLine.quantity - alreadyReturnedQty;
+          if (line.quantity <= 0 || line.quantity > remaining) {
+            throw new Error(
+              `كمية إرجاع غير صحيحة للمنتج "${product.name}" (المتاح للإرجاع ${remaining})`,
+            );
+          }
+          returnItems.push({
+            product_id: product.id,
+            product_name: product.name,
+            quantity: line.quantity,
+            unit_price: saleLine.unit_price,
+            line_total: Math.round(saleLine.unit_price * line.quantity * 100) / 100,
+          });
+        }
+      }
+
+      const refund_amount =
+        Math.round(returnItems.reduce((sum, i) => sum + i.line_total, 0) * 100) / 100;
+      const return_number = await nextInstallmentDocNumber(
+        "sale_returns",
+        "return_number",
+        tenantId,
+        "RET",
+      );
+
+      if (serialIdsToInspect.size > 0) {
+        const { error: updateSerialsError } = await supabase
+          .from("product_serials")
+          .update({ status: "inspection" })
+          .in("id", Array.from(serialIdsToInspect));
+        if (updateSerialsError) throw new Error(updateSerialsError.message);
+      }
+
+      const nonSerialItems = returnItems.filter((i) => !i.serial_id);
+      if (nonSerialItems.length > 0) {
+        const movementInserts = [];
+        for (const item of nonSerialItems) {
+          const { data: movements, error: movementsError } = await supabase
+            .from("inventory_movements")
+            .select("quantity")
+            .eq("tenant_id", tenantId)
+            .eq("product_id", item.product_id);
+          if (movementsError) throw new Error(movementsError.message);
+          const before = (movements ?? []).reduce((sum, m) => sum + (m.quantity as number), 0);
+          movementInserts.push({
+            tenant_id: tenantId,
+            product_id: item.product_id,
+            type: "return",
+            quantity: item.quantity,
+            before,
+            after: before + item.quantity,
+            user_id: actorUserId,
+            reference: return_number,
+          });
+        }
+        const { error: insertMovementsError } = await supabase
+          .from("inventory_movements")
+          .insert(movementInserts);
+        if (insertMovementsError) throw new Error(insertMovementsError.message);
+      }
+
+      const { data: saleReturn, error: returnError } = await supabase
+        .from("sale_returns")
+        .insert({
+          tenant_id: tenantId,
+          return_number,
+          sale_id: sale.id as string,
+          customer_id: sale.customer_id,
+          customer_name: sale.customer_name,
+          items: returnItems,
+          refund_amount,
+          reason: input.reason.trim(),
+          user_id: actorUserId,
+        })
+        .select()
+        .single();
+      if (returnError) throw new Error(returnError.message);
+
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "sale_return.create",
+        entity: "sale_returns",
+        entity_id: saleReturn.id as string,
+        new_value: saleReturn,
+        reason: input.reason.trim(),
+      });
+
+      await postFinancials(
+        tenantId,
+        "cashier",
+        "return",
+        -refund_amount,
+        actorUserId,
+        return_number,
+        [
+          {
+            account_code: "3000",
+            account_name: ACCOUNT_NAMES["3000"],
+            debit: refund_amount,
+            credit: 0,
+          },
+          {
+            account_code: "1000",
+            account_name: ACCOUNT_NAMES["1000"],
+            debit: 0,
+            credit: refund_amount,
+          },
+        ],
+        `مرتجع ${return_number}`,
+        "sale_return",
+        saleReturn.id as string,
+      );
+
+      return saleReturn as SaleReturn;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["sale_returns", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["product_serials", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["inventory_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["treasury_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["journal_entries", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function useExchangeTransactions(tenantId: string | undefined) {
+  return useTenantList<ExchangeTransaction>("exchange_transactions", tenantId, {
+    orderBy: "created_at",
+    ascending: false,
+  });
+}
+
+export interface CreateExchangeInput {
+  original_sale_id: string;
+  returned_items: Array<{ product_id: string; serial_id?: string; quantity: number }>;
+  new_items: Array<{ product_id: string; serial_id?: string; quantity: number }>;
+  reason: string;
+}
+
+export function useCreateExchange(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      input,
+      actorUserId,
+    }: {
+      input: CreateExchangeInput;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (input.returned_items.length === 0) throw new Error("لازم صنف واحد على الأقل للإرجاع");
+      if (input.new_items.length === 0) throw new Error("لازم صنف واحد على الأقل للاستبدال به");
+      if (!input.reason.trim()) throw new Error("سبب الاستبدال مطلوب");
+
+      const { data: sale, error: saleError } = await supabase
+        .from("sales")
+        .select("*")
+        .eq("id", input.original_sale_id)
+        .single();
+      if (saleError || !sale) throw new Error("الفاتورة الأصلية غير موجودة");
+      const saleItems = sale.items as SaleItem[];
+
+      const [
+        { data: products, error: productsError },
+        { data: allSerials, error: serialsError },
+        { data: movements, error: movementsError },
+      ] = await Promise.all([
+        supabase.from("products").select("*").eq("tenant_id", tenantId),
+        supabase.from("product_serials").select("*").eq("tenant_id", tenantId),
+        supabase
+          .from("inventory_movements")
+          .select("product_id, quantity")
+          .eq("tenant_id", tenantId),
+      ]);
+      if (productsError) throw new Error(productsError.message);
+      if (serialsError) throw new Error(serialsError.message);
+      if (movementsError) throw new Error(movementsError.message);
+
+      const returnedItems: ReturnItem[] = [];
+      const returnedSerialIds = new Set<string>();
+      for (const line of input.returned_items) {
+        const saleLine = saleItems.find(
+          (i) =>
+            i.product_id === line.product_id &&
+            (line.serial_id ? i.serial_id === line.serial_id : !i.serial_id),
+        );
+        if (!saleLine) throw new Error("صنف الإرجاع غير موجود في الفاتورة الأصلية");
+        const product = (products ?? []).find((p) => p.id === line.product_id) as
+          Product | undefined;
+        if (!product) throw new Error("منتج غير موجود");
+        if (product.serial_required) {
+          if (line.quantity !== 1 || !line.serial_id) {
+            throw new Error(`إرجاع "${product.name}" لازم سيريال واحد محدد`);
+          }
+          const serial = (allSerials ?? []).find((s) => s.id === line.serial_id);
+          if (!serial || serial.status !== "sold") {
+            throw new Error("السيريال مش في حالة تسمح بالإرجاع");
+          }
+          returnedSerialIds.add(serial.id as string);
+          returnedItems.push({
+            product_id: product.id,
+            product_name: product.name,
+            serial_id: serial.id as string,
+            serial_number: serial.serial_number as string,
+            quantity: 1,
+            unit_price: saleLine.unit_price,
+            line_total: saleLine.unit_price,
+          });
+        } else {
+          if (line.quantity <= 0 || line.quantity > saleLine.quantity) {
+            throw new Error(`كمية إرجاع غير صحيحة للمنتج "${product.name}"`);
+          }
+          returnedItems.push({
+            product_id: product.id,
+            product_name: product.name,
+            quantity: line.quantity,
+            unit_price: saleLine.unit_price,
+            line_total: Math.round(saleLine.unit_price * line.quantity * 100) / 100,
+          });
+        }
+      }
+      const returnedValue =
+        Math.round(returnedItems.reduce((sum, i) => sum + i.line_total, 0) * 100) / 100;
+
+      const newItems: SaleItem[] = [];
+      const soldSerialIds = new Set<string>();
+      const stockTracker = new Map<string, number>();
+      const movementDrafts: Array<{
+        product_id: string;
+        quantity: number;
+        before: number;
+        after: number;
+      }> = [];
+      for (const line of input.new_items) {
+        const product = (products ?? []).find((p) => p.id === line.product_id) as
+          Product | undefined;
+        if (!product) throw new Error("منتج غير موجود");
+        if (!product.active) throw new Error(`المنتج "${product.name}" غير نشط`);
+        const currentStock = stockTracker.has(product.id)
+          ? (stockTracker.get(product.id) as number)
+          : computeProductStock(
+              product.id,
+              product.serial_required,
+              (allSerials ?? []) as ProductSerial[],
+              (movements ?? []) as InventoryMovement[],
+            );
+        if (product.serial_required) {
+          if (line.quantity !== 1 || !line.serial_id) {
+            throw new Error(`اختر سيريال للمنتج "${product.name}"`);
+          }
+          if (soldSerialIds.has(line.serial_id) || returnedSerialIds.has(line.serial_id)) {
+            throw new Error("تعارض في اختيار السيريالات");
+          }
+          const serial = (allSerials ?? []).find(
+            (s) => s.id === line.serial_id && s.product_id === product.id,
+          );
+          if (!serial || serial.status !== "available") {
+            throw new Error(`السيريال غير متاح للمنتج "${product.name}"`);
+          }
+          soldSerialIds.add(serial.id as string);
+          newItems.push({
+            product_id: product.id,
+            product_name: product.name,
+            serial_id: serial.id as string,
+            serial_number: serial.serial_number as string,
+            quantity: 1,
+            unit_price: product.cash_price,
+            line_total: product.cash_price,
+          });
+          stockTracker.set(product.id, currentStock - 1);
+          movementDrafts.push({
+            product_id: product.id,
+            quantity: -1,
+            before: currentStock,
+            after: currentStock - 1,
+          });
+        } else {
+          if (line.quantity <= 0 || line.quantity > currentStock) {
+            throw new Error(`المخزون غير كافٍ للمنتج "${product.name}"`);
+          }
+          newItems.push({
+            product_id: product.id,
+            product_name: product.name,
+            quantity: line.quantity,
+            unit_price: product.cash_price,
+            line_total: Math.round(product.cash_price * line.quantity * 100) / 100,
+          });
+          stockTracker.set(product.id, currentStock - line.quantity);
+          movementDrafts.push({
+            product_id: product.id,
+            quantity: -line.quantity,
+            before: currentStock,
+            after: currentStock - line.quantity,
+          });
+        }
+      }
+      const newValue = Math.round(newItems.reduce((sum, i) => sum + i.line_total, 0) * 100) / 100;
+      const price_difference = Math.round((newValue - returnedValue) * 100) / 100;
+      const exchange_number = await nextInstallmentDocNumber(
+        "exchange_transactions",
+        "exchange_number",
+        tenantId,
+        "EXC",
+      );
+
+      if (returnedSerialIds.size > 0) {
+        const { error: updateReturnedError } = await supabase
+          .from("product_serials")
+          .update({ status: "inspection" })
+          .in("id", Array.from(returnedSerialIds));
+        if (updateReturnedError) throw new Error(updateReturnedError.message);
+      }
+      if (soldSerialIds.size > 0) {
+        const { error: updateSoldError } = await supabase
+          .from("product_serials")
+          .update({ status: "sold" })
+          .in("id", Array.from(soldSerialIds));
+        if (updateSoldError) throw new Error(updateSoldError.message);
+      }
+
+      const nonSerialReturned = returnedItems.filter((i) => !i.serial_id);
+      const movementInserts: Array<Record<string, unknown>> = [];
+      for (const item of nonSerialReturned) {
+        const { data: itemMovements, error: itemMovementsError } = await supabase
+          .from("inventory_movements")
+          .select("quantity")
+          .eq("tenant_id", tenantId)
+          .eq("product_id", item.product_id);
+        if (itemMovementsError) throw new Error(itemMovementsError.message);
+        const before = (itemMovements ?? []).reduce((sum, m) => sum + (m.quantity as number), 0);
+        movementInserts.push({
+          tenant_id: tenantId,
+          product_id: item.product_id,
+          type: "return",
+          quantity: item.quantity,
+          before,
+          after: before + item.quantity,
+          user_id: actorUserId,
+          reference: exchange_number,
+        });
+      }
+      for (const m of movementDrafts) {
+        movementInserts.push({
+          tenant_id: tenantId,
+          product_id: m.product_id,
+          type: "sale",
+          quantity: m.quantity,
+          before: m.before,
+          after: m.after,
+          user_id: actorUserId,
+          reference: exchange_number,
+        });
+      }
+      if (movementInserts.length > 0) {
+        const { error: insertMovementsError } = await supabase
+          .from("inventory_movements")
+          .insert(movementInserts);
+        if (insertMovementsError) throw new Error(insertMovementsError.message);
+      }
+
+      const { data: exchange, error: exchangeError } = await supabase
+        .from("exchange_transactions")
+        .insert({
+          tenant_id: tenantId,
+          exchange_number,
+          original_sale_id: sale.id as string,
+          returned_items: returnedItems,
+          new_items: newItems,
+          price_difference,
+          reason: input.reason.trim(),
+          user_id: actorUserId,
+        })
+        .select()
+        .single();
+      if (exchangeError) throw new Error(exchangeError.message);
+
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "exchange.create",
+        entity: "exchange_transactions",
+        entity_id: exchange.id as string,
+        new_value: exchange,
+        reason: input.reason.trim(),
+      });
+
+      try {
+        if (price_difference !== 0) {
+          const cashierId = await findAccountIdByKind(tenantId, "cashier");
+          if (cashierId) {
+            await performPostTreasuryMovement(
+              tenantId,
+              cashierId,
+              price_difference,
+              "exchange",
+              actorUserId,
+              exchange_number,
+            );
+          }
+        }
+        const journalLines: JournalLine[] = [];
+        if (returnedValue > 0) {
+          journalLines.push({
+            account_code: "3000",
+            account_name: ACCOUNT_NAMES["3000"],
+            debit: returnedValue,
+            credit: 0,
+          });
+        }
+        if (newValue > 0) {
+          journalLines.push({
+            account_code: "3000",
+            account_name: ACCOUNT_NAMES["3000"],
+            debit: 0,
+            credit: newValue,
+          });
+        }
+        if (price_difference > 0) {
+          journalLines.push({
+            account_code: "1000",
+            account_name: ACCOUNT_NAMES["1000"],
+            debit: price_difference,
+            credit: 0,
+          });
+        } else if (price_difference < 0) {
+          journalLines.push({
+            account_code: "1000",
+            account_name: ACCOUNT_NAMES["1000"],
+            debit: 0,
+            credit: -price_difference,
+          });
+        }
+        if (journalLines.length > 0) {
+          await performPostJournalEntry(
+            tenantId,
+            journalLines,
+            `استبدال ${exchange_number}`,
+            "exchange",
+            exchange.id as string,
+          );
+        }
+      } catch (e) {
+        console.warn("فشل ترحيل الحركة المالية:", e instanceof Error ? e.message : e);
+      }
+
+      return exchange as ExchangeTransaction;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["exchange_transactions", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["product_serials", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["inventory_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["treasury_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["journal_entries", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+/* ---------------- Delivery Orders (§84) ---------------- */
+
+export function useDeliveryOrders(tenantId: string | undefined) {
+  return useTenantList<DeliveryOrder>("delivery_orders", tenantId, {
+    orderBy: "created_at",
+    ascending: false,
+  });
+}
+
+export function useScheduleDelivery(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      saleId,
+      address,
+      scheduledDate,
+      actorUserId,
+    }: {
+      saleId: string;
+      address: string;
+      scheduledDate: string;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (!address.trim()) throw new Error("العنوان مطلوب");
+      if (!scheduledDate) throw new Error("تاريخ التوصيل مطلوب");
+      const { data: sale, error: saleError } = await supabase
+        .from("sales")
+        .select("customer_name")
+        .eq("id", saleId)
+        .single();
+      if (saleError || !sale) throw new Error("الفاتورة غير موجودة");
+
+      const { data, error } = await supabase
+        .from("delivery_orders")
+        .insert({
+          tenant_id: tenantId,
+          sale_id: saleId,
+          customer_name: sale.customer_name as string,
+          address: address.trim(),
+          scheduled_date: scheduledDate,
+          status: "scheduled",
+          user_id: actorUserId,
+        })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "delivery.schedule",
+        entity: "delivery_orders",
+        entity_id: data.id as string,
+        new_value: data,
+      });
+      return data as DeliveryOrder;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["delivery_orders", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+const DELIVERY_STATUS_ORDER: DeliveryOrder["status"][] = [
+  "scheduled",
+  "out_for_delivery",
+  "delivered",
+];
+
+export function useAdvanceDeliveryStatus(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      nextStatus,
+      actorUserId,
+    }: {
+      id: string;
+      nextStatus: DeliveryOrder["status"];
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data: order, error: orderError } = await supabase
+        .from("delivery_orders")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (orderError || !order) throw new Error("طلب التوصيل غير موجود");
+      const currentIndex = DELIVERY_STATUS_ORDER.indexOf(order.status as DeliveryOrder["status"]);
+      const nextIndex = DELIVERY_STATUS_ORDER.indexOf(nextStatus);
+      if (nextIndex !== currentIndex + 1) {
+        throw new Error("لا يمكن تخطي مراحل التوصيل");
+      }
+
+      const { data, error } = await supabase
+        .from("delivery_orders")
+        .update({
+          status: nextStatus,
+          ...(nextStatus === "delivered" && { delivered_at: new Date().toISOString() }),
+        })
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "delivery.advance",
+        entity: "delivery_orders",
+        entity_id: id,
+        old_value: order,
+        new_value: data,
+      });
+      return data as DeliveryOrder;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["delivery_orders", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+/* ---------------- Warranty (§86) — read-only, derived, no stored entity ---------------- */
+
+export interface WarrantyInfo {
+  product_name: string;
+  serial_number: string;
+  customer_name: string;
+  sold_at: string;
+  warranty_months: number;
+  warranty_end: string;
+  active: boolean;
+}
+
+/** On-demand lookup (not a useQuery hook) — triggered by a search button, same pattern data-
+ * store.ts's getWarrantyInfo used. `tenantId` is required, not optional, for the same reason
+ * documented there: a free-text serial search without it could leak another tenant's data. */
+export async function fetchWarrantyInfo(
+  tenantId: string,
+  serialNumberRaw: string,
+): Promise<WarrantyInfo | null> {
+  const serialNumber = serialNumberRaw.trim().toLowerCase();
+  if (!serialNumber) return null;
+
+  const { data: serial, error: serialError } = await supabase
+    .from("product_serials")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .ilike("serial_number", serialNumber)
+    .maybeSingle();
+  if (serialError || !serial) return null;
+
+  const { data: product, error: productError } = await supabase
+    .from("products")
+    .select("*")
+    .eq("id", serial.product_id as string)
+    .maybeSingle();
+  if (productError || !product || !product.warranty_months) return null;
+
+  const [{ data: cashSales }, { data: contracts }] = await Promise.all([
+    supabase.from("sales").select("created_at, customer_name, items").eq("tenant_id", tenantId),
+    supabase
+      .from("installment_contracts")
+      .select("created_at, customer_name, items")
+      .eq("tenant_id", tenantId),
+  ]);
+  const cashSale = (cashSales ?? []).find((s) =>
+    (s.items as SaleItem[]).some((i) => i.serial_id === serial.id),
+  );
+  const contract = (contracts ?? []).find((c) =>
+    (c.items as SaleItem[]).some((i) => i.serial_id === serial.id),
+  );
+  const soldAt = (cashSale?.created_at ?? contract?.created_at) as string | undefined;
+  const customerName = (cashSale?.customer_name ?? contract?.customer_name) as string | undefined;
+  if (!soldAt || !customerName) return null;
+
+  const warrantyEnd = new Date(soldAt);
+  warrantyEnd.setMonth(warrantyEnd.getMonth() + (product.warranty_months as number));
+
+  return {
+    product_name: product.name as string,
+    serial_number: serial.serial_number as string,
+    customer_name: customerName,
+    sold_at: soldAt,
+    warranty_months: product.warranty_months as number,
+    warranty_end: warrantyEnd.toISOString(),
+    active: new Date() <= warrantyEnd,
+  };
 }

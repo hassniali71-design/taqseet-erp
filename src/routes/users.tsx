@@ -1,16 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import {
-  createUser,
-  getRoles,
-  getUserRoles,
-  getUsers,
-  setUserActive,
-  setUserRole,
-  subscribeData,
-} from "@/lib/data-store";
+  useCreateUserRecord,
+  useRoles,
+  useSetUserActive,
+  useUserRoles,
+  useUsers,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 import type { User } from "@/types";
 
@@ -21,27 +19,25 @@ export const Route = createFileRoute("/users")({
 type FormState = {
   full_name: string;
   email: string;
-  password: string;
   role_id: string;
 };
 
-const EMPTY_FORM: FormState = { full_name: "", email: "", password: "", role_id: "" };
+const EMPTY_FORM: FormState = { full_name: "", email: "", role_id: "" };
 
 function UsersPage() {
   const session = useRequireSession();
-  const [, forceRerender] = useState(0);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
+  const { data: roles = [] } = useRoles(session?.tenant_id);
+  const { data: users = [] } = useUsers(session?.tenant_id);
+  const { data: userRoles = [] } = useUserRoles(session?.tenant_id);
+  const createUserMutation = useCreateUserRecord(session?.tenant_id);
+  const setUserActiveMutation = useSetUserActive(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
-  const tenantId = session.tenant_id;
-
-  const roles = getRoles(session.tenant_id);
-  const users = getUsers(session.tenant_id);
-  const userRoles = getUserRoles();
 
   function roleLabel(userId: string): string {
     const roleIds = new Set(
@@ -53,24 +49,29 @@ function UsersPage() {
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    const created = createUser(
+    setError(null);
+    createUserMutation.mutate(
       {
-        tenant_id: tenantId,
-        full_name: form.full_name.trim(),
-        email: form.email.trim(),
-        password: form.password.trim(),
-        active: true,
+        input: {
+          full_name: form.full_name.trim(),
+          email: form.email.trim(),
+          ...(form.role_id && { roleId: form.role_id }),
+        },
+        actorUserId,
       },
-      actorUserId,
+      {
+        onSuccess: () => {
+          setForm({ full_name: "", email: "", role_id: roles[0]?.id ?? "" });
+          setShowForm(false);
+        },
+        onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
     );
-    if (form.role_id) setUserRole(created.id, form.role_id, actorUserId);
-    setForm({ full_name: "", email: "", password: "", role_id: roles[0]?.id ?? "" });
-    setShowForm(false);
   }
 
   function toggleActive(user: User) {
     if (user.id === actorUserId) return; // can't deactivate yourself from this screen
-    setUserActive(user.id, !user.active, actorUserId);
+    setUserActiveMutation.mutate({ userId: user.id, active: !user.active, actorUserId });
   }
 
   return (
@@ -98,6 +99,10 @@ function UsersPage() {
             className="mt-4 space-y-3 rounded-xl border border-border bg-card p-5 shadow-sm"
           >
             <h2 className="text-sm font-bold text-foreground">مستخدم جديد</h2>
+            <p className="text-xs text-muted-foreground">
+              بيتسجل سجل الموظف والدور فورًا، لكن من غير حساب دخول حقيقي بعد (نفس قيد عميل منصة جديد
+              من /platform) — تفعيل الدخول الفعلي خطوة منفصلة لاحقة.
+            </p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="الاسم *">
                 <input
@@ -113,16 +118,6 @@ function UsersPage() {
                   type="email"
                   value={form.email}
                   onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  className="form-input"
-                  dir="ltr"
-                />
-              </Field>
-              <Field label="كلمة السر *">
-                <input
-                  required
-                  type="text"
-                  value={form.password}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })}
                   className="form-input"
                   dir="ltr"
                 />
@@ -156,6 +151,7 @@ function UsersPage() {
                 إلغاء
               </button>
             </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
           </form>
         )}
 

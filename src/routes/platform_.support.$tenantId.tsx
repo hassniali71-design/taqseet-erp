@@ -14,18 +14,12 @@ import { useEffect, useState } from "react";
 import { Logo } from "@/components/Logo";
 import { Panel, StatCard } from "@/components/ui/StatCard";
 import { useSession } from "@/hooks/use-session";
+import { getUsers, subscribeData } from "@/lib/data-store";
 import {
-  getAccountBalance,
-  getCustomers,
-  getInstallmentContracts,
-  getInstallments,
-  getProducts,
-  getSales,
-  getTreasuryAccounts,
-  getUsers,
-  subscribeData,
-} from "@/lib/data-store";
-import { fetchManagedTenants, fetchTenantAuditLog } from "@/lib/platform-server";
+  fetchManagedTenants,
+  fetchTenantAuditLog,
+  fetchTenantSummary,
+} from "@/lib/platform-server";
 
 export const Route = createFileRoute("/platform_/support/$tenantId")({
   component: SupportAccessPage,
@@ -69,6 +63,11 @@ function SupportAccessPage() {
       fetchTenantAuditLog({ data: { tenantId, action: "support_access.use", limit: 10 } }),
     enabled: Boolean(currentUser?.is_platform_owner) && Boolean(tenantId),
   });
+  const { data: summary } = useQuery({
+    queryKey: ["tenant-summary", tenantId],
+    queryFn: () => fetchTenantSummary({ data: { tenantId } }),
+    enabled: Boolean(currentUser?.is_platform_owner) && Boolean(tenantId),
+  });
 
   if (!session || !currentUser?.is_platform_owner) return null;
 
@@ -91,19 +90,13 @@ function SupportAccessPage() {
     );
   }
 
-  const owner = getUsers().find((u) => u.tenant_id === tenantId && !u.is_platform_owner);
-  const customers = getCustomers(tenantId);
-  const products = getProducts(tenantId);
-  const sales = getSales(tenantId);
-  const contracts = getInstallmentContracts(tenantId);
-  const activeContracts = contracts.filter(
-    (c) => c.status === "active" || c.status === "partially_paid",
-  );
-  const overdueInstallments = getInstallments(tenantId).filter((i) => i.status === "overdue");
-  const treasuryBalance = getTreasuryAccounts(tenantId).reduce(
-    (sum, acc) => sum + getAccountBalance(acc.id),
-    0,
-  );
+  const ownerEmail = summary?.ownerEmail ?? null;
+  const customersCount = summary?.customersCount ?? 0;
+  const productsCount = summary?.productsCount ?? 0;
+  const salesCount = summary?.salesCount ?? 0;
+  const activeContractsCount = summary?.activeContractsCount ?? 0;
+  const overdueInstallmentsCount = summary?.overdueInstallmentsCount ?? 0;
+  const treasuryBalance = summary?.treasuryBalance ?? 0;
 
   return (
     <div className="min-h-screen bg-sidebar">
@@ -131,35 +124,30 @@ function SupportAccessPage() {
           <h1 className="text-2xl text-sidebar-foreground">{tenant.name}</h1>
           <p className="mt-1 text-sm font-bold text-sidebar-foreground/70">
             المالك: {tenant.owner_name}
-            {owner ? ` — ${owner.email}` : ""}
+            {ownerEmail ? ` — ${ownerEmail}` : ""}
           </p>
         </div>
 
         <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
-          <StatCard label="العملاء" value={String(customers.length)} icon={Users} tone="primary" />
-          <StatCard
-            label="المنتجات"
-            value={String(products.length)}
-            icon={Package}
-            tone="primary"
-          />
+          <StatCard label="العملاء" value={String(customersCount)} icon={Users} tone="primary" />
+          <StatCard label="المنتجات" value={String(productsCount)} icon={Package} tone="primary" />
           <StatCard
             label="عمليات البيع"
-            value={String(sales.length)}
+            value={String(salesCount)}
             icon={ReceiptText}
             tone="primary"
           />
           <StatCard
             label="عقود تقسيط نشطة"
-            value={String(activeContracts.length)}
+            value={String(activeContractsCount)}
             icon={Building2}
             tone="primary"
           />
           <StatCard
             label="أقساط متأخرة"
-            value={String(overdueInstallments.length)}
+            value={String(overdueInstallmentsCount)}
             icon={AlertTriangle}
-            tone={overdueInstallments.length > 0 ? "danger" : "success"}
+            tone={overdueInstallmentsCount > 0 ? "danger" : "success"}
           />
           <StatCard
             label="رصيد الخزينة"

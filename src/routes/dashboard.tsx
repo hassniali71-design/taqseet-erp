@@ -11,27 +11,27 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
-import { useEffect, useState } from "react";
-
 import { AppSidebar } from "@/components/AppSidebar";
 import { SalesTrendChart } from "@/components/ui/Charts";
 import { LinkCard, Panel, StatCard } from "@/components/ui/StatCard";
+import { getEffectiveInstallmentStatus } from "@/lib/data-store";
 import {
-  getAccountBalance,
-  getCurrentTenantSettings,
-  getCustomers,
-  getDeliveryOrders,
-  getEffectiveInstallmentStatus,
-  getExpenses,
-  getInstallmentContracts,
-  getInstallments,
-  getProductStock,
-  getProducts,
-  getSales,
-  getTenants,
-  getTreasuryAccounts,
-  subscribeData,
-} from "@/lib/data-store";
+  computeAccountBalance,
+  computeProductStock,
+  useCurrentTenant,
+  useCurrentTenantSettings,
+  useCustomers,
+  useDeliveryOrders,
+  useExpenses,
+  useInstallmentContracts,
+  useInstallments,
+  useInventoryMovements,
+  useProducts,
+  useProductSerials,
+  useSales,
+  useTreasuryAccounts,
+  useTreasuryMovements,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/dashboard")({
@@ -51,17 +51,25 @@ const WEEKDAY_LABELS_AR = ["أحد", "اثنين", "ثلاثاء", "أربعاء
 
 function DashboardPage() {
   const session = useRequireSession();
-  const [, forceRerender] = useState(0);
 
-  useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
+  const { data: tenant } = useCurrentTenant(session?.tenant_id);
+  const { data: customers = [] } = useCustomers(session?.tenant_id);
+  const { data: products = [] } = useProducts(session?.tenant_id);
+  const { data: allSales = [] } = useSales(session?.tenant_id);
+  const { data: settingsData } = useCurrentTenantSettings(session?.tenant_id);
+  const { data: contractsAll = [] } = useInstallmentContracts(session?.tenant_id);
+  const { data: allInstallments = [] } = useInstallments(session?.tenant_id);
+  const { data: allSerials = [] } = useProductSerials(session?.tenant_id);
+  const { data: allMovements = [] } = useInventoryMovements(session?.tenant_id);
+  const { data: allDeliveryOrders = [] } = useDeliveryOrders(session?.tenant_id);
+  const { data: allExpenses = [] } = useExpenses(session?.tenant_id);
+  const { data: allAccounts = [] } = useTreasuryAccounts(session?.tenant_id);
+  const { data: allTreasuryMovements = [] } = useTreasuryMovements(session?.tenant_id);
 
   if (!session) return null;
 
-  const tenant = getTenants().find((t) => t.id === session.tenant_id);
-  const customers = getCustomers(session.tenant_id);
-  const products = getProducts(session.tenant_id);
-  const sales = getSales(session.tenant_id).filter((s) => s.status === "completed");
-  const settings = getCurrentTenantSettings();
+  const sales = allSales.filter((s) => s.status === "completed");
+  const settings = settingsData ?? { grace_period_days: 3 };
 
   const today = new Date();
   const todaySalesTotal = sales
@@ -77,10 +85,9 @@ function DashboardPage() {
     return { label: WEEKDAY_LABELS_AR[day.getDay()] ?? "", value: total };
   });
 
-  const contracts = getInstallmentContracts(session.tenant_id).filter(
+  const contracts = contractsAll.filter(
     (c) => c.status !== "settled" && c.status !== "settled_early",
   );
-  const allInstallments = getInstallments(session.tenant_id);
   let dueTodayAmount = 0;
   let overdueAmount = 0;
   let overdueCount = 0;
@@ -101,15 +108,18 @@ function DashboardPage() {
   }
 
   const lowStockProducts = products.filter(
-    (p) => p.active && !p.serial_required && getProductStock(p.id, p) < p.min_stock,
+    (p) =>
+      p.active &&
+      !p.serial_required &&
+      computeProductStock(p.id, false, allSerials, allMovements) < p.min_stock,
   );
 
-  const pendingDeliveries = getDeliveryOrders(session.tenant_id).filter(
-    (d) => d.status !== "delivered",
-  ).length;
-  const pendingExpenses = getExpenses(session.tenant_id).filter((e) => e.needs_approval).length;
-  const cashierAccount = getTreasuryAccounts(session.tenant_id).find((a) => a.kind === "cashier");
-  const cashierBalance = cashierAccount ? getAccountBalance(cashierAccount.id) : 0;
+  const pendingDeliveries = allDeliveryOrders.filter((d) => d.status !== "delivered").length;
+  const pendingExpenses = allExpenses.filter((e) => e.needs_approval).length;
+  const cashierAccount = allAccounts.find((a) => a.kind === "cashier");
+  const cashierBalance = cashierAccount
+    ? computeAccountBalance(cashierAccount.id, allTreasuryMovements)
+    : 0;
 
   return (
     <div className="flex min-h-screen bg-background">

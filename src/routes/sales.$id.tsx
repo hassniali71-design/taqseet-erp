@@ -2,8 +2,13 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import { createReturn, getSaleReturns, getTenants, subscribeData } from "@/lib/data-store";
-import { useSales } from "@/lib/supabase-queries";
+import { getTenants, subscribeData } from "@/lib/data-store";
+import {
+  useCreateReturn,
+  useCurrentTenantSettings,
+  useSaleReturns,
+  useSales,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/sales/$id")({
@@ -23,6 +28,9 @@ function SaleReceiptPage() {
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
   const { data: sales = [], isLoading } = useSales(session?.tenant_id);
+  const { data: allReturns = [] } = useSaleReturns(session?.tenant_id);
+  const { data: settings } = useCurrentTenantSettings(session?.tenant_id);
+  const createReturnMutation = useCreateReturn(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
@@ -52,7 +60,7 @@ function SaleReceiptPage() {
 
   const saleId = sale.id;
   const saleItems = sale.items;
-  const returns = getSaleReturns(session.tenant_id)
+  const returns = allReturns
     .filter((r) => r.sale_id === saleId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
 
@@ -91,16 +99,23 @@ function SaleReceiptPage() {
       setReturnError("أدخل كمية إرجاع لصنف واحد على الأقل");
       return;
     }
-    try {
-      createReturn({ sale_id: saleId, items, reason: returnReason }, actorUserId);
-      setReturnQuantities({});
-      setReturnReason("");
-      setShowReturnForm(false);
-      setReturnSuccess(true);
-      setTimeout(() => setReturnSuccess(false), 3000);
-    } catch (e) {
-      setReturnError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+    createReturnMutation.mutate(
+      {
+        input: { sale_id: saleId, items, reason: returnReason },
+        actorUserId,
+        returnPeriodDays: settings?.return_period_days ?? 14,
+      },
+      {
+        onSuccess: () => {
+          setReturnQuantities({});
+          setReturnReason("");
+          setShowReturnForm(false);
+          setReturnSuccess(true);
+          setTimeout(() => setReturnSuccess(false), 3000);
+        },
+        onError: (e) => setReturnError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   return (

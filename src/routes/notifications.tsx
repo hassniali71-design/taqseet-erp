@@ -3,11 +3,25 @@ import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import {
-  getNotifications,
+  getDaysOverdue,
+  getEffectiveInstallmentStatus,
+  getEffectivePromiseStatus,
+  getReadNotificationIds,
   markAllNotificationsRead,
   markNotificationRead,
   subscribeData,
 } from "@/lib/data-store";
+import {
+  computeProductStock,
+  useCurrentTenantSettings,
+  useExpenses,
+  useInstallmentContracts,
+  useInstallments,
+  useInventoryMovements,
+  useProducts,
+  useProductSerials,
+  usePromisesToPay,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 import type { AppNotification } from "@/lib/data-store";
 
@@ -41,9 +55,90 @@ function NotificationsPage() {
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
+  const { data: settingsData } = useCurrentTenantSettings(session?.tenant_id);
+  const { data: contracts = [] } = useInstallmentContracts(session?.tenant_id);
+  const { data: allInstallments = [] } = useInstallments(session?.tenant_id);
+  const { data: promises = [] } = usePromisesToPay(session?.tenant_id);
+  const { data: products = [] } = useProducts(session?.tenant_id);
+  const { data: allSerials = [] } = useProductSerials(session?.tenant_id);
+  const { data: allMovements = [] } = useInventoryMovements(session?.tenant_id);
+  const { data: expenses = [] } = useExpenses(session?.tenant_id);
+
   if (!session) return null;
 
-  const notifications = getNotifications();
+  const settings = settingsData ?? { grace_period_days: 3 };
+  const readIds = new Set(getReadNotificationIds());
+  const derived: Array<Omit<AppNotification, "read">> = [];
+
+  const openContracts = contracts.filter(
+    (c) => c.status !== "settled" && c.status !== "settled_early",
+  );
+  for (const contract of openContracts) {
+    const lines = allInstallments.filter(
+      (i) => i.contract_id === contract.id && i.status !== "waived" && i.status !== "rescheduled",
+    );
+    for (const line of lines) {
+      const outstanding = Math.max(0, line.amount - line.paid_amount);
+      if (outstanding <= 0) continue;
+      const effective = getEffectiveInstallmentStatus(line, settings.grace_period_days);
+      if (effective === "due") {
+        derived.push({
+          id: `inst_due_${line.id}`,
+          category: "installment_due",
+          message: `قسط مستحق اليوم على عقد ${contract.contract_number} (${contract.customer_name}) بمبلغ ${outstanding.toLocaleString("ar-EG")} ج.م`,
+          severity: "warning",
+        });
+      } else if (effective === "overdue") {
+        derived.push({
+          id: `inst_overdue_${line.id}`,
+          category: "installment_overdue",
+          message: `قسط متأخر ${getDaysOverdue(line)} يوم على عقد ${contract.contract_number} (${contract.customer_name}) بمبلغ ${outstanding.toLocaleString("ar-EG")} ج.م`,
+          severity: "danger",
+        });
+      }
+    }
+  }
+
+  for (const promise of promises) {
+    if (getEffectivePromiseStatus(promise) === "failed") {
+      const contract = contracts.find((c) => c.id === promise.contract_id);
+      derived.push({
+        id: `promise_failed_${promise.id}`,
+        category: "promise_failed",
+        message: `وعد بالدفع فشل${contract ? ` على عقد ${contract.contract_number} (${contract.customer_name})` : ""} — كان متوقّع بتاريخ ${new Date(promise.promise_date).toLocaleDateString("ar-EG")}`,
+        severity: "danger",
+      });
+    }
+  }
+
+  for (const product of products) {
+    if (!product.active || product.serial_required) continue;
+    const stock = computeProductStock(product.id, false, allSerials, allMovements);
+    if (stock < product.min_stock) {
+      derived.push({
+        id: `low_stock_${product.id}`,
+        category: "low_stock",
+        message: `مخزون منخفض: "${product.name}" (${stock} فقط، الحد الأدنى ${product.min_stock})`,
+        severity: "warning",
+      });
+    }
+  }
+
+  for (const expense of expenses) {
+    if (expense.needs_approval) {
+      derived.push({
+        id: `expense_${expense.id}`,
+        category: "expense_approval",
+        message: `مصروف يحتاج اعتماد: ${expense.category} بمبلغ ${expense.amount.toLocaleString("ar-EG")} ج.م`,
+        severity: "info",
+      });
+    }
+  }
+
+  const notifications: AppNotification[] = derived.map((n) => ({
+    ...n,
+    read: readIds.has(n.id),
+  }));
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   return (

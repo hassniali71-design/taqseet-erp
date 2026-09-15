@@ -1,14 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import { getUsers, subscribeData } from "@/lib/data-store";
 import {
   useApproveExpense,
   useCurrentTenantSettings,
   useExpenses,
   useRecordExpense,
   useTreasuryAccounts,
+  useUsers,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
@@ -18,18 +18,16 @@ export const Route = createFileRoute("/expenses")({
 
 function ExpensesPage() {
   const session = useRequireSession();
-  const [, forceRerender] = useState(0);
   const [accountId, setAccountId] = useState("");
   const [category, setCategory] = useState("");
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
-
   const { data: settingsData } = useCurrentTenantSettings(session?.tenant_id);
   const { data: allAccounts = [] } = useTreasuryAccounts(session?.tenant_id);
   const { data: allExpenses = [] } = useExpenses(session?.tenant_id);
+  const { data: users = [] } = useUsers(session?.tenant_id);
   const recordExpenseMutation = useRecordExpense(session?.tenant_id);
   const approveExpenseMutation = useApproveExpense(session?.tenant_id);
 
@@ -39,7 +37,6 @@ function ExpensesPage() {
   const settings = settingsData ?? { expense_approval_threshold: 2000 };
   const accounts = allAccounts.filter((a) => a.active);
   const expenses = [...allExpenses].sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const users = getUsers(session.tenant_id);
 
   function handleApprove(expenseId: string) {
     const note = window.prompt("ملاحظة الاعتماد (اختياري):", "");

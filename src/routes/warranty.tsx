@@ -2,9 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import { getWarrantyInfo } from "@/lib/data-store";
+import { fetchWarrantyInfo, type WarrantyInfo } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
-import type { WarrantyInfo } from "@/lib/data-store";
 
 export const Route = createFileRoute("/warranty")({
   component: WarrantyPage,
@@ -14,12 +13,16 @@ function WarrantyPage() {
   const session = useRequireSession();
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<WarrantyInfo | null | undefined>(undefined);
+  const [searching, setSearching] = useState(false);
 
   if (!session) return null;
   const tenantId = session.tenant_id;
 
   function handleSearch() {
-    setResult(getWarrantyInfo(query, tenantId));
+    setSearching(true);
+    fetchWarrantyInfo(tenantId, query)
+      .then(setResult)
+      .finally(() => setSearching(false));
   }
 
   return (
@@ -43,7 +46,8 @@ function WarrantyPage() {
           />
           <button
             onClick={handleSearch}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            disabled={searching}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             بحث
           </button>

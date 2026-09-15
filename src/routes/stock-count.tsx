@@ -1,8 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import { adjustStock, getProductStock, getProducts, subscribeData } from "@/lib/data-store";
+import {
+  computeProductStock,
+  useAdjustStock,
+  useInventoryMovements,
+  useProducts,
+  useProductSerials,
+} from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/stock-count")({
@@ -11,39 +17,51 @@ export const Route = createFileRoute("/stock-count")({
 
 function StockCountPage() {
   const session = useRequireSession();
-  const [, forceRerender] = useState(0);
   const [actuals, setActuals] = useState<Record<string, string>>({});
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
 
-  useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
+  const { data: allProducts = [] } = useProducts(session?.tenant_id);
+  const { data: allSerials = [] } = useProductSerials(session?.tenant_id);
+  const { data: allMovements = [] } = useInventoryMovements(session?.tenant_id);
+  const adjustStockMutation = useAdjustStock(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  const products = getProducts(session.tenant_id).filter((p) => p.active && !p.serial_required);
+  const products = allProducts.filter((p) => p.active && !p.serial_required);
 
   function submitRow(productId: string) {
     setError(null);
     const actualRaw = actuals[productId];
     if (actualRaw === undefined || actualRaw.trim() === "") return;
     const actual = Number(actualRaw);
-    const expected = getProductStock(productId);
+    const product = products.find((p) => p.id === productId);
+    if (!product) return;
+    const expected = computeProductStock(productId, false, allSerials, allMovements);
     const diff = actual - expected;
     if (diff !== 0 && !reasons[productId]?.trim()) {
       setError("لازم تكتب سبب الفرق قبل الحفظ");
       return;
     }
-    try {
-      adjustStock(productId, actual, reasons[productId]?.trim() || "بدون فرق", actorUserId);
-      setActuals((prev) => ({ ...prev, [productId]: "" }));
-      setReasons((prev) => ({ ...prev, [productId]: "" }));
-      setSavedId(productId);
-      setTimeout(() => setSavedId(null), 2000);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "حدث خطأ");
-    }
+    adjustStockMutation.mutate(
+      {
+        product,
+        actualQuantity: actual,
+        reason: reasons[productId]?.trim() || "بدون فرق",
+        actorUserId,
+      },
+      {
+        onSuccess: () => {
+          setActuals((prev) => ({ ...prev, [productId]: "" }));
+          setReasons((prev) => ({ ...prev, [productId]: "" }));
+          setSavedId(productId);
+          setTimeout(() => setSavedId(null), 2000);
+        },
+        onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   return (
@@ -71,7 +89,7 @@ function StockCountPage() {
             </thead>
             <tbody>
               {products.map((product) => {
-                const expected = getProductStock(product.id, product);
+                const expected = computeProductStock(product.id, false, allSerials, allMovements);
                 const actualValue = actuals[product.id] ?? "";
                 const diff = actualValue !== "" ? Number(actualValue) - expected : null;
                 return (
