@@ -2,11 +2,14 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import { getProductStock, subscribeData } from "@/lib/data-store";
+import { subscribeData } from "@/lib/data-store";
 import {
+  computeProductStock,
   useCreateProduct,
+  useInventoryMovements,
   useProductBrands,
   useProductCategories,
+  useProductSerials,
   useProducts,
   useReceiveStock,
   useRegisterProductBrand,
@@ -70,6 +73,8 @@ function ProductsPage() {
   const { data: products = [], isLoading } = useProducts(session?.tenant_id);
   const { data: allCategories = [] } = useProductCategories(session?.tenant_id);
   const { data: allBrands = [] } = useProductBrands(session?.tenant_id);
+  const { data: allSerials = [] } = useProductSerials(session?.tenant_id);
+  const { data: allMovements = [] } = useInventoryMovements(session?.tenant_id);
   const createProductMutation = useCreateProduct(session?.tenant_id);
   const updateProductMutation = useUpdateProduct(session?.tenant_id);
   const registerBrandMutation = useRegisterProductBrand(session?.tenant_id);
@@ -415,7 +420,12 @@ function ProductsPage() {
                     {[product.brand, product.model].filter(Boolean).join(" / ") || "—"}
                   </td>
                   <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
-                    {getProductStock(product.id, product)}
+                    {computeProductStock(
+                      product.id,
+                      product.serial_required,
+                      allSerials,
+                      allMovements,
+                    )}
                   </td>
                   <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
                     {product.cash_price.toLocaleString("ar-EG")} ج.م
