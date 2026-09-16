@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
@@ -18,6 +19,7 @@ import {
   useUpdateTenantSettings,
 } from "@/lib/supabase-queries";
 import { exportTenantDataCsv } from "@/lib/export-data";
+import { resetTenantDataServer } from "@/lib/reset-tenant-data-server";
 import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
 import type { TenantSettings } from "@/types";
@@ -61,6 +63,13 @@ function SettingsPage() {
   const { requestConfirm, dialog: passwordDialog } = useOwnerPasswordConfirm();
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [resetConfirmText, setResetConfirmText] = useState("");
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetDone, setResetDone] = useState(false);
+  const resetTenantDataMutation = useMutation({
+    mutationFn: (vars: { tenantId: string; actorUserId: string | null }) =>
+      resetTenantDataServer({ data: vars }),
+  });
   const updateSettingsMutation = useUpdateTenantSettings(session?.tenant_id);
   const { data: categories = [] } = useProductCategories(session?.tenant_id);
   const { data: brands = [] } = useProductBrands(session?.tenant_id);
@@ -146,6 +155,23 @@ function SettingsPage() {
       setExportError(e instanceof Error ? e.message : "تعذّر تجهيز الملف");
     } finally {
       setExporting(false);
+    }
+  }
+
+  async function handleResetTenantData() {
+    setResetError(null);
+    if (resetConfirmText.trim() !== "احذف") {
+      setResetError('اكتب كلمة "احذف" بالظبط في المربع فوق قبل ما تقدر تكمل.');
+      return;
+    }
+    const confirmed = await requestConfirm();
+    if (!confirmed) return;
+    try {
+      await resetTenantDataMutation.mutateAsync({ tenantId, actorUserId });
+      setResetConfirmText("");
+      setResetDone(true);
+    } catch (e) {
+      setResetError(e instanceof Error ? e.message : "حدث خطأ أثناء التصفير");
     }
   }
 
@@ -522,6 +548,40 @@ function SettingsPage() {
             {exporting ? "جارٍ التجهيز..." : "تحميل نسخة من البيانات"}
           </button>
           {exportError && <p className="mt-2 text-sm text-destructive">{exportError}</p>}
+        </section>
+
+        <section className="mt-8 rounded-xl border-2 border-destructive/40 bg-destructive/5 p-5 shadow-sm">
+          <h2 className="text-sm font-bold text-destructive">تصفير بيانات المحل (نهائي)</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            بيمسح كل بيانات المحل (عملاء، أجهزة، مبيعات، عقود تقسيط، مشتريات، خزينة، محاسبة، سجل
+            عمليات) نهائيًا بدون رجعة — يفضل بس حساب المحل نفسه والمستخدمين والصلاحيات. استخدمه بس
+            لما تكون خلّصت العرض التجريبي للعميل وعايز تبدأ من صفر ببياناته الحقيقية.
+          </p>
+          {resetDone ? (
+            <p className="mt-3 text-sm font-bold text-success">
+              تم التصفير ✓ — المحل دلوقتي فاضي وجاهز لإدخال البيانات الحقيقية.
+            </p>
+          ) : (
+            <>
+              <label className="mt-3 block max-w-xs space-y-1">
+                <span className="text-xs font-medium text-foreground">اكتب "احذف" للتأكيد</span>
+                <input
+                  value={resetConfirmText}
+                  onChange={(e) => setResetConfirmText(e.target.value)}
+                  className="form-input"
+                  placeholder="احذف"
+                />
+              </label>
+              <button
+                onClick={() => void handleResetTenantData()}
+                disabled={resetTenantDataMutation.isPending}
+                className="mt-3 rounded-md bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {resetTenantDataMutation.isPending ? "جارٍ التصفير..." : "تصفير كل بيانات المحل"}
+              </button>
+              {resetError && <p className="mt-2 text-sm text-destructive">{resetError}</p>}
+            </>
+          )}
         </section>
         {passwordDialog}
       </main>

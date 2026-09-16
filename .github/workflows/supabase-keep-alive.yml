@@ -1,0 +1,31 @@
+name: Supabase keep-alive
+
+# Supabase's free tier pauses a project after ~1 week of no API activity — this makes one
+# lightweight, read-only request every day so that never happens. Delete this workflow once
+# the project moves to a paid Supabase plan (Pro projects are never auto-paused).
+on:
+  schedule:
+    - cron: "0 6 * * *" # daily at 06:00 UTC
+  workflow_dispatch: {} # lets you trigger it manually from the Actions tab to test it
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            "${SUPABASE_URL}/rest/v1/tenants?select=id&limit=1" \
+            -H "apikey: ${SUPABASE_ANON_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}")
+          echo "Supabase responded with HTTP $status"
+          # 200/206 = reached the DB; 401/403 = reached the DB too (RLS/auth rejected the
+          # query, which is fine — the project is awake either way). Only a connection
+          # failure (curl couldn't reach it at all) should fail this job.
+          if [ -z "$status" ]; then
+            echo "No response from Supabase — check SUPABASE_URL." >&2
+            exit 1
+          fi
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
