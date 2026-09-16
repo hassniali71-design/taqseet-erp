@@ -188,7 +188,7 @@ async function main() {
     const { error: mErr } = await supabase.from("inventory_movements").insert({
       tenant_id: TENANT_ID,
       product_id: data.id as string,
-      type: "opening",
+      type: "receipt",
       quantity: p.stock,
       before: 0,
       after: p.stock,
@@ -586,7 +586,7 @@ async function main() {
     await supabase.from("inventory_movements").insert({
       tenant_id: TENANT_ID,
       product_id: product.id,
-      type: "purchase",
+      type: "receipt",
       quantity: qty,
       before: (stockLeft.get(product.id) ?? 0) - qty,
       after: stockLeft.get(product.id) ?? 0,
