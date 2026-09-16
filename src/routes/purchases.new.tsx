@@ -3,12 +3,15 @@ import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import {
+  useCreateProduct,
   useCreatePurchase,
   useCurrentTenantSettings,
   useProducts,
   useSuppliers,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
+
+const NEW_PRODUCT_VALUE = "__new__";
 
 export const Route = createFileRoute("/purchases/new")({
   component: NewPurchasePage,
@@ -32,11 +35,20 @@ function NewPurchasePage() {
   const [unitCost, setUnitCost] = useState("");
   const [serialInputs, setSerialInputs] = useState<string[]>([""]);
   const [error, setError] = useState<string | null>(null);
+  const [issueDate, setIssueDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [returnPeriodDays, setReturnPeriodDays] = useState("");
+  const [showNewProductForm, setShowNewProductForm] = useState(false);
+  const [newProductName, setNewProductName] = useState("");
+  const [newProductCash, setNewProductCash] = useState("");
+  const [newProductInstallment, setNewProductInstallment] = useState("");
+  const [newProductSerialRequired, setNewProductSerialRequired] = useState(false);
+  const [newProductError, setNewProductError] = useState<string | null>(null);
 
   const { data: allSuppliers = [] } = useSuppliers(session?.tenant_id);
   const { data: allProducts = [] } = useProducts(session?.tenant_id);
   const { data: settings } = useCurrentTenantSettings(session?.tenant_id);
   const createPurchaseMutation = useCreatePurchase(session?.tenant_id);
+  const createProductMutation = useCreateProduct(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
@@ -100,6 +112,48 @@ function NewPurchasePage() {
     setCart((prev) => prev.filter((_, i) => i !== index));
   }
 
+  async function handleCreateNewProduct() {
+    setNewProductError(null);
+    if (!newProductName.trim()) {
+      setNewProductError("اسم الجهاز مطلوب");
+      return;
+    }
+    const cash = Number(newProductCash);
+    const installment = Number(newProductInstallment);
+    if (!newProductCash || cash < 0) {
+      setNewProductError("أدخل سعر نقدي صحيح");
+      return;
+    }
+    if (!newProductInstallment || installment < 0) {
+      setNewProductError("أدخل سعر تقسيط صحيح");
+      return;
+    }
+    try {
+      const product = await createProductMutation.mutateAsync({
+        input: {
+          name: newProductName.trim(),
+          unit: "قطعة",
+          cost_price: 0,
+          cash_price: cash,
+          installment_price: installment,
+          min_stock: 0,
+          max_stock: 0,
+          serial_required: newProductSerialRequired,
+        },
+        actorUserId,
+      });
+      setSelectedProductId(product.id);
+      setSerialInputs([""]);
+      setShowNewProductForm(false);
+      setNewProductName("");
+      setNewProductCash("");
+      setNewProductInstallment("");
+      setNewProductSerialRequired(false);
+    } catch (e) {
+      setNewProductError(e instanceof Error ? e.message : "حدث خطأ");
+    }
+  }
+
   const total = cart.reduce((sum, l) => sum + l.unit_cost * l.quantity, 0);
 
   function handleConfirm() {
@@ -118,6 +172,8 @@ function NewPurchasePage() {
             unit_cost: l.unit_cost,
             ...(l.serial_numbers.length > 0 && { serial_numbers: l.serial_numbers }),
           })),
+          ...(issueDate && { issue_date: issueDate }),
+          ...(returnPeriodDays && { return_period_days: Number(returnPeriodDays) }),
         },
         actorUserId,
         costingMethod: settings?.costing_method ?? "average",
@@ -139,8 +195,8 @@ function NewPurchasePage() {
           §61-§64 — الاستلام هنا فوري: تأكيد الأمر يحدّث المخزون وينشئ السيريالات المطلوبة مباشرة.
         </p>
 
-        <div className="mt-4">
-          <label className="block max-w-sm space-y-1">
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <label className="block space-y-1">
             <span className="text-xs font-medium text-foreground">المورد *</span>
             <select
               value={supplierId}
@@ -155,6 +211,28 @@ function NewPurchasePage() {
               ))}
             </select>
           </label>
+          <label className="block space-y-1">
+            <span className="text-xs font-medium text-foreground">تاريخ إصدار الفاتورة</span>
+            <input
+              type="date"
+              value={issueDate}
+              onChange={(e) => setIssueDate(e.target.value)}
+              className="form-input"
+              dir="ltr"
+            />
+          </label>
+          <label className="block space-y-1">
+            <span className="text-xs font-medium text-foreground">مدة إرجاع (أيام، اختياري)</span>
+            <input
+              type="number"
+              min="0"
+              value={returnPeriodDays}
+              onChange={(e) => setReturnPeriodDays(e.target.value)}
+              className="form-input"
+              dir="ltr"
+              placeholder="مثلًا: 14"
+            />
+          </label>
         </div>
 
         <div className="mt-6 rounded-xl border border-border bg-card p-5 shadow-sm">
@@ -165,12 +243,18 @@ function NewPurchasePage() {
               <select
                 value={selectedProductId}
                 onChange={(e) => {
+                  if (e.target.value === NEW_PRODUCT_VALUE) {
+                    setShowNewProductForm(true);
+                    setSelectedProductId("");
+                    return;
+                  }
                   setSelectedProductId(e.target.value);
                   setSerialInputs([""]);
                 }}
                 className="form-input"
               >
                 <option value="">اختر جهاز</option>
+                <option value={NEW_PRODUCT_VALUE}>+ إضافة جهاز جديد</option>
                 {products.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name} (تكلفة حالية: {p.cost_price.toLocaleString("ar-EG")} ج.م)
@@ -201,6 +285,75 @@ function NewPurchasePage() {
               />
             </label>
           </div>
+
+          {showNewProductForm && (
+            <div className="mt-3 space-y-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
+              <p className="text-xs font-bold text-foreground">
+                جهاز جديد — هيتضاف لقائمة الأجهزة ويتسجل عليه هذه الكمية فورًا
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">الاسم *</span>
+                  <input
+                    value={newProductName}
+                    onChange={(e) => setNewProductName(e.target.value)}
+                    className="form-input"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">السعر النقدي *</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={newProductCash}
+                    onChange={(e) => setNewProductCash(e.target.value)}
+                    className="form-input"
+                    dir="ltr"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">سعر التقسيط *</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={newProductInstallment}
+                    onChange={(e) => setNewProductInstallment(e.target.value)}
+                    className="form-input"
+                    dir="ltr"
+                  />
+                </label>
+              </div>
+              <label className="flex items-center gap-2 text-xs font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  checked={newProductSerialRequired}
+                  onChange={(e) => setNewProductSerialRequired(e.target.checked)}
+                />
+                يحتاج سيريال (جهاز فردي)
+              </label>
+              {newProductError && <p className="text-sm text-destructive">{newProductError}</p>}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleCreateNewProduct()}
+                  disabled={createProductMutation.isPending}
+                  className="rounded-md bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {createProductMutation.isPending ? "جارٍ الإنشاء..." : "إنشاء واستخدام"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNewProductForm(false);
+                    setNewProductError(null);
+                  }}
+                  className="rounded-md border border-input px-4 py-2 text-xs font-medium text-foreground hover:bg-accent"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </div>
+          )}
 
           {selectedProduct?.serial_required && (
             <div className="mt-3">

@@ -443,6 +443,11 @@ export interface Purchase {
   total: number;
   user_id: string | null;
   created_at: string;
+  /** Informational only (§61-§64 addendum) — when the supplier's invoice was actually issued,
+   * and an optional agreed return window in days. Neither feeds into any automatic
+   * calculation yet. */
+  issue_date?: string;
+  return_period_days?: number;
 }
 
 /** §65 Supplier Payments — unlike customer installments, suppliers have no due-date schedule in

@@ -69,6 +69,27 @@ function PurchaseReceiptPage() {
             </div>
           </div>
 
+          {Boolean(purchase.issue_date || purchase.return_period_days !== undefined) && (
+            <div className="flex flex-wrap gap-4 border-b border-border py-3 text-xs text-muted-foreground">
+              {purchase.issue_date && (
+                <p>
+                  تاريخ إصدار الفاتورة:{" "}
+                  <span className="font-bold text-foreground" dir="ltr">
+                    {new Date(purchase.issue_date).toLocaleDateString("ar-EG")}
+                  </span>
+                </p>
+              )}
+              {purchase.return_period_days !== undefined && (
+                <p>
+                  مدة الإرجاع المتفق عليها:{" "}
+                  <span className="font-bold text-foreground" dir="ltr">
+                    {purchase.return_period_days} يوم
+                  </span>
+                </p>
+              )}
+            </div>
+          )}
+
           <table className="mt-4 w-full text-right text-sm">
             <thead className="border-b border-border text-xs text-muted-foreground">
               <tr>

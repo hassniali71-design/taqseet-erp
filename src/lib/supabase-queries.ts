@@ -2322,6 +2322,8 @@ export interface CreatePurchaseInput {
     unit_cost: number;
     serial_numbers?: string[];
   }>;
+  issue_date?: string;
+  return_period_days?: number;
 }
 
 export function useCreatePurchase(tenantId: string | undefined) {
@@ -2466,6 +2468,10 @@ export function useCreatePurchase(tenantId: string | undefined) {
           items: purchaseItems,
           total,
           user_id: actorUserId,
+          ...(input.issue_date && { issue_date: input.issue_date }),
+          ...(input.return_period_days !== undefined && {
+            return_period_days: input.return_period_days,
+          }),
         })
         .select()
         .single();

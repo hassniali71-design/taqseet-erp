@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { StatCard } from "@/components/ui/StatCard";
 import { subscribeData } from "@/lib/data-store";
 import {
   computeSupplierBalance,
@@ -89,6 +90,19 @@ function SuppliersPage() {
     });
   }
 
+  const volumeBySupplier = new Map<string, { total: number; count: number }>();
+  for (const purchase of allPurchases) {
+    const current = volumeBySupplier.get(purchase.supplier_id) ?? { total: 0, count: 0 };
+    current.total += purchase.total;
+    current.count += 1;
+    volumeBySupplier.set(purchase.supplier_id, current);
+  }
+  const topSuppliers = suppliers
+    .map((s) => ({ supplier: s, ...(volumeBySupplier.get(s.id) ?? { total: 0, count: 0 }) }))
+    .filter((s) => s.count > 0)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 3);
+
   return (
     <div className="flex min-h-screen bg-background">
       <AppSidebar session={session} />
@@ -166,6 +180,21 @@ function SuppliersPage() {
               </button>
             </div>
           </form>
+        )}
+
+        {topSuppliers.length > 0 && (
+          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            {topSuppliers.map(({ supplier, total, count }, i) => (
+              <StatCard
+                key={supplier.id}
+                label={i === 0 ? "أكبر مورد (بحجم الشراء)" : supplier.name}
+                value={`${total.toLocaleString("ar-EG")} ج.م`}
+                sub={`${count} أمر شراء`}
+                valueDir="ltr"
+                tone={i === 0 ? "primary" : "default"}
+              />
+            ))}
+          </div>
         )}
 
         <div className="mt-6 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
