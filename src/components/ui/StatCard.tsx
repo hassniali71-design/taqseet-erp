@@ -97,18 +97,27 @@ export function Panel({
 export function LinkCard({
   label,
   value,
+  sub,
   cta,
   icon: Icon,
   tone = "primary",
+  valueDir,
 }: {
   label: string;
   value: string;
+  sub?: string;
   cta: string;
   icon?: LucideIcon;
   tone?: Tone;
+  valueDir?: "ltr" | "rtl";
 }) {
   return (
-    <div className={cn("rounded-2xl border-2 p-5 shadow-sm transition-colors", TONE_CARD[tone])}>
+    <div
+      className={cn(
+        "rounded-2xl border-2 p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md",
+        TONE_CARD[tone],
+      )}
+    >
       <div className="flex items-center justify-between">
         <p className="text-sm font-bold text-muted-foreground">{label}</p>
         {Icon && (
@@ -122,7 +131,13 @@ export function LinkCard({
           </span>
         )}
       </div>
-      <p className="font-stat mt-2 text-3xl font-extrabold text-foreground">{value}</p>
+      <p
+        className="font-stat mt-2 text-3xl font-extrabold text-foreground"
+        {...(valueDir && { dir: valueDir })}
+      >
+        {value}
+      </p>
+      {sub && <p className="mt-1 text-xs font-bold text-muted-foreground">{sub}</p>}
       <p className="mt-2 text-xs font-extrabold text-primary">{cta}</p>
     </div>
   );

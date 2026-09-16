@@ -2,18 +2,17 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   AlertTriangle,
   Clock,
-  CreditCard,
   Landmark,
-  Package,
   PackageX,
   Percent,
+  ReceiptText,
   Truck,
   Users,
   Wallet,
 } from "lucide-react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { SalesTrendChart } from "@/components/ui/Charts";
-import { LinkCard, Panel, StatCard } from "@/components/ui/StatCard";
+import { LinkCard, Panel } from "@/components/ui/StatCard";
 import { getEffectiveInstallmentStatus } from "@/lib/data-store";
 import {
   computeAccountBalance,
@@ -47,7 +46,20 @@ function isSameDay(isoDate: string, ref: Date): boolean {
   );
 }
 
-const WEEKDAY_LABELS_AR = ["أحد", "اثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت"];
+const MONTH_LABELS_AR = [
+  "يناير",
+  "فبراير",
+  "مارس",
+  "أبريل",
+  "مايو",
+  "يونيو",
+  "يوليو",
+  "أغسطس",
+  "سبتمبر",
+  "أكتوبر",
+  "نوفمبر",
+  "ديسمبر",
+];
 
 function DashboardPage() {
   const session = useRequireSession();
@@ -76,13 +88,15 @@ function DashboardPage() {
     .filter((s) => isSameDay(s.created_at, today))
     .reduce((sum, s) => sum + s.total, 0);
 
-  const last7Days = Array.from({ length: 7 }, (_, i) => {
-    const day = new Date(today);
-    day.setDate(day.getDate() - (6 - i));
+  const last5Months = Array.from({ length: 5 }, (_, i) => {
+    const monthDate = new Date(today.getFullYear(), today.getMonth() - (4 - i), 1);
     const total = sales
-      .filter((s) => isSameDay(s.created_at, day))
+      .filter((s) => {
+        const d = new Date(s.created_at);
+        return d.getFullYear() === monthDate.getFullYear() && d.getMonth() === monthDate.getMonth();
+      })
       .reduce((sum, s) => sum + s.total, 0);
-    return { label: WEEKDAY_LABELS_AR[day.getDay()] ?? "", value: total };
+    return { label: MONTH_LABELS_AR[monthDate.getMonth()] ?? "", value: total };
   });
 
   const contracts = contractsAll.filter(
@@ -130,51 +144,92 @@ function DashboardPage() {
           محل: {tenant?.name} — حالة الاشتراك: {tenant?.status}
         </p>
 
-        <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <StatCard
-            label="مبيعات اليوم"
-            value={`${todaySalesTotal.toLocaleString("ar-EG")} ج.م`}
-            icon={Wallet}
-            tone="primary"
-            valueDir="ltr"
-          />
-          <StatCard
-            label="مستحق اليوم (تقسيط)"
-            value={`${dueTodayAmount.toLocaleString("ar-EG")} ج.م`}
-            icon={Clock}
-            valueDir="ltr"
-          />
-          <StatCard
-            label="متأخرات (تقسيط)"
-            value={`${overdueAmount.toLocaleString("ar-EG")} ج.م`}
-            icon={AlertTriangle}
-            tone={overdueCount > 0 ? "danger" : "default"}
-            valueDir="ltr"
-            {...(overdueCount > 0 && { sub: `${overdueCount} قسط متأخر` })}
-          />
-          <StatCard
-            label="رصيد خزينة الكاشير"
-            value={`${cashierBalance.toLocaleString("ar-EG")} ج.م`}
-            icon={Landmark}
-            valueDir="ltr"
-          />
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <StatCard label="عملاء" value={String(customers.length)} icon={Users} />
-          <StatCard label="عقود تقسيط مفتوحة" value={String(contracts.length)} icon={Percent} />
-          <StatCard
-            label="أجهزة تحت الحد الأدنى"
-            value={String(lowStockProducts.length)}
-            icon={PackageX}
-            tone={lowStockProducts.length > 0 ? "danger" : "default"}
-          />
-          <StatCard label="توصيلات جارية" value={String(pendingDeliveries)} icon={Truck} />
+        <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
+          <Link to="/reports">
+            <LinkCard
+              label="مبيعات اليوم"
+              value={`${todaySalesTotal.toLocaleString("ar-EG")} ج.م`}
+              cta="عرض تقرير المبيعات ←"
+              icon={Wallet}
+              tone="primary"
+              valueDir="ltr"
+            />
+          </Link>
+          <Link to="/collections">
+            <LinkCard
+              label="مستحق اليوم (تقسيط)"
+              value={`${dueTodayAmount.toLocaleString("ar-EG")} ج.م`}
+              cta="فتح التحصيل ←"
+              icon={Clock}
+              valueDir="ltr"
+            />
+          </Link>
+          <Link to="/collections">
+            <LinkCard
+              label="متأخرات (تقسيط)"
+              value={`${overdueAmount.toLocaleString("ar-EG")} ج.م`}
+              cta="فتح التحصيل ←"
+              icon={AlertTriangle}
+              tone={overdueCount > 0 ? "danger" : "primary"}
+              valueDir="ltr"
+              {...(overdueCount > 0 && { sub: `${overdueCount} قسط متأخر` })}
+            />
+          </Link>
+          <Link to="/treasury">
+            <LinkCard
+              label="رصيد خزينة الكاشير"
+              value={`${cashierBalance.toLocaleString("ar-EG")} ج.م`}
+              cta="فتح الخزينة ←"
+              icon={Landmark}
+              valueDir="ltr"
+            />
+          </Link>
+          <Link to="/reports">
+            <LinkCard
+              label="إجمالي عدد الفواتير"
+              value={String(sales.length)}
+              cta="عرض تقرير المبيعات ←"
+              icon={ReceiptText}
+            />
+          </Link>
+          <Link to="/customers">
+            <LinkCard
+              label="عملاء"
+              value={String(customers.length)}
+              cta="إدارة العملاء ←"
+              icon={Users}
+            />
+          </Link>
+          <Link to="/collections">
+            <LinkCard
+              label="عقود تقسيط مفتوحة"
+              value={String(contracts.length)}
+              cta="فتح التحصيل ←"
+              icon={Percent}
+            />
+          </Link>
+          <Link to="/products">
+            <LinkCard
+              label="أجهزة تحت الحد الأدنى"
+              value={String(lowStockProducts.length)}
+              cta="إدارة الأجهزة ←"
+              icon={PackageX}
+              tone={lowStockProducts.length > 0 ? "danger" : "primary"}
+            />
+          </Link>
+          <Link to="/deliveries">
+            <LinkCard
+              label="توصيلات جارية"
+              value={String(pendingDeliveries)}
+              cta="فتح التوصيل ←"
+              icon={Truck}
+            />
+          </Link>
         </div>
 
         <div className="mt-6">
-          <Panel title="المبيعات آخر 7 أيام" description="إجمالي المبيعات النقدية المكتملة يومياً">
-            <SalesTrendChart data={last7Days} />
+          <Panel title="المبيعات آخر 5 شهور" description="إجمالي المبيعات النقدية المكتملة شهريًا">
+            <SalesTrendChart data={last5Months} />
           </Panel>
         </div>
 
@@ -206,35 +261,6 @@ function DashboardPage() {
             </ul>
           </div>
         )}
-
-        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Link to="/customers">
-            <LinkCard
-              label="العملاء"
-              value={String(customers.length)}
-              cta="إدارة العملاء ←"
-              icon={Users}
-            />
-          </Link>
-          <Link to="/products">
-            <LinkCard
-              label="الأجهزة (المنتجات)"
-              value={String(products.length)}
-              cta="إدارة الأجهزة ←"
-              icon={Package}
-              tone="default"
-            />
-          </Link>
-          <Link to="/reports">
-            <LinkCard
-              label="التقارير"
-              value="📊"
-              cta="عرض التقارير ←"
-              icon={CreditCard}
-              tone="default"
-            />
-          </Link>
-        </div>
       </main>
     </div>
   );
