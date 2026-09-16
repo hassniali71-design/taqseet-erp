@@ -478,6 +478,38 @@ export function useCreateGuarantor(tenantId: string | undefined) {
   });
 }
 
+/** A guarantor is pure contact info (no financial ledger references it), so unlike every
+ * business-transaction table in this app it's safe to actually delete rather than deactivate —
+ * confirmed against the schema's own RLS policies (guarantors_isolation is `for all`, no
+ * insert/select-only restriction) before adding this. */
+export function useDeleteGuarantor(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      guarantorId,
+      actorUserId,
+    }: {
+      guarantorId: string;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { error } = await supabase.from("guarantors").delete().eq("id", guarantorId);
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "guarantor.delete",
+        entity: "guarantors",
+        entity_id: guarantorId,
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["guarantors", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
 /* ---------------- Products (§19) ---------------- */
 
 export function useProducts(tenantId: string | undefined) {

@@ -9,6 +9,7 @@ import {
   useCreateGuarantor,
   useCurrentTenantSettings,
   useCustomers,
+  useDeleteGuarantor,
   useGuarantors,
   useInstallmentContracts,
   useInstallmentPayments,
@@ -39,6 +40,7 @@ function CustomerDetailPage() {
   const { data: settingsData } = useCurrentTenantSettings(session?.tenant_id);
   const { data: allGuarantors = [] } = useGuarantors(session?.tenant_id);
   const createGuarantorMutation = useCreateGuarantor(session?.tenant_id);
+  const deleteGuarantorMutation = useDeleteGuarantor(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
@@ -73,6 +75,11 @@ function CustomerDetailPage() {
     .filter((c) => c.customer_id === id)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const exposure = computeCustomerExposure(id, allContracts, allInstallments);
+
+  function handleDeleteGuarantor(guarantorId: string) {
+    if (!window.confirm("حذف هذا الضامن نهائيًا؟")) return;
+    deleteGuarantorMutation.mutate({ guarantorId, actorUserId });
+  }
 
   function handleAddGuarantor(event: FormEvent) {
     event.preventDefault();
@@ -230,6 +237,7 @@ function CustomerDetailPage() {
                   <th className="px-4 py-3 font-medium">الاسم</th>
                   <th className="px-4 py-3 font-medium">الهاتف</th>
                   <th className="px-4 py-3 font-medium">الصلة</th>
+                  <th className="px-4 py-3 font-medium"></th>
                 </tr>
               </thead>
               <tbody>
@@ -240,11 +248,19 @@ function CustomerDetailPage() {
                       {g.phone}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{g.relationship ?? "—"}</td>
+                    <td className="px-4 py-3 text-left">
+                      <button
+                        onClick={() => handleDeleteGuarantor(g.id)}
+                        className="text-xs font-medium text-destructive hover:underline"
+                      >
+                        حذف
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 {guarantors.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-4 py-6 text-center text-muted-foreground">
+                    <td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">
                       لا يوجد ضامنون بعد.
                     </td>
                   </tr>

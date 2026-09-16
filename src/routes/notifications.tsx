@@ -22,6 +22,7 @@ import {
   useProductSerials,
   usePromisesToPay,
 } from "@/lib/supabase-queries";
+import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
 import type { AppNotification } from "@/lib/data-store";
 
@@ -52,6 +53,7 @@ const SEVERITY_BADGE: Record<AppNotification["severity"], string> = {
 function NotificationsPage() {
   const session = useRequireSession();
   const [, forceRerender] = useState(0);
+  const { requestConfirm, dialog } = useOwnerPasswordConfirm();
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -141,6 +143,11 @@ function NotificationsPage() {
   }));
   const unreadCount = notifications.filter((n) => !n.read).length;
 
+  async function handleClearAll() {
+    const confirmed = await requestConfirm();
+    if (confirmed) markAllNotificationsRead(notifications.map((n) => n.id));
+  }
+
   return (
     <div className="flex min-h-screen bg-background">
       <AppSidebar session={session} />
@@ -155,7 +162,7 @@ function NotificationsPage() {
           </div>
           {unreadCount > 0 && (
             <button
-              onClick={() => markAllNotificationsRead(notifications.map((n) => n.id))}
+              onClick={() => void handleClearAll()}
               className="whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-xs font-bold text-foreground hover:bg-accent"
             >
               تعليم الكل كمقروء ({unreadCount})
@@ -163,7 +170,7 @@ function NotificationsPage() {
           )}
         </div>
 
-        <div className="mt-6 space-y-3">
+        <div className="mt-6 max-h-[36rem] space-y-3 overflow-y-auto">
           {notifications.map((n) => (
             <div
               key={n.id}
@@ -197,6 +204,7 @@ function NotificationsPage() {
           )}
         </div>
       </main>
+      {dialog}
     </div>
   );
 }
