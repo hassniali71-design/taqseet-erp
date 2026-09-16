@@ -2,29 +2,45 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { SalesTrendChart } from "@/components/ui/Charts";
+import { Panel, StatCard } from "@/components/ui/StatCard";
 import {
+  computeCustomerExposure,
   useCustomers,
   useInstallmentContracts,
   useInstallmentPayments,
   useInstallments,
+  useJournalEntries,
   useProducts,
   useSaleReturns,
   useSales,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
+import type { AccountCode } from "@/types";
 
 export const Route = createFileRoute("/reports")({
   component: ReportsPage,
 });
 
-type Tab = "sales" | "contracts" | "statement" | "slow-moving";
+type Tab = "sales" | "contracts" | "statement" | "movement" | "financial";
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "sales", label: "المبيعات" },
   { id: "contracts", label: "عقود التقسيط" },
   { id: "statement", label: "كشف حساب عميل" },
-  { id: "slow-moving", label: "أصناف بطيئة الحركة" },
+  { id: "movement", label: "حركة الأصناف" },
+  { id: "financial", label: "التقرير المالي" },
 ];
+
+const ACCOUNT_LABELS: Record<AccountCode, string> = {
+  "1000": "الخزينة/النقدية",
+  "1100": "عملاء (ذمم مدينة)",
+  "1200": "المخزون",
+  "2000": "موردون (ذمم دائنة)",
+  "3000": "إيرادات المبيعات",
+  "3100": "إيرادات التمويل",
+  "5000": "المصروفات",
+};
 
 function daysAgo(days: number): Date {
   const d = new Date();
@@ -66,7 +82,7 @@ function ReportsPage() {
           ))}
         </div>
 
-        {(tab === "sales" || tab === "slow-moving") && (
+        {(tab === "sales" || tab === "movement" || tab === "financial") && (
           <div className="mt-4 flex flex-wrap items-end gap-3">
             <label className="block space-y-1">
               <span className="text-xs font-medium text-foreground">من تاريخ</span>
@@ -100,8 +116,9 @@ function ReportsPage() {
             tenantId={session.tenant_id}
           />
         )}
-        {tab === "slow-moving" && (
-          <SlowMovingReport from={from} to={to} tenantId={session.tenant_id} />
+        {tab === "movement" && <MovementReport from={from} to={to} tenantId={session.tenant_id} />}
+        {tab === "financial" && (
+          <FinancialReport from={from} to={to} tenantId={session.tenant_id} />
         )}
       </main>
     </div>
@@ -110,6 +127,7 @@ function ReportsPage() {
 
 function SalesReport({ from, to, tenantId }: { from: number; to: number; tenantId: string }) {
   const { data: allSales = [] } = useSales(tenantId);
+  const [chartMonth, setChartMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const sales = allSales
     .filter((s) => {
       const t = new Date(s.created_at).getTime();
@@ -118,9 +136,56 @@ function SalesReport({ from, to, tenantId }: { from: number; to: number; tenantI
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const total = sales.reduce((sum, s) => sum + s.total, 0);
 
+  const [chartYear, chartMonthIndex] = chartMonth.split("-").map(Number) as [number, number];
+  const daysInMonth = new Date(chartYear, chartMonthIndex, 0).getDate();
+  const monthlySales = allSales.filter((s) => {
+    const d = new Date(s.created_at);
+    return (
+      d.getFullYear() === chartYear &&
+      d.getMonth() + 1 === chartMonthIndex &&
+      s.status === "completed"
+    );
+  });
+  const dailyChartData = Array.from({ length: daysInMonth }, (_, i) => {
+    const day = i + 1;
+    const total = monthlySales
+      .filter((s) => new Date(s.created_at).getDate() === day)
+      .reduce((sum, s) => sum + s.total, 0);
+    return { label: String(day), value: total };
+  });
+  const bestDay = dailyChartData.reduce(
+    (best, d) => (d.value > best.value ? d : best),
+    dailyChartData[0] ?? { label: "-", value: 0 },
+  );
+
   return (
     <section className="mt-6">
-      <p className="text-sm text-muted-foreground">
+      <Panel
+        title="حركة المبيعات اليومية خلال شهر"
+        description="اختر شهر لمعرفة أكتر الأيام مبيعًا فيه"
+        actions={
+          <input
+            type="month"
+            value={chartMonth}
+            onChange={(e) => setChartMonth(e.target.value)}
+            className="form-input"
+            dir="ltr"
+          />
+        }
+      >
+        <SalesTrendChart data={dailyChartData} />
+        {bestDay.value > 0 && (
+          <p className="mt-3 text-sm text-muted-foreground">
+            أكتر يوم مبيعًا في الشهر ده:{" "}
+            <span className="font-bold text-foreground">يوم {bestDay.label}</span> بإجمالي{" "}
+            <span className="font-bold text-foreground" dir="ltr">
+              {bestDay.value.toLocaleString("ar-EG")} ج.م
+            </span>
+          </p>
+        )}
+      </Panel>
+
+      <p className="mt-6 text-sm text-muted-foreground">
         عدد الفواتير: {sales.length} — الإجمالي:{" "}
         <span className="font-bold text-foreground" dir="ltr">
           {total.toLocaleString("ar-EG")} ج.م
@@ -230,6 +295,7 @@ function StatementReport({
   const { data: customers = [] } = useCustomers(tenantId);
   const { data: allSales = [] } = useSales(tenantId);
   const { data: allContracts = [] } = useInstallmentContracts(tenantId);
+  const { data: allInstallments = [] } = useInstallments(tenantId);
   const { data: allPayments = [] } = useInstallmentPayments(tenantId);
   const { data: allReturns = [] } = useSaleReturns(tenantId);
   const customer = customers.find((c) => c.id === customerId);
@@ -239,6 +305,15 @@ function StatementReport({
   const contractIds = new Set(contracts.map((c) => c.id));
   const payments = allPayments.filter((p) => contractIds.has(p.contract_id));
   const returns = customer ? allReturns.filter((r) => r.customer_id === customer.id) : [];
+
+  const totalPurchased =
+    sales.reduce((sum, s) => sum + s.total, 0) +
+    contracts.reduce((sum, c) => sum + c.total_amount, 0);
+  const exposure = customer
+    ? computeCustomerExposure(customer.id, allContracts, allInstallments)
+    : 0;
+  const lastPaymentDate = [...payments].sort((a, b) => b.created_at.localeCompare(a.created_at))[0]
+    ?.created_at;
 
   type Row = { date: string; label: string; amount: number };
   const rows: Row[] = [
@@ -286,6 +361,30 @@ function StatementReport({
 
       {customer && (
         <>
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatCard
+              label="تاريخ الانضمام"
+              value={new Date(customer.created_at).toLocaleDateString("ar-EG")}
+              valueDir="ltr"
+            />
+            <StatCard
+              label="إجمالي الشراء"
+              value={`${totalPurchased.toLocaleString("ar-EG")} ج.م`}
+              valueDir="ltr"
+              tone="primary"
+            />
+            <StatCard
+              label="المديونية الحالية"
+              value={`${exposure.toLocaleString("ar-EG")} ج.م`}
+              valueDir="ltr"
+              tone={exposure > 0 ? "warning" : "default"}
+            />
+            <StatCard
+              label="آخر تحصيل"
+              value={lastPaymentDate ? new Date(lastPaymentDate).toLocaleDateString("ar-EG") : "—"}
+              valueDir="ltr"
+            />
+          </div>
           <p className="mt-4 text-sm text-muted-foreground">
             صافي الحركة (فواتير/عقود مطروحًا منها تحصيلات ومرتجعات):{" "}
             <span className="font-bold text-foreground" dir="ltr">
@@ -333,10 +432,11 @@ function StatementReport({
   );
 }
 
-function SlowMovingReport({ from, to, tenantId }: { from: number; to: number; tenantId: string }) {
+function MovementReport({ from, to, tenantId }: { from: number; to: number; tenantId: string }) {
   const { data: allProducts = [] } = useProducts(tenantId);
   const { data: allSales = [] } = useSales(tenantId);
   const { data: allContracts = [] } = useInstallmentContracts(tenantId);
+  const [order, setOrder] = useState<"fast" | "slow">("fast");
   const products = allProducts.filter((p) => p.active);
   const sales = allSales.filter((s) => {
     const t = new Date(s.created_at).getTime();
@@ -367,13 +467,39 @@ function SlowMovingReport({ from, to, tenantId }: { from: number; to: number; te
 
   const rows = products
     .map((p) => ({ product: p, quantitySold: soldQtyByProduct.get(p.id) ?? 0 }))
-    .sort((a, b) => a.quantitySold - b.quantitySold);
+    .sort((a, b) =>
+      order === "slow" ? a.quantitySold - b.quantitySold : b.quantitySold - a.quantitySold,
+    );
 
   return (
     <section className="mt-6">
-      <p className="text-sm text-muted-foreground">
-        الكمية المباعة (نقدًا أو تقسيطًا) خلال الفترة المحددة أعلاه، مرتبة من الأقل للأكثر.
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">
+          الكمية المباعة (نقدًا أو تقسيطًا) خلال الفترة المحددة أعلاه.
+        </p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setOrder("fast")}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              order === "fast"
+                ? "bg-primary text-primary-foreground"
+                : "border border-input text-foreground hover:bg-accent"
+            }`}
+          >
+            الأكثر حركة
+          </button>
+          <button
+            onClick={() => setOrder("slow")}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              order === "slow"
+                ? "bg-primary text-primary-foreground"
+                : "border border-input text-foreground hover:bg-accent"
+            }`}
+          >
+            الأبطأ حركة
+          </button>
+        </div>
+      </div>
       <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
         <table className="w-full text-right text-sm">
           <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
@@ -397,6 +523,114 @@ function SlowMovingReport({ from, to, tenantId }: { from: number; to: number; te
           </tbody>
         </table>
       </div>
+    </section>
+  );
+}
+
+/** يبني تقريره مباشرة من القيود المحاسبية التلقائية الحقيقية (نفس مصدر الحقيقة اللي صفحة
+ * "/accounting" بتعرضه) — بدون أي منطق مالي موازٍ جديد. الإيرادات = دائن حسابات 3000/3100،
+ * المصروفات = مدين حساب 5000، صافي = الفرق بينهم. مبسّط عمدًا (تقريب تشغيلي وليس محاسبة
+ * استحقاق كاملة)، لكن كل رقم فيه حقيقي ومتحدّث مع كل عملية. */
+function FinancialReport({ from, to, tenantId }: { from: number; to: number; tenantId: string }) {
+  const { data: allEntries = [] } = useJournalEntries(tenantId);
+  const entries = allEntries.filter((e) => {
+    const t = new Date(e.created_at).getTime();
+    return t >= from && t <= to;
+  });
+
+  const byAccount = new Map<string, { debit: number; credit: number }>();
+  for (const entry of entries) {
+    for (const line of entry.lines) {
+      const current = byAccount.get(line.account_code) ?? { debit: 0, credit: 0 };
+      current.debit += line.debit;
+      current.credit += line.credit;
+      byAccount.set(line.account_code, current);
+    }
+  }
+
+  const salesRevenue = byAccount.get("3000")?.credit ?? 0;
+  const financeRevenue = byAccount.get("3100")?.credit ?? 0;
+  const totalRevenue = salesRevenue + financeRevenue;
+  const totalExpenses = byAccount.get("5000")?.debit ?? 0;
+  const net = totalRevenue - totalExpenses;
+
+  const chartData = [
+    { label: "الإيرادات", value: totalRevenue },
+    { label: "المصروفات", value: totalExpenses },
+  ];
+
+  return (
+    <section className="mt-6 space-y-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard
+          label="إيرادات المبيعات"
+          value={`${salesRevenue.toLocaleString("ar-EG")} ج.م`}
+          valueDir="ltr"
+          tone="primary"
+        />
+        <StatCard
+          label="إيرادات التمويل (تقسيط)"
+          value={`${financeRevenue.toLocaleString("ar-EG")} ج.م`}
+          valueDir="ltr"
+          tone="primary"
+        />
+        <StatCard
+          label="إجمالي المصروفات"
+          value={`${totalExpenses.toLocaleString("ar-EG")} ج.م`}
+          valueDir="ltr"
+          tone="danger"
+        />
+        <StatCard
+          label="صافي الفترة"
+          value={`${net.toLocaleString("ar-EG")} ج.م`}
+          valueDir="ltr"
+          tone={net >= 0 ? "success" : "danger"}
+        />
+      </div>
+
+      <Panel title="الإيرادات مقابل المصروفات" description="خلال الفترة المحددة أعلاه">
+        <SalesTrendChart data={chartData} />
+      </Panel>
+
+      <Panel title="تفصيل الحسابات" description="مجموع الحركة على كل حساب خلال الفترة">
+        <div className="max-h-[20rem] overflow-y-auto overflow-x-auto rounded-xl border border-border">
+          <table className="w-full text-right text-sm">
+            <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3 font-medium">الحساب</th>
+                <th className="px-4 py-3 font-medium">مدين</th>
+                <th className="px-4 py-3 font-medium">دائن</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(ACCOUNT_LABELS).map(([code, name]) => {
+                const totals = byAccount.get(code);
+                if (!totals || (totals.debit === 0 && totals.credit === 0)) return null;
+                return (
+                  <tr key={code} className="border-b border-border last:border-0">
+                    <td className="px-4 py-3 font-medium text-foreground">
+                      {code} — {name}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground" dir="ltr">
+                      {totals.debit > 0 ? totals.debit.toLocaleString("ar-EG") : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground" dir="ltr">
+                      {totals.credit > 0 ? totals.credit.toLocaleString("ar-EG") : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+              {entries.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="px-4 py-6 text-center text-muted-foreground">
+                    لا يوجد حركة مالية في هذه الفترة.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
     </section>
   );
 }
