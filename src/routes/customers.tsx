@@ -4,6 +4,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { RiskBadge } from "@/components/ui/StatCard";
 import {
+  computeCustomerExposure,
   computeCustomerRiskAssessment,
   useCreateCustomer,
   useCurrentTenantSettings,
@@ -12,6 +13,7 @@ import {
   useInstallmentPayments,
   useInstallments,
   usePromisesToPay,
+  useSales,
   useUpdateCustomer,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
@@ -50,6 +52,7 @@ function CustomersPage() {
   const { data: installments = [] } = useInstallments(session?.tenant_id);
   const { data: payments = [] } = useInstallmentPayments(session?.tenant_id);
   const { data: promises = [] } = usePromisesToPay(session?.tenant_id);
+  const { data: sales = [] } = useSales(session?.tenant_id);
   const createCustomerMutation = useCreateCustomer(session?.tenant_id);
   const updateCustomerMutation = useUpdateCustomer(session?.tenant_id);
 
@@ -208,6 +211,8 @@ function CustomersPage() {
                 <th className="px-4 py-3 font-medium">الاسم</th>
                 <th className="px-4 py-3 font-medium">الهاتف</th>
                 <th className="px-4 py-3 font-medium">العنوان</th>
+                <th className="px-4 py-3 font-medium">إجمالي المشتريات</th>
+                <th className="px-4 py-3 font-medium">المديونية الحالية</th>
                 <th className="px-4 py-3 font-medium">حد الائتمان</th>
                 <th className="px-4 py-3 font-medium">التقييم</th>
                 <th className="px-4 py-3 font-medium">الحالة</th>
@@ -215,69 +220,88 @@ function CustomersPage() {
               </tr>
             </thead>
             <tbody>
-              {customers.map((customer) => (
-                <tr key={customer.id} className="border-b border-border last:border-0">
-                  <td className="px-4 py-3 text-muted-foreground" dir="ltr">
-                    {customer.code}
-                  </td>
-                  <td className="px-4 py-3 font-medium text-foreground">
-                    <Link
-                      to="/customers/$id"
-                      params={{ id: customer.id }}
-                      className="hover:underline"
+              {customers.map((customer) => {
+                const totalPurchased =
+                  sales
+                    .filter((s) => s.customer_id === customer.id)
+                    .reduce((sum, s) => sum + s.total, 0) +
+                  contracts
+                    .filter((c) => c.customer_id === customer.id)
+                    .reduce((sum, c) => sum + c.total_amount, 0);
+                const exposure = computeCustomerExposure(customer.id, contracts, installments);
+                return (
+                  <tr key={customer.id} className="border-b border-border last:border-0">
+                    <td className="px-4 py-3 text-muted-foreground" dir="ltr">
+                      {customer.code}
+                    </td>
+                    <td className="px-4 py-3 font-medium text-foreground">
+                      <Link
+                        to="/customers/$id"
+                        params={{ id: customer.id }}
+                        className="hover:underline"
+                      >
+                        {customer.name}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground" dir="ltr">
+                      {customer.phone}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">{customer.address ?? "—"}</td>
+                    <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
+                      {totalPurchased.toLocaleString("ar-EG")} ج.م
+                    </td>
+                    <td
+                      className={`px-4 py-3 font-medium ${exposure > 0 ? "text-warning" : "text-muted-foreground"}`}
+                      dir="ltr"
                     >
-                      {customer.name}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground" dir="ltr">
-                    {customer.phone}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">{customer.address ?? "—"}</td>
-                  <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
-                    {customer.credit_limit.toLocaleString("ar-EG")} ج.م
-                  </td>
-                  <td className="px-4 py-3">
-                    <RiskBadge
-                      assessment={computeCustomerRiskAssessment(
-                        customer.id,
-                        contracts,
-                        installments,
-                        payments,
-                        promises,
-                        gracePeriodDays,
-                      )}
-                    />
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={
-                        customer.status === "active"
-                          ? "rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success"
-                          : "rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
-                      }
-                    >
-                      {customer.status === "active" ? "نشط" : "موقوف"}
-                    </span>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-left">
-                    <button
-                      onClick={() => startEdit(customer)}
-                      className="ml-2 text-xs font-medium text-primary hover:underline"
-                    >
-                      تعديل
-                    </button>
-                    <button
-                      onClick={() => toggleStatus(customer)}
-                      className="text-xs font-medium text-muted-foreground hover:underline"
-                    >
-                      {customer.status === "active" ? "إيقاف" : "تفعيل"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                      {exposure.toLocaleString("ar-EG")} ج.م
+                    </td>
+                    <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
+                      {customer.credit_limit.toLocaleString("ar-EG")} ج.م
+                    </td>
+                    <td className="px-4 py-3">
+                      <RiskBadge
+                        assessment={computeCustomerRiskAssessment(
+                          customer.id,
+                          contracts,
+                          installments,
+                          payments,
+                          promises,
+                          gracePeriodDays,
+                        )}
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={
+                          customer.status === "active"
+                            ? "rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success"
+                            : "rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
+                        }
+                      >
+                        {customer.status === "active" ? "نشط" : "موقوف"}
+                      </span>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-left">
+                      <button
+                        onClick={() => startEdit(customer)}
+                        className="ml-2 text-xs font-medium text-primary hover:underline"
+                      >
+                        تعديل
+                      </button>
+                      <button
+                        onClick={() => toggleStatus(customer)}
+                        className="text-xs font-medium text-muted-foreground hover:underline"
+                      >
+                        {customer.status === "active" ? "إيقاف" : "تفعيل"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
               {customers.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">
+                  <td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">
                     {isLoading ? "جارٍ التحميل..." : "لا يوجد عملاء بعد."}
                   </td>
                 </tr>
