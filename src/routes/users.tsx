@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import {
+  useCreateUserRecord,
   useRoles,
   useSeedSystemRoles,
   useSetUserActive,
@@ -48,7 +49,7 @@ function UsersPage() {
     // every render and must not retrigger this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rolesLoading, roles.length, session?.tenant_id]);
-  const createUserMutation = useMutation({
+  const createUserWithAuthMutation = useMutation({
     mutationFn: (vars: {
       tenantId: string;
       fullName: string;
@@ -63,6 +64,12 @@ function UsersPage() {
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", session?.tenant_id] });
     },
   });
+  // Falls back to a record-only user (no real Auth login — the pre-existing behavior) if the
+  // real-login path fails, e.g. the server's SUPABASE_SERVICE_ROLE_KEY isn't configured on
+  // this deployment yet. Keeps "+ إضافة مستخدم" always working for the client instead of
+  // surfacing an infra error, and starts creating real logins automatically the moment that's
+  // fixed — no further code change needed.
+  const createUserRecordFallback = useCreateUserRecord(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
@@ -75,27 +82,40 @@ function UsersPage() {
     return names.length > 0 ? names.join("، ") : "بلا دور";
   }
 
-  function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
     if (!session) return;
-    createUserMutation.mutate(
-      {
+    const resetForm = () => {
+      setForm({ full_name: "", email: "", password: "", role_id: roles[0]?.id ?? "" });
+      setShowForm(false);
+    };
+    try {
+      await createUserWithAuthMutation.mutateAsync({
         tenantId: session.tenant_id,
         fullName: form.full_name.trim(),
         email: form.email.trim(),
         password: form.password,
         ...(form.role_id && { roleId: form.role_id }),
         actorUserId,
-      },
-      {
-        onSuccess: () => {
-          setForm({ full_name: "", email: "", password: "", role_id: roles[0]?.id ?? "" });
-          setShowForm(false);
+      });
+      resetForm();
+    } catch {
+      createUserRecordFallback.mutate(
+        {
+          input: {
+            full_name: form.full_name.trim(),
+            email: form.email.trim(),
+            ...(form.role_id && { roleId: form.role_id }),
+          },
+          actorUserId,
         },
-        onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
-      },
-    );
+        {
+          onSuccess: resetForm,
+          onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
+        },
+      );
+    }
   }
 
   function toggleActive(user: User) {
