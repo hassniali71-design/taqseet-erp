@@ -60,6 +60,8 @@ function toNumber(value: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+const UNIT_OPTIONS = ["قطعة", "دستة", "كرتونة", "طقم", "زوج"];
+
 function ProductsPage() {
   const session = useRequireSession();
   const [, forceRerender] = useState(0);
@@ -67,6 +69,8 @@ function ProductsPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [openingSerials, setOpeningSerials] = useState<string[]>([""]);
   const [formError, setFormError] = useState<string | null>(null);
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [customUnit, setCustomUnit] = useState(false);
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -93,6 +97,8 @@ function ProductsPage() {
     setForm(EMPTY_FORM);
     setOpeningSerials([""]);
     setFormError(null);
+    setAddingCategory(categories.length === 0);
+    setCustomUnit(false);
     setEditingId("new");
   }
 
@@ -113,6 +119,10 @@ function ProductsPage() {
       opening_stock: "0",
     });
     setFormError(null);
+    setAddingCategory(
+      categories.length === 0 || !categories.some((c) => c.name === product.category),
+    );
+    setCustomUnit(!UNIT_OPTIONS.includes(product.unit));
     setEditingId(product.id);
   }
 
@@ -237,25 +247,92 @@ function ProductsPage() {
                 />
               </Field>
               <Field label="الفئة">
-                <input
-                  list="category-options"
-                  value={form.category}
-                  onChange={(e) => setForm({ ...form, category: e.target.value })}
-                  className="form-input"
-                  placeholder="ثلاجات، غسالات، ..."
-                />
-                <datalist id="category-options">
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.name} />
-                  ))}
-                </datalist>
+                {addingCategory || categories.length === 0 ? (
+                  <div className="flex gap-2">
+                    <input
+                      value={form.category}
+                      onChange={(e) => setForm({ ...form, category: e.target.value })}
+                      className="form-input"
+                      placeholder="اسم فئة جديدة، مثلاً: ثلاجات"
+                    />
+                    {categories.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setAddingCategory(false)}
+                        className="whitespace-nowrap rounded-md border border-input px-3 text-xs font-medium text-foreground hover:bg-accent"
+                      >
+                        اختيار من القائمة
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <select
+                      value={form.category}
+                      onChange={(e) => setForm({ ...form, category: e.target.value })}
+                      className="form-input"
+                    >
+                      <option value="">اختر فئة</option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddingCategory(true);
+                        setForm({ ...form, category: "" });
+                      }}
+                      className="whitespace-nowrap rounded-md border border-input px-3 text-xs font-medium text-foreground hover:bg-accent"
+                    >
+                      + فئة جديدة
+                    </button>
+                  </div>
+                )}
               </Field>
               <Field label="الوحدة">
-                <input
-                  value={form.unit}
-                  onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                  className="form-input"
-                />
+                {customUnit ? (
+                  <div className="flex gap-2">
+                    <input
+                      value={form.unit}
+                      onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                      className="form-input"
+                      placeholder="وحدة مخصصة"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCustomUnit(false);
+                        setForm({ ...form, unit: UNIT_OPTIONS[0] ?? "قطعة" });
+                      }}
+                      className="whitespace-nowrap rounded-md border border-input px-3 text-xs font-medium text-foreground hover:bg-accent"
+                    >
+                      اختيار من القائمة
+                    </button>
+                  </div>
+                ) : (
+                  <select
+                    value={form.unit}
+                    onChange={(e) => {
+                      if (e.target.value === "__other__") {
+                        setCustomUnit(true);
+                        setForm({ ...form, unit: "" });
+                      } else {
+                        setForm({ ...form, unit: e.target.value });
+                      }
+                    }}
+                    className="form-input"
+                  >
+                    {UNIT_OPTIONS.map((u) => (
+                      <option key={u} value={u}>
+                        {u}
+                      </option>
+                    ))}
+                    <option value="__other__">أخرى...</option>
+                  </select>
+                )}
               </Field>
               <Field label="الضمان (بالشهور)">
                 <input
@@ -304,15 +381,10 @@ function ProductsPage() {
                   onChange={(e) => setForm({ ...form, min_stock: e.target.value })}
                   className="form-input"
                 />
-              </Field>
-              <Field label="الحد الأقصى للمخزون">
-                <input
-                  type="number"
-                  min="0"
-                  value={form.max_stock}
-                  onChange={(e) => setForm({ ...form, max_stock: e.target.value })}
-                  className="form-input"
-                />
+                <span className="block text-[11px] text-muted-foreground">
+                  لما الكمية المتاحة توصل للرقم ده أو أقل، هيظهر تنبيه "مخزون منخفض" في لوحة التحكم
+                  والإشعارات.
+                </span>
               </Field>
               <label className="flex items-center gap-2 self-end pb-2 text-xs font-medium text-foreground">
                 <input
@@ -326,7 +398,7 @@ function ProductsPage() {
 
             {editingId === "new" && (
               <div className="rounded-lg border border-border bg-muted/30 p-3">
-                <Field label="المخزون الافتتاحي (اختياري — تقدر تستلم كمية لاحقًا من صفحة الجهاز)">
+                <Field label="الكمية المتاحة الآن (اختياري)">
                   <input
                     type="number"
                     min="0"
@@ -335,6 +407,11 @@ function ProductsPage() {
                     className="form-input max-w-xs"
                     dir="ltr"
                   />
+                  <span className="block text-[11px] text-muted-foreground">
+                    لو عندك كمية جاهزة تتباع دلوقتي من الجهاز ده، اكتبها هنا فتتسجل فورًا في
+                    المخزون. سيبها 0 لو مفيش كمية دلوقتي — تقدر تضيف كمية في أي وقت لاحق من زرار
+                    "استلام كمية" داخل صفحة الجهاز نفسه.
+                  </span>
                 </Field>
                 {form.serial_required && toNumber(form.opening_stock) > 0 && (
                   <div className="mt-3 space-y-2">
