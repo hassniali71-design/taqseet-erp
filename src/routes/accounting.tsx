@@ -71,7 +71,7 @@ function AccountingPage() {
 
         <section className="mt-8">
           <h2 className="text-lg font-bold text-foreground">القيود التلقائية</h2>
-          <div className="mt-3 space-y-3">
+          <div className="mt-3 max-h-[40rem] space-y-3 overflow-y-auto">
             {entries.map((entry) => (
               <div
                 key={entry.id}

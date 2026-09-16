@@ -359,9 +359,9 @@ function SettingsPage() {
             </form>
           )}
 
-          <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+          <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-lg border border-border">
             <table className="w-full text-right text-sm">
-              <thead className="border-b border-border text-xs text-muted-foreground">
+              <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3 font-medium">المدة</th>
                   <th className="px-4 py-3 font-medium">نسبة التمويل</th>

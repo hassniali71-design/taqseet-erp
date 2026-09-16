@@ -3389,6 +3389,8 @@ export function useCreateExchange(tenantId: string | undefined) {
         { data: products, error: productsError },
         { data: allSerials, error: serialsError },
         { data: movements, error: movementsError },
+        { data: priorReturns, error: priorReturnsError },
+        { data: priorExchanges, error: priorExchangesError },
       ] = await Promise.all([
         supabase.from("products").select("*").eq("tenant_id", tenantId),
         supabase.from("product_serials").select("*").eq("tenant_id", tenantId),
@@ -3396,10 +3398,25 @@ export function useCreateExchange(tenantId: string | undefined) {
           .from("inventory_movements")
           .select("product_id, quantity")
           .eq("tenant_id", tenantId),
+        supabase.from("sale_returns").select("items").eq("sale_id", input.original_sale_id),
+        supabase
+          .from("exchange_transactions")
+          .select("returned_items")
+          .eq("original_sale_id", input.original_sale_id),
       ]);
       if (productsError) throw new Error(productsError.message);
       if (serialsError) throw new Error(serialsError.message);
       if (movementsError) throw new Error(movementsError.message);
+      if (priorReturnsError) throw new Error(priorReturnsError.message);
+      if (priorExchangesError) throw new Error(priorExchangesError.message);
+
+      // Same "already accounted for" check useCreateReturn does — a non-serial line here
+      // could otherwise be returned/exchanged past what the original sale actually contained,
+      // across any mix of prior returns and prior exchanges of this same sale.
+      const priorConsumedItems: ReturnItem[] = [
+        ...(priorReturns ?? []).flatMap((r) => r.items as ReturnItem[]),
+        ...(priorExchanges ?? []).flatMap((e) => e.returned_items as ReturnItem[]),
+      ];
 
       const returnedItems: ReturnItem[] = [];
       const returnedSerialIds = new Set<string>();
@@ -3432,8 +3449,14 @@ export function useCreateExchange(tenantId: string | undefined) {
             line_total: saleLine.unit_price,
           });
         } else {
-          if (line.quantity <= 0 || line.quantity > saleLine.quantity) {
-            throw new Error(`كمية إرجاع غير صحيحة للمنتج "${product.name}"`);
+          const alreadyConsumedQty = priorConsumedItems
+            .filter((ri) => ri.product_id === product.id && !ri.serial_id)
+            .reduce((s, ri) => s + ri.quantity, 0);
+          const remaining = saleLine.quantity - alreadyConsumedQty;
+          if (line.quantity <= 0 || line.quantity > remaining) {
+            throw new Error(
+              `كمية إرجاع غير صحيحة للمنتج "${product.name}" (المتاح للإرجاع ${remaining})`,
+            );
           }
           returnedItems.push({
             product_id: product.id,

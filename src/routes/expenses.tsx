@@ -103,6 +103,11 @@ function ExpensesPage() {
                   </option>
                 ))}
               </select>
+              {accounts.length === 0 && (
+                <span className="block text-[11px] text-warning">
+                  مفيش خزينة نشطة بعد — أضف خزينة من صفحة "الخزينة" الأول.
+                </span>
+              )}
             </label>
             <label className="block space-y-1">
               <span className="text-xs font-medium text-foreground">النوع *</span>
