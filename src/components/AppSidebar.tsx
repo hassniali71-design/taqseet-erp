@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 
 import { Logo } from "@/components/Logo";
-import { getTenants, getUsers, signOut, type Session } from "@/lib/data-store";
+import { getUsers, signOut, type Session } from "@/lib/data-store";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -105,15 +105,11 @@ export function AppSidebar({ session }: { session: Session }) {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const user = getUsers().find((u) => u.id === session.user_id);
-  const tenant = getTenants().find((t) => t.id === session.tenant_id);
 
   return (
     <aside className="flex w-64 shrink-0 flex-col border-l border-sidebar-border bg-sidebar text-sidebar-foreground">
       <div className="border-b border-sidebar-border px-4 py-4">
         <Logo className="text-sidebar-foreground" />
-        <p className="mt-2 truncate text-xs font-bold text-sidebar-foreground/70">
-          {tenant?.name ?? "تقسيط"}
-        </p>
       </div>
 
       <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-4">
