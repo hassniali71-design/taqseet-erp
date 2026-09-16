@@ -5,6 +5,7 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { SalesTrendChart } from "@/components/ui/Charts";
 import { Panel, StatCard } from "@/components/ui/StatCard";
 import {
+  computeAccountBalance,
   computeCustomerExposure,
   useCustomers,
   useInstallmentContracts,
@@ -14,6 +15,8 @@ import {
   useProducts,
   useSaleReturns,
   useSales,
+  useTreasuryAccounts,
+  useTreasuryMovements,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 import type { AccountCode } from "@/types";
@@ -533,10 +536,20 @@ function MovementReport({ from, to, tenantId }: { from: number; to: number; tena
  * استحقاق كاملة)، لكن كل رقم فيه حقيقي ومتحدّث مع كل عملية. */
 function FinancialReport({ from, to, tenantId }: { from: number; to: number; tenantId: string }) {
   const { data: allEntries = [] } = useJournalEntries(tenantId);
+  const { data: allSales = [] } = useSales(tenantId);
+  const { data: allContracts = [] } = useInstallmentContracts(tenantId);
+  const { data: allPayments = [] } = useInstallmentPayments(tenantId);
+  const { data: allAccounts = [] } = useTreasuryAccounts(tenantId);
+  const { data: allMovements = [] } = useTreasuryMovements(tenantId);
+
   const entries = allEntries.filter((e) => {
     const t = new Date(e.created_at).getTime();
     return t >= from && t <= to;
   });
+  const inPeriod = (isoDate: string) => {
+    const t = new Date(isoDate).getTime();
+    return t >= from && t <= to;
+  };
 
   const byAccount = new Map<string, { debit: number; credit: number }>();
   for (const entry of entries) {
@@ -548,37 +561,77 @@ function FinancialReport({ from, to, tenantId }: { from: number; to: number; ten
     }
   }
 
+  const cashSalesTotal = allSales
+    .filter((s) => s.status === "completed" && inPeriod(s.created_at))
+    .reduce((sum, s) => sum + s.total, 0);
+  const installmentSalesTotal = allContracts
+    .filter((c) => inPeriod(c.created_at))
+    .reduce((sum, c) => sum + c.total_amount, 0);
+  const totalSales = cashSalesTotal + installmentSalesTotal;
+  const collectionsTotal = allPayments
+    .filter((p) => inPeriod(p.created_at))
+    .reduce((sum, p) => sum + p.amount, 0);
+
   const salesRevenue = byAccount.get("3000")?.credit ?? 0;
   const financeRevenue = byAccount.get("3100")?.credit ?? 0;
   const totalRevenue = salesRevenue + financeRevenue;
   const totalExpenses = byAccount.get("5000")?.debit ?? 0;
   const net = totalRevenue - totalExpenses;
+  const totalTreasuryBalance = allAccounts
+    .filter((a) => a.active)
+    .reduce((sum, a) => sum + computeAccountBalance(a.id, allMovements), 0);
 
   const chartData = [
-    { label: "الإيرادات", value: totalRevenue },
-    { label: "المصروفات", value: totalExpenses },
+    { label: "مبيعات كاش", value: cashSalesTotal },
+    { label: "مبيعات تقسيط", value: installmentSalesTotal },
+    { label: "تحصيلات", value: collectionsTotal },
+    { label: "مصروفات", value: totalExpenses },
   ];
 
   return (
     <section className="mt-6 space-y-6">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard
-          label="إيرادات المبيعات"
-          value={`${salesRevenue.toLocaleString("ar-EG")} ج.م`}
+          label="إجمالي المبيعات"
+          value={`${totalSales.toLocaleString("ar-EG")} ج.م`}
           valueDir="ltr"
-          tone="primary"
+          tone="navy"
+        />
+        <StatCard
+          label="مبيعات كاش"
+          value={`${cashSalesTotal.toLocaleString("ar-EG")} ج.م`}
+          valueDir="ltr"
+          tone="teal"
+        />
+        <StatCard
+          label="مبيعات تقسيط"
+          value={`${installmentSalesTotal.toLocaleString("ar-EG")} ج.م`}
+          valueDir="ltr"
+          tone="navy"
+        />
+        <StatCard
+          label="تحصيلات الأقساط"
+          value={`${collectionsTotal.toLocaleString("ar-EG")} ج.م`}
+          valueDir="ltr"
+          tone="teal"
         />
         <StatCard
           label="إيرادات التمويل (تقسيط)"
           value={`${financeRevenue.toLocaleString("ar-EG")} ج.م`}
           valueDir="ltr"
-          tone="primary"
+          tone="navy"
         />
         <StatCard
           label="إجمالي المصروفات"
           value={`${totalExpenses.toLocaleString("ar-EG")} ج.م`}
           valueDir="ltr"
           tone="danger"
+        />
+        <StatCard
+          label="رصيد الخزينة الإجمالي الآن"
+          value={`${totalTreasuryBalance.toLocaleString("ar-EG")} ج.م`}
+          valueDir="ltr"
+          tone="teal"
         />
         <StatCard
           label="صافي الفترة"
@@ -588,7 +641,7 @@ function FinancialReport({ from, to, tenantId }: { from: number; to: number; ten
         />
       </div>
 
-      <Panel title="الإيرادات مقابل المصروفات" description="خلال الفترة المحددة أعلاه">
+      <Panel title="ملخص الحركة المالية" description="خلال الفترة المحددة أعلاه">
         <SalesTrendChart data={chartData} />
       </Panel>
 

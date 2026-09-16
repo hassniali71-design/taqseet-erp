@@ -27,6 +27,7 @@ const MOVEMENT_TYPE_LABELS: Record<TreasuryMovement["type"], string> = {
   expense: "مصروف",
   return: "مرتجع",
   exchange: "استبدال",
+  transfer: "تحويل بين خزائن (تسليم وردية)",
 };
 
 function isToday(isoDate: string): boolean {
@@ -52,6 +53,7 @@ function TreasuryPage() {
   const [openingBalance, setOpeningBalance] = useState("0");
   const [countedAmount, setCountedAmount] = useState("");
   const [closeReason, setCloseReason] = useState("");
+  const [allocationAmounts, setAllocationAmounts] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [newAccountName, setNewAccountName] = useState("");
@@ -122,23 +124,39 @@ function TreasuryPage() {
 
   function handleCloseShift() {
     setError(null);
-    if (!openShiftRow) return;
+    if (!openShiftRow || !cashierAccount) return;
     const counted = Number(countedAmount);
     if (!countedAmount || counted < 0) {
       setError("أدخل المبلغ المعدود فعليًا");
       return;
     }
+    const allocations = Object.entries(allocationAmounts)
+      .map(([accountId, value]) => ({ accountId, amount: Number(value) || 0 }))
+      .filter((a) => a.amount > 0);
     closeShiftMutation.mutate(
-      { shiftId: openShiftRow.id, countedAmount: counted, reason: closeReason, actorUserId },
+      {
+        shiftId: openShiftRow.id,
+        countedAmount: counted,
+        reason: closeReason,
+        actorUserId,
+        allocations,
+      },
       {
         onSuccess: () => {
           setCountedAmount("");
           setCloseReason("");
+          setAllocationAmounts({});
         },
         onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
       },
     );
   }
+
+  const otherAccounts = accounts.filter((a) => a.id !== cashierAccount?.id);
+  const allocatedTotal = Object.values(allocationAmounts).reduce(
+    (sum, v) => sum + (Number(v) || 0),
+    0,
+  );
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -215,6 +233,17 @@ function TreasuryPage() {
         )}
 
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {accounts.length > 0 && (
+            <div className="rounded-xl border-2 border-primary/40 bg-primary/5 p-4 sm:col-span-2">
+              <p className="text-xs text-muted-foreground">إجمالي كل الخزائن الآن</p>
+              <p className="mt-1 text-2xl font-bold text-foreground" dir="ltr">
+                {accounts
+                  .reduce((sum, a) => sum + computeAccountBalance(a.id, allMovements), 0)
+                  .toLocaleString("ar-EG")}{" "}
+                ج.م
+              </p>
+            </div>
+          )}
           {accounts.map((account) => (
             <div key={account.id} className="rounded-xl border border-border bg-card p-4">
               <p className="text-xs text-muted-foreground">
@@ -293,13 +322,56 @@ function TreasuryPage() {
                       className="form-input"
                     />
                   </label>
-                  <button
-                    onClick={handleCloseShift}
-                    className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-                  >
-                    إقفال الوردية
-                  </button>
                 </div>
+
+                {otherAccounts.length > 0 && (
+                  <div className="mt-4 rounded-lg border border-border p-3">
+                    <p className="text-xs font-bold text-foreground">
+                      توزيع النقدية على الخزائن (اختياري)
+                    </p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      من المبلغ المعدود فعليًا، حدّد قد إيه هيتسلّم لكل خزينة — مثلاً جزء محفظة
+                      إلكترونية، جزء بنك، والباقي يفضل كاش في الكاشير.
+                    </p>
+                    <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      {otherAccounts.map((account) => (
+                        <label key={account.id} className="block space-y-1">
+                          <span className="text-xs font-medium text-foreground">
+                            {account.name} ({ACCOUNT_KIND_LABELS[account.kind]})
+                          </span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={allocationAmounts[account.id] ?? ""}
+                            onChange={(e) =>
+                              setAllocationAmounts((prev) => ({
+                                ...prev,
+                                [account.id]: e.target.value,
+                              }))
+                            }
+                            className="form-input"
+                            dir="ltr"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground" dir="ltr">
+                      الموزَّع: {allocatedTotal.toLocaleString("ar-EG")} ج.م — الباقي كاش في
+                      الكاشير:{" "}
+                      {Math.max(0, (Number(countedAmount) || 0) - allocatedTotal).toLocaleString(
+                        "ar-EG",
+                      )}{" "}
+                      ج.م
+                    </p>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleCloseShift}
+                  className="mt-3 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  إقفال الوردية
+                </button>
               </div>
             )}
           </section>

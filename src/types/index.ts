@@ -283,6 +283,10 @@ export interface Sale {
   total: number;
   user_id: string | null;
   status: "completed" | "cancelled";
+  /** Optional per-sale override of the tenant-wide `return_period_days` default — the seller
+   * can set a custom return/exchange window on this specific invoice. Empty means "use the
+   * default from Settings", same as before this field existed. */
+  return_window_days?: number;
   created_at: string;
 }
 
@@ -482,7 +486,15 @@ export interface TreasuryMovement {
   id: string;
   tenant_id: string;
   account_id: string;
-  type: "opening" | "sale" | "collection" | "purchase_payment" | "expense" | "return" | "exchange";
+  type:
+    | "opening"
+    | "sale"
+    | "collection"
+    | "purchase_payment"
+    | "expense"
+    | "return"
+    | "exchange"
+    | "transfer";
   /** Signed — positive increases the account's balance, negative decreases it. */
   amount: number;
   before: number;

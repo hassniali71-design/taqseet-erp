@@ -6,6 +6,7 @@ import { subscribeData } from "@/lib/data-store";
 import {
   computeProductStock,
   useCreateProduct,
+  useDeleteProduct,
   useInventoryMovements,
   useProductBrands,
   useProductCategories,
@@ -16,6 +17,7 @@ import {
   useRegisterProductCategory,
   useUpdateProduct,
 } from "@/lib/supabase-queries";
+import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
 import type { Product } from "@/types";
 
@@ -70,7 +72,10 @@ function ProductsPage() {
   const [openingSerials, setOpeningSerials] = useState<string[]>([""]);
   const [formError, setFormError] = useState<string | null>(null);
   const [addingCategory, setAddingCategory] = useState(false);
+  const [addingBrand, setAddingBrand] = useState(false);
   const [customUnit, setCustomUnit] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const { requestConfirm, dialog: passwordDialog } = useOwnerPasswordConfirm();
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -84,6 +89,7 @@ function ProductsPage() {
   const registerBrandMutation = useRegisterProductBrand(session?.tenant_id);
   const registerCategoryMutation = useRegisterProductCategory(session?.tenant_id);
   const receiveStockMutation = useReceiveStock(session?.tenant_id);
+  const deleteProductMutation = useDeleteProduct(session?.tenant_id);
 
   if (!session) return null;
   // Extracted so nested closures below see a plain `string`, not the `Session | null` union
@@ -98,6 +104,7 @@ function ProductsPage() {
     setOpeningSerials([""]);
     setFormError(null);
     setAddingCategory(categories.length === 0);
+    setAddingBrand(brands.length === 0);
     setCustomUnit(false);
     setEditingId("new");
   }
@@ -122,8 +129,27 @@ function ProductsPage() {
     setAddingCategory(
       categories.length === 0 || !categories.some((c) => c.name === product.category),
     );
+    setAddingBrand(brands.length === 0 || !brands.some((b) => b.name === product.brand));
     setCustomUnit(!UNIT_OPTIONS.includes(product.unit));
     setEditingId(product.id);
+  }
+
+  async function handleDelete(product: Product) {
+    setDeleteError(null);
+    if (
+      !window.confirm(
+        `حذف "${product.name}" نهائيًا؟ عمليات البيع القديمة اللي فيها الجهاز ده هتفضل محفوظة زي ما هي، بس سجل السيريالات/حركة المخزون بتاعته هيتمسح مع الجهاز.`,
+      )
+    ) {
+      return;
+    }
+    const confirmed = await requestConfirm();
+    if (!confirmed) return;
+    try {
+      await deleteProductMutation.mutateAsync({ id: product.id, actorUserId });
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : "حدث خطأ أثناء الحذف");
+    }
   }
 
   function onOpeningStockChange(value: string) {
@@ -227,17 +253,50 @@ function ProductsPage() {
                 />
               </Field>
               <Field label="الماركة">
-                <input
-                  list="brand-options"
-                  value={form.brand}
-                  onChange={(e) => setForm({ ...form, brand: e.target.value })}
-                  className="form-input"
-                />
-                <datalist id="brand-options">
-                  {brands.map((b) => (
-                    <option key={b.id} value={b.name} />
-                  ))}
-                </datalist>
+                {addingBrand || brands.length === 0 ? (
+                  <div className="flex gap-2">
+                    <input
+                      value={form.brand}
+                      onChange={(e) => setForm({ ...form, brand: e.target.value })}
+                      className="form-input"
+                      placeholder="اسم ماركة جديدة"
+                    />
+                    {brands.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setAddingBrand(false)}
+                        className="whitespace-nowrap rounded-md border border-input px-3 text-xs font-medium text-foreground hover:bg-accent"
+                      >
+                        اختيار من القائمة
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <select
+                      value={form.brand}
+                      onChange={(e) => setForm({ ...form, brand: e.target.value })}
+                      className="form-input"
+                    >
+                      <option value="">اختر ماركة</option>
+                      {brands.map((b) => (
+                        <option key={b.id} value={b.name}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddingBrand(true);
+                        setForm({ ...form, brand: "" });
+                      }}
+                      className="whitespace-nowrap rounded-md border border-input px-3 text-xs font-medium text-foreground hover:bg-accent"
+                    >
+                      + ماركة جديدة
+                    </button>
+                  </div>
+                )}
               </Field>
               <Field label="الموديل">
                 <input
@@ -530,9 +589,15 @@ function ProductsPage() {
                     </button>
                     <button
                       onClick={() => toggleActive(product)}
-                      className="text-xs font-medium text-muted-foreground hover:underline"
+                      className="ml-2 text-xs font-medium text-muted-foreground hover:underline"
                     >
                       {product.active ? "إيقاف" : "تفعيل"}
+                    </button>
+                    <button
+                      onClick={() => void handleDelete(product)}
+                      className="text-xs font-medium text-destructive hover:underline"
+                    >
+                      حذف
                     </button>
                   </td>
                 </tr>
@@ -547,6 +612,8 @@ function ProductsPage() {
             </tbody>
           </table>
         </div>
+        {deleteError && <p className="mt-2 text-sm text-destructive">{deleteError}</p>}
+        {passwordDialog}
       </main>
     </div>
   );

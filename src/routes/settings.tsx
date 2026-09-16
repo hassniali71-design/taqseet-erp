@@ -5,6 +5,7 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { subscribeData } from "@/lib/data-store";
 import {
   useCreateInstallmentPlan,
+  useCurrentTenant,
   useCurrentTenantSettings,
   useInstallmentPlans,
   useProductBrands,
@@ -16,6 +17,8 @@ import {
   useSetProductCategoryActive,
   useUpdateTenantSettings,
 } from "@/lib/supabase-queries";
+import { exportTenantDataCsv } from "@/lib/export-data";
+import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
 import type { TenantSettings } from "@/types";
 
@@ -54,6 +57,10 @@ function SettingsPage() {
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
   const { data: settings } = useCurrentTenantSettings(session?.tenant_id);
+  const { data: tenant } = useCurrentTenant(session?.tenant_id);
+  const { requestConfirm, dialog: passwordDialog } = useOwnerPasswordConfirm();
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const updateSettingsMutation = useUpdateTenantSettings(session?.tenant_id);
   const { data: categories = [] } = useProductCategories(session?.tenant_id);
   const { data: brands = [] } = useProductBrands(session?.tenant_id);
@@ -74,6 +81,7 @@ function SettingsPage() {
 
   if (!session || !form) return null;
   const actorUserId = session.user_id;
+  const tenantId = session.tenant_id;
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -125,6 +133,20 @@ function SettingsPage() {
     if (!newBrand.trim()) return;
     registerBrandMutation.mutate({ name: newBrand.trim(), actorUserId });
     setNewBrand("");
+  }
+
+  async function handleExport() {
+    setExportError(null);
+    const confirmed = await requestConfirm();
+    if (!confirmed) return;
+    setExporting(true);
+    try {
+      await exportTenantDataCsv(tenantId, tenant?.name ?? "");
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : "تعذّر تجهيز الملف");
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
@@ -260,28 +282,6 @@ function SettingsPage() {
                 />
               </Field>
             </div>
-          </section>
-
-          <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="text-sm font-bold text-foreground">الإشعارات (Phase 8)</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              مركز الإشعارات الداخلي في `/notifications` مُشتق دائمًا من البيانات، بيشتغل بغض النظر
-              عن هذا الإعداد. المفتاح ده مجرد نقطة تجهيز معمارية لمزوّد واتساب/SMS حقيقي — تفعيله
-              لسه ما بيبعتش أي رسالة فعلية (§93).
-            </p>
-            <label className="mt-3 flex items-center gap-2 text-xs font-medium text-foreground">
-              <input
-                type="checkbox"
-                checked={form.whatsapp_notifications_enabled === "true"}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    whatsapp_notifications_enabled: String(e.target.checked),
-                  })
-                }
-              />
-              تفعيل إشعارات واتساب/SMS (Feature Flag — غير موصول بمزوّد حقيقي)
-            </label>
           </section>
 
           <div className="flex items-center gap-3">
@@ -507,6 +507,23 @@ function SettingsPage() {
             </div>
           </div>
         </section>
+
+        <section className="mt-8 rounded-xl border border-border bg-card p-5 shadow-sm">
+          <h2 className="text-sm font-bold text-foreground">نسخة من بيانات المحل</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            تصدير ملف (CSV) فيه العملاء والأجهزة والمبيعات وعقود التقسيط — يحتاج تأكيد بكلمة سر
+            المالك.
+          </p>
+          <button
+            onClick={() => void handleExport()}
+            disabled={exporting}
+            className="mt-3 rounded-md border border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {exporting ? "جارٍ التجهيز..." : "تحميل نسخة من البيانات"}
+          </button>
+          {exportError && <p className="mt-2 text-sm text-destructive">{exportError}</p>}
+        </section>
+        {passwordDialog}
       </main>
     </div>
   );

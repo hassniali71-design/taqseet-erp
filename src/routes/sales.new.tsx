@@ -38,6 +38,7 @@ function NewSalePage() {
   const [selectedSerialId, setSelectedSerialId] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [discountPct, setDiscountPct] = useState("0");
+  const [returnWindowDays, setReturnWindowDays] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
@@ -142,6 +143,7 @@ function NewSalePage() {
             ...(l.serial_id && { serial_id: l.serial_id }),
           })),
           discount_pct: Number(discountPct) || 0,
+          ...(returnWindowDays && { return_window_days: Number(returnWindowDays) }),
         },
         actorUserId,
         employeeDiscountLimitPct,
@@ -293,20 +295,36 @@ function NewSalePage() {
         </div>
 
         <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
-          <label className="block max-w-xs space-y-1">
-            <span className="text-xs font-medium text-foreground">
-              نسبة الخصم % (الحد الأقصى {employeeDiscountLimitPct}%)
-            </span>
-            <input
-              type="number"
-              min="0"
-              max={employeeDiscountLimitPct}
-              value={discountPct}
-              onChange={(e) => setDiscountPct(e.target.value)}
-              className="form-input"
-              dir="ltr"
-            />
-          </label>
+          <div className="flex flex-wrap items-end gap-4">
+            <label className="block max-w-xs space-y-1">
+              <span className="text-xs font-medium text-foreground">
+                نسبة الخصم % (الحد الأقصى {employeeDiscountLimitPct}%)
+              </span>
+              <input
+                type="number"
+                min="0"
+                max={employeeDiscountLimitPct}
+                value={discountPct}
+                onChange={(e) => setDiscountPct(e.target.value)}
+                className="form-input"
+                dir="ltr"
+              />
+            </label>
+            <label className="block max-w-xs space-y-1">
+              <span className="text-xs font-medium text-foreground">
+                مدة استرجاع/استبدال مخصصة (يوم — اختياري)
+              </span>
+              <input
+                type="number"
+                min="0"
+                value={returnWindowDays}
+                onChange={(e) => setReturnWindowDays(e.target.value)}
+                className="form-input"
+                dir="ltr"
+                placeholder={`افتراضي: ${settings?.return_period_days ?? 14}`}
+              />
+            </label>
+          </div>
 
           <div className="text-left">
             <p className="text-sm text-muted-foreground" dir="ltr">

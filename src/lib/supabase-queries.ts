@@ -119,6 +119,37 @@ export function useAuditLogs(tenantId: string | undefined) {
   });
 }
 
+/** The audit trail has no UPDATE/DELETE RLS policy by design (supabase/migrations/0001) —
+ * these two require supabase/migrations/0013_audit_log_delete.sql to be applied first, which
+ * adds a narrow owner-gated delete policy. Both are only ever reachable behind the UI's
+ * owner-password re-confirmation, on top of that DB-level gate. */
+export function useDeleteAuditLog(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("audit_logs").delete().eq("id", id);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+export function useDeleteAllAuditLogs(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { error } = await supabase.from("audit_logs").delete().eq("tenant_id", tenantId);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
 /* ---------------- Users & Roles (§8-§11) ----------------
  * Creating a user here only ever writes the `users` table row — it deliberately does NOT create
  * a real Supabase Auth account (that stays out of scope for this batch, same call already made
@@ -132,6 +163,40 @@ export function useUsers(tenantId: string | undefined) {
 
 export function useRoles(tenantId: string | undefined) {
   return useTenantList<Role>("roles", tenantId, { orderBy: "name", ascending: true });
+}
+
+const SYSTEM_ROLE_NAMES = [
+  "owner",
+  "manager",
+  "sales",
+  "cashier",
+  "warehouse",
+  "purchasing",
+  "collections",
+  "accountant",
+] as const;
+
+/** No real Supabase tenant has ever had its `roles` table seeded — the 8 baseline system
+ * roles (§9) only ever existed in the dead Mock `data-store.ts` path. Called once from
+ * `/users` whenever `roles` comes back empty, so the role dropdown there (and therefore real
+ * employee-login creation) has something to assign instead of silently having nothing to
+ * pick from. Safe to call more than once: `roles` has a `unique (tenant_id, name)` constraint,
+ * so a second call for a tenant that already has them is a no-op per row. */
+export function useSeedSystemRoles(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { error } = await supabase.from("roles").upsert(
+        SYSTEM_ROLE_NAMES.map((name) => ({ tenant_id: tenantId, name, is_system: true })),
+        { onConflict: "tenant_id,name", ignoreDuplicates: true },
+      );
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["roles", tenantId] });
+    },
+  });
 }
 
 /** user_roles has no tenant_id column — RLS (joined through users.tenant_id) is what actually
@@ -427,6 +492,43 @@ export function useUpdateCustomer(tenantId: string | undefined) {
   });
 }
 
+/** Real permanent delete — gated by owner-password re-confirmation in the UI. Past sales
+ * (`sales.customer_id` is `on delete set null`) keep their amounts/items untouched, just
+ * unlinked from this customer. `installment_contracts.customer_id` is `on delete restrict`,
+ * so Postgres itself refuses the delete while any contract (open or settled) still
+ * references this customer — surfaced here as a clear Arabic message instead of a raw
+ * Postgres error, since that's the "don't break business history" guarantee in practice. */
+export function useDeleteCustomer(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, actorUserId }: { id: string; actorUserId: string | null }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data: before } = await supabase.from("customers").select("*").eq("id", id).single();
+      const { error } = await supabase.from("customers").delete().eq("id", id);
+      if (error) {
+        if (error.code === "23503") {
+          throw new Error(
+            "لا يمكن حذف هذا العميل نهائيًا لأن له عقود تقسيط مرتبطة (حتى لو مسدَّدة) — استخدم زر إيقاف بدلاً من الحذف.",
+          );
+        }
+        throw new Error(error.message);
+      }
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "customer.delete",
+        entity: "customers",
+        entity_id: id,
+        old_value: before,
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["customers", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
 /* ---------------- Guarantors (§15) ---------------- */
 
 export function useGuarantors(tenantId: string | undefined) {
@@ -590,6 +692,37 @@ export function useUpdateProduct(tenantId: string | undefined) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["products", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+/** Real permanent delete — gated by owner-password re-confirmation in the UI. Safe for sale
+ * history: `sales.items`/`installment_contracts.items` store product name/price as a frozen
+ * JSON snapshot at time of sale (no FK to `products`), so past invoices are untouched. Only
+ * `product_serials`/`inventory_movements` cascade-delete with the product (its own stock
+ * ledger, not a sale record) — surfaced to the user as an explicit warning before confirming. */
+export function useDeleteProduct(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, actorUserId }: { id: string; actorUserId: string | null }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data: before } = await supabase.from("products").select("*").eq("id", id).single();
+      const { error } = await supabase.from("products").delete().eq("id", id);
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "product.delete",
+        entity: "products",
+        entity_id: id,
+        old_value: before,
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["products", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["product_serials", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["inventory_movements", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
   });
@@ -1003,6 +1136,7 @@ export interface CreateSaleInput {
   customer_id: string | null;
   items: Array<{ product_id: string; serial_id?: string; quantity: number }>;
   discount_pct: number;
+  return_window_days?: number;
 }
 
 export function useCreateSale(tenantId: string | undefined) {
@@ -1150,6 +1284,7 @@ export function useCreateSale(tenantId: string | undefined) {
           total,
           user_id: actorUserId,
           status: "completed",
+          ...(input.return_window_days && { return_window_days: input.return_window_days }),
         })
         .select()
         .single();
@@ -2796,20 +2931,23 @@ async function performPostJournalEntry(
   return entry as JournalEntry;
 }
 
+/** Looks for an active account of the exact requested kind first, then falls back through
+ * "cashier" → "main" → any active account — so a tenant that only ever created one treasury
+ * (of whatever kind) still gets every sale/collection posted somewhere real instead of the
+ * movement being silently dropped just because it wasn't named/kinded exactly "cashier". */
 async function findAccountIdByKind(
   tenantId: string,
   kind: TreasuryAccount["kind"],
 ): Promise<string | undefined> {
-  const { data, error } = await supabase
+  const { data: accounts, error } = await supabase
     .from("treasury_accounts")
-    .select("id")
+    .select("id, kind")
     .eq("tenant_id", tenantId)
-    .eq("kind", kind)
-    .eq("active", true)
-    .limit(1)
-    .maybeSingle();
-  if (error || !data) return undefined;
-  return data.id as string;
+    .eq("active", true);
+  if (error || !accounts || accounts.length === 0) return undefined;
+  const byKind = (k: TreasuryAccount["kind"]) =>
+    (accounts as { id: string; kind: TreasuryAccount["kind"] }[]).find((a) => a.kind === k)?.id;
+  return byKind(kind) ?? byKind("cashier") ?? byKind("main") ?? accounts[0]?.id;
 }
 
 /** Best-effort: never throws, never blocks the caller's own success — a sale/collection/
@@ -2912,11 +3050,18 @@ export function useCloseShift(tenantId: string | undefined) {
       countedAmount,
       reason,
       actorUserId,
+      allocations,
     }: {
       shiftId: string;
       countedAmount: number;
       reason?: string;
       actorUserId: string | null;
+      /** Optional: split today's counted cash across other treasuries (bank/wallet/cash-in-
+       * hand) right at shift-close time — e.g. "من الـ10 آلاف: 3 محفظة، 4 بنك، 3 كاش". For each
+       * entry this moves that amount OUT of the shift's own account and INTO the destination
+       * account as a paired "transfer" movement, so both balances (and any card summing them)
+       * reflect where the money actually ended up the moment the shift closes. */
+      allocations?: Array<{ accountId: string; amount: number }>;
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
       const { data: shift, error: shiftError } = await supabase
@@ -2938,6 +3083,13 @@ export function useCloseShift(tenantId: string | undefined) {
       const diff = Math.round((countedAmount - expected) * 100) / 100;
       if (diff !== 0 && !reason?.trim()) {
         throw new Error("لازم تكتب سبب الفرق قبل إقفال الوردية");
+      }
+
+      const validAllocations = (allocations ?? []).filter((a) => a.amount > 0);
+      const allocatedTotal =
+        Math.round(validAllocations.reduce((sum, a) => sum + a.amount, 0) * 100) / 100;
+      if (allocatedTotal > countedAmount) {
+        throw new Error("إجمالي التوزيع على الخزائن أكبر من المبلغ المعدود فعليًا");
       }
 
       const { data, error } = await supabase
@@ -2965,10 +3117,47 @@ export function useCloseShift(tenantId: string | undefined) {
         new_value: data,
         ...(reason?.trim() && { reason: reason.trim() }),
       });
+
+      for (const allocation of validAllocations) {
+        try {
+          await performPostTreasuryMovement(
+            tenantId,
+            shift.account_id as string,
+            -allocation.amount,
+            "transfer",
+            actorUserId,
+            `تسليم وردية ${shiftId.slice(0, 8)}`,
+          );
+          await performPostTreasuryMovement(
+            tenantId,
+            allocation.accountId,
+            allocation.amount,
+            "transfer",
+            actorUserId,
+            `تسليم وردية ${shiftId.slice(0, 8)}`,
+          );
+          await insertAuditLog({
+            tenant_id: tenantId,
+            user_id: actorUserId,
+            action: "shift.allocate",
+            entity: "treasury_movements",
+            entity_id: allocation.accountId,
+            new_value: {
+              amount: allocation.amount,
+              from: shift.account_id,
+              to: allocation.accountId,
+            },
+          });
+        } catch (e) {
+          console.warn("فشل توزيع مبلغ من الوردية على خزينة:", e instanceof Error ? e.message : e);
+        }
+      }
+
       return data as Shift;
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["shifts", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["treasury_movements", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
   });
@@ -3831,38 +4020,56 @@ export function useAdvanceDeliveryStatus(tenantId: string | undefined) {
 
 export interface WarrantyInfo {
   product_name: string;
-  serial_number: string;
+  serial_number: string | null;
   customer_name: string;
   sold_at: string;
+  unit_price: number;
   warranty_months: number;
   warranty_end: string;
   active: boolean;
 }
 
 /** On-demand lookup (not a useQuery hook) — triggered by a search button, same pattern data-
- * store.ts's getWarrantyInfo used. `tenantId` is required, not optional, for the same reason
- * documented there: a free-text serial search without it could leak another tenant's data. */
+ * store.ts's getWarrantyInfo used. `tenantId` is required, not optional: a free-text search
+ * without it could leak another tenant's data. General search (not serial-only, since plenty
+ * of devices have `serial_required=false`): matches products by name/code/brand/model *or* by
+ * an exact serial number, then returns one warranty record per matching sold unit found across
+ * cash sales and installment contracts — so the same product sold to several customers, or a
+ * non-serialized device, both come back as a real, distinguishable list instead of a single
+ * (necessarily serial-anchored) result. */
 export async function fetchWarrantyInfo(
   tenantId: string,
-  serialNumberRaw: string,
-): Promise<WarrantyInfo | null> {
-  const serialNumber = serialNumberRaw.trim().toLowerCase();
-  if (!serialNumber) return null;
+  queryRaw: string,
+): Promise<WarrantyInfo[]> {
+  const query = queryRaw.trim();
+  if (!query) return [];
 
-  const { data: serial, error: serialError } = await supabase
-    .from("product_serials")
-    .select("*")
-    .eq("tenant_id", tenantId)
-    .ilike("serial_number", serialNumber)
-    .maybeSingle();
-  if (serialError || !serial) return null;
+  const [{ data: matchedProducts }, { data: matchedSerials }] = await Promise.all([
+    supabase
+      .from("products")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .or(
+        `name.ilike.%${query}%,code.ilike.%${query}%,brand.ilike.%${query}%,model.ilike.%${query}%`,
+      ),
+    supabase
+      .from("product_serials")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .ilike("serial_number", query),
+  ]);
 
-  const { data: product, error: productError } = await supabase
-    .from("products")
-    .select("*")
-    .eq("id", serial.product_id as string)
-    .maybeSingle();
-  if (productError || !product || !product.warranty_months) return null;
+  const productIds = new Set((matchedProducts ?? []).map((p) => p.id as string));
+  for (const s of matchedSerials ?? []) productIds.add(s.product_id as string);
+  if (productIds.size === 0) return [];
+
+  const productsById = new Map((matchedProducts ?? []).map((p) => [p.id as string, p]));
+  const missingProductIds = [...productIds].filter((id) => !productsById.has(id));
+  if (missingProductIds.length > 0) {
+    const { data: extra } = await supabase.from("products").select("*").in("id", missingProductIds);
+    for (const p of extra ?? []) productsById.set(p.id as string, p);
+  }
+  const serialById = new Map((matchedSerials ?? []).map((s) => [s.id as string, s]));
 
   const [{ data: cashSales }, { data: contracts }] = await Promise.all([
     supabase.from("sales").select("created_at, customer_name, items").eq("tenant_id", tenantId),
@@ -3871,26 +4078,33 @@ export async function fetchWarrantyInfo(
       .select("created_at, customer_name, items")
       .eq("tenant_id", tenantId),
   ]);
-  const cashSale = (cashSales ?? []).find((s) =>
-    (s.items as SaleItem[]).some((i) => i.serial_id === serial.id),
-  );
-  const contract = (contracts ?? []).find((c) =>
-    (c.items as SaleItem[]).some((i) => i.serial_id === serial.id),
-  );
-  const soldAt = (cashSale?.created_at ?? contract?.created_at) as string | undefined;
-  const customerName = (cashSale?.customer_name ?? contract?.customer_name) as string | undefined;
-  if (!soldAt || !customerName) return null;
 
-  const warrantyEnd = new Date(soldAt);
-  warrantyEnd.setMonth(warrantyEnd.getMonth() + (product.warranty_months as number));
-
-  return {
-    product_name: product.name as string,
-    serial_number: serial.serial_number as string,
-    customer_name: customerName,
-    sold_at: soldAt,
-    warranty_months: product.warranty_months as number,
-    warranty_end: warrantyEnd.toISOString(),
-    active: new Date() <= warrantyEnd,
-  };
+  const results: WarrantyInfo[] = [];
+  const sources: Array<{ created_at: string; customer_name: string; items: SaleItem[] }> = [
+    ...((cashSales ?? []) as { created_at: string; customer_name: string; items: SaleItem[] }[]),
+    ...((contracts ?? []) as { created_at: string; customer_name: string; items: SaleItem[] }[]),
+  ];
+  for (const source of sources) {
+    for (const item of source.items) {
+      if (!productIds.has(item.product_id)) continue;
+      const product = productsById.get(item.product_id);
+      if (!product || !product.warranty_months) continue;
+      const soldAt = source.created_at;
+      const warrantyEnd = new Date(soldAt);
+      warrantyEnd.setMonth(warrantyEnd.getMonth() + (product.warranty_months as number));
+      results.push({
+        product_name: product.name as string,
+        serial_number: item.serial_id
+          ? (serialById.get(item.serial_id)?.serial_number ?? item.serial_number ?? null)
+          : null,
+        customer_name: source.customer_name,
+        sold_at: soldAt,
+        unit_price: item.unit_price,
+        warranty_months: product.warranty_months as number,
+        warranty_end: warrantyEnd.toISOString(),
+        active: new Date() <= warrantyEnd,
+      });
+    }
+  }
+  return results.sort((a, b) => b.sold_at.localeCompare(a.sold_at));
 }

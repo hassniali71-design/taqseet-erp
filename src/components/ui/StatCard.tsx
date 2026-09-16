@@ -4,14 +4,21 @@ import type { LucideIcon } from "lucide-react";
 import type { CustomerRiskAssessment, CustomerRiskLevel } from "@/lib/data-store";
 import { cn } from "@/lib/utils";
 
-type Tone = "default" | "primary" | "success" | "warning" | "danger";
+type Tone = "default" | "primary" | "success" | "warning" | "danger" | "navy" | "teal";
 
+/** "navy"/"teal" are solid HESBA-brand-colored cards (dark background) instead of the usual
+ * light/white tinted ones — the identity explicitly wants stat/KPI cards to read as colored,
+ * not plain white, with white reserved for simple things. Text colors for these two are
+ * self-contained (TONE_TEXT below), never the shared text-foreground/text-muted-foreground
+ * classes tuned for a light background. */
 const TONE_CARD: Record<Tone, string> = {
   default: "border-border bg-card",
   primary: "border-primary/50 bg-primary/5",
   success: "border-success/40 bg-success/5",
   warning: "border-warning/40 bg-warning/5",
   danger: "border-destructive/40 bg-destructive/5",
+  navy: "border-transparent bg-[#1b2a41]",
+  teal: "border-transparent bg-[#16a3b0]",
 };
 
 const TONE_ICON: Record<Tone, string> = {
@@ -20,6 +27,53 @@ const TONE_ICON: Record<Tone, string> = {
   success: "bg-success text-success-foreground",
   warning: "bg-warning text-warning-foreground",
   danger: "bg-destructive text-destructive-foreground",
+  navy: "bg-[#d4aa17] text-[#111417]",
+  teal: "bg-[#d4aa17] text-[#111417]",
+};
+
+const TONE_TEXT: Record<Tone, { label: string; value: string; sub: string; cta: string }> = {
+  default: {
+    label: "text-muted-foreground",
+    value: "text-foreground",
+    sub: "text-muted-foreground",
+    cta: "text-primary",
+  },
+  primary: {
+    label: "text-muted-foreground",
+    value: "text-foreground",
+    sub: "text-muted-foreground",
+    cta: "text-primary",
+  },
+  success: {
+    label: "text-muted-foreground",
+    value: "text-foreground",
+    sub: "text-muted-foreground",
+    cta: "text-primary",
+  },
+  warning: {
+    label: "text-muted-foreground",
+    value: "text-foreground",
+    sub: "text-muted-foreground",
+    cta: "text-primary",
+  },
+  danger: {
+    label: "text-muted-foreground",
+    value: "text-foreground",
+    sub: "text-muted-foreground",
+    cta: "text-primary",
+  },
+  navy: {
+    label: "text-white/70",
+    value: "text-white",
+    sub: "text-white/70",
+    cta: "text-[#d4aa17]",
+  },
+  teal: {
+    label: "text-[#0d2f34]/70",
+    value: "text-[#0d2f34]",
+    sub: "text-[#0d2f34]/70",
+    cta: "text-[#1b2a41]",
+  },
 };
 
 /** كرت إحصائية بهوية "حسبة": حدود سميكة، أرقام بخط Almarai البارز، شارة أيقونة ملوّنة. */
@@ -38,10 +92,11 @@ export function StatCard({
   tone?: Tone;
   valueDir?: "ltr" | "rtl";
 }) {
+  const text = TONE_TEXT[tone];
   return (
     <div className={cn("rounded-2xl border-2 p-4 shadow-sm", TONE_CARD[tone])}>
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-extrabold text-muted-foreground">{label}</p>
+        <p className={cn("text-xs font-extrabold", text.label)}>{label}</p>
         {Icon && (
           <span
             className={cn(
@@ -54,12 +109,12 @@ export function StatCard({
         )}
       </div>
       <p
-        className="font-stat mt-2 text-2xl font-extrabold text-foreground"
+        className={cn("font-stat mt-2 text-2xl font-extrabold", text.value)}
         {...(valueDir && { dir: valueDir })}
       >
         {value}
       </p>
-      {sub && <p className="mt-1 text-xs font-bold text-muted-foreground">{sub}</p>}
+      {sub && <p className={cn("mt-1 text-xs font-bold", text.sub)}>{sub}</p>}
     </div>
   );
 }
@@ -111,6 +166,7 @@ export function LinkCard({
   tone?: Tone;
   valueDir?: "ltr" | "rtl";
 }) {
+  const text = TONE_TEXT[tone];
   return (
     <div
       className={cn(
@@ -119,7 +175,7 @@ export function LinkCard({
       )}
     >
       <div className="flex items-center justify-between">
-        <p className="text-sm font-bold text-muted-foreground">{label}</p>
+        <p className={cn("text-sm font-bold", text.label)}>{label}</p>
         {Icon && (
           <span
             className={cn(
@@ -132,13 +188,13 @@ export function LinkCard({
         )}
       </div>
       <p
-        className="font-stat mt-2 text-3xl font-extrabold text-foreground"
+        className={cn("font-stat mt-2 text-3xl font-extrabold", text.value)}
         {...(valueDir && { dir: valueDir })}
       >
         {value}
       </p>
-      {sub && <p className="mt-1 text-xs font-bold text-muted-foreground">{sub}</p>}
-      <p className="mt-2 text-xs font-extrabold text-primary">{cta}</p>
+      {sub && <p className={cn("mt-1 text-xs font-bold", text.sub)}>{sub}</p>}
+      <p className={cn("mt-2 text-xs font-extrabold", text.cta)}>{cta}</p>
     </div>
   );
 }

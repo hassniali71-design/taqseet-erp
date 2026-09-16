@@ -1,14 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import {
-  useCreateUserRecord,
   useRoles,
+  useSeedSystemRoles,
   useSetUserActive,
   useUserRoles,
   useUsers,
 } from "@/lib/supabase-queries";
+import { createTenantUserWithAuth } from "@/lib/user-provisioning-server";
 import { useRequireSession } from "@/hooks/use-session";
 import type { User } from "@/types";
 
@@ -19,22 +21,48 @@ export const Route = createFileRoute("/users")({
 type FormState = {
   full_name: string;
   email: string;
+  password: string;
   role_id: string;
 };
 
-const EMPTY_FORM: FormState = { full_name: "", email: "", role_id: "" };
+const EMPTY_FORM: FormState = { full_name: "", email: "", password: "", role_id: "" };
 
 function UsersPage() {
   const session = useRequireSession();
+  const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [error, setError] = useState<string | null>(null);
 
-  const { data: roles = [] } = useRoles(session?.tenant_id);
+  const { data: roles = [], isLoading: rolesLoading } = useRoles(session?.tenant_id);
   const { data: users = [] } = useUsers(session?.tenant_id);
   const { data: userRoles = [] } = useUserRoles(session?.tenant_id);
-  const createUserMutation = useCreateUserRecord(session?.tenant_id);
   const setUserActiveMutation = useSetUserActive(session?.tenant_id);
+  const seedRolesMutation = useSeedSystemRoles(session?.tenant_id);
+
+  useEffect(() => {
+    if (!rolesLoading && roles.length === 0 && session?.tenant_id) {
+      seedRolesMutation.mutate();
+    }
+    // Only re-check when the roles list itself changes — seedRolesMutation is a fresh object
+    // every render and must not retrigger this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rolesLoading, roles.length, session?.tenant_id]);
+  const createUserMutation = useMutation({
+    mutationFn: (vars: {
+      tenantId: string;
+      fullName: string;
+      email: string;
+      password: string;
+      roleId?: string;
+      actorUserId: string | null;
+    }) => createTenantUserWithAuth({ data: vars }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["users", session?.tenant_id] });
+      void queryClient.invalidateQueries({ queryKey: ["user_roles", session?.tenant_id] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", session?.tenant_id] });
+    },
+  });
 
   if (!session) return null;
   const actorUserId = session.user_id;
@@ -50,18 +78,19 @@ function UsersPage() {
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    if (!session) return;
     createUserMutation.mutate(
       {
-        input: {
-          full_name: form.full_name.trim(),
-          email: form.email.trim(),
-          ...(form.role_id && { roleId: form.role_id }),
-        },
+        tenantId: session.tenant_id,
+        fullName: form.full_name.trim(),
+        email: form.email.trim(),
+        password: form.password,
+        ...(form.role_id && { roleId: form.role_id }),
         actorUserId,
       },
       {
         onSuccess: () => {
-          setForm({ full_name: "", email: "", role_id: roles[0]?.id ?? "" });
+          setForm({ full_name: "", email: "", password: "", role_id: roles[0]?.id ?? "" });
           setShowForm(false);
         },
         onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
@@ -100,8 +129,8 @@ function UsersPage() {
           >
             <h2 className="text-sm font-bold text-foreground">مستخدم جديد</h2>
             <p className="text-xs text-muted-foreground">
-              بيتسجل سجل الموظف والدور فورًا، لكن من غير حساب دخول حقيقي بعد (نفس قيد عميل منصة جديد
-              من /platform) — تفعيل الدخول الفعلي خطوة منفصلة لاحقة.
+              بيتم إنشاء حساب دخول حقيقي فورًا بالبريد وكلمة السر دول — الموظف يقدر يدخل من صفحة
+              تسجيل الدخول مباشرة بصلاحيات دوره المحدد تحت.
             </p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="الاسم *">
@@ -120,6 +149,18 @@ function UsersPage() {
                   onChange={(e) => setForm({ ...form, email: e.target.value })}
                   className="form-input"
                   dir="ltr"
+                />
+              </Field>
+              <Field label="كلمة السر *">
+                <input
+                  required
+                  minLength={6}
+                  type="text"
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  className="form-input"
+                  dir="ltr"
+                  placeholder="6 أحرف على الأقل"
                 />
               </Field>
               <Field label="الدور">

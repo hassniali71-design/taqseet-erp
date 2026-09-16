@@ -9,6 +9,7 @@ import {
   useCreateCustomer,
   useCurrentTenantSettings,
   useCustomers,
+  useDeleteCustomer,
   useInstallmentContracts,
   useInstallmentPayments,
   useInstallments,
@@ -16,6 +17,7 @@ import {
   useSales,
   useUpdateCustomer,
 } from "@/lib/supabase-queries";
+import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
 import type { Customer } from "@/types";
 
@@ -55,6 +57,9 @@ function CustomersPage() {
   const { data: sales = [] } = useSales(session?.tenant_id);
   const createCustomerMutation = useCreateCustomer(session?.tenant_id);
   const updateCustomerMutation = useUpdateCustomer(session?.tenant_id);
+  const deleteCustomerMutation = useDeleteCustomer(session?.tenant_id);
+  const { requestConfirm, dialog: passwordDialog } = useOwnerPasswordConfirm();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   if (!session) return null;
   const gracePeriodDays = settingsData?.grace_period_days ?? 3;
@@ -104,6 +109,24 @@ function CustomersPage() {
       patch: { status: customer.status === "active" ? "inactive" : "active" },
       actorUserId,
     });
+  }
+
+  async function handleDelete(customer: Customer) {
+    setDeleteError(null);
+    if (
+      !window.confirm(
+        `حذف "${customer.name}" نهائيًا؟ فواتير البيع القديمة بتاعته هتفضل محفوظة برقمها ومبلغها بدون ما تتأثر، بس هتبقى بدون اسم عميل مرتبط.`,
+      )
+    ) {
+      return;
+    }
+    const confirmed = await requestConfirm();
+    if (!confirmed) return;
+    try {
+      await deleteCustomerMutation.mutateAsync({ id: customer.id, actorUserId });
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : "حدث خطأ أثناء الحذف");
+    }
   }
 
   return (
@@ -291,9 +314,15 @@ function CustomersPage() {
                       </button>
                       <button
                         onClick={() => toggleStatus(customer)}
-                        className="text-xs font-medium text-muted-foreground hover:underline"
+                        className="ml-2 text-xs font-medium text-muted-foreground hover:underline"
                       >
                         {customer.status === "active" ? "إيقاف" : "تفعيل"}
+                      </button>
+                      <button
+                        onClick={() => void handleDelete(customer)}
+                        className="text-xs font-medium text-destructive hover:underline"
+                      >
+                        حذف
                       </button>
                     </td>
                   </tr>
@@ -309,6 +338,8 @@ function CustomersPage() {
             </tbody>
           </table>
         </div>
+        {deleteError && <p className="mt-2 text-sm text-destructive">{deleteError}</p>}
+        {passwordDialog}
       </main>
     </div>
   );

@@ -1,7 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
-import { useAuditLogs, useUsers } from "@/lib/supabase-queries";
+import {
+  useAuditLogs,
+  useDeleteAllAuditLogs,
+  useDeleteAuditLog,
+  useUsers,
+} from "@/lib/supabase-queries";
+import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/audit")({
@@ -13,6 +20,7 @@ const ACTION_LABELS: Record<string, string> = {
   "tenant.status_change": "تغيير حالة اشتراك",
   "tenant_settings.update": "تعديل الإعدادات",
   "user.create": "إنشاء مستخدم",
+  "user.create_with_login": "إنشاء مستخدم بحساب دخول حقيقي",
   "user.status_change": "تغيير حالة مستخدم",
   "user_role.assign": "إسناد دور",
   "user_role.set": "تغيير دور",
@@ -48,6 +56,7 @@ const ACTION_LABELS: Record<string, string> = {
   "treasury_account.update": "تعديل خزينة",
   "shift.open": "فتح وردية",
   "shift.close": "قفل وردية",
+  "shift.allocate": "توزيع نقدية الوردية على خزينة",
   "expense.record": "تسجيل مصروف",
   "expense.approve": "اعتماد مصروف",
 };
@@ -56,6 +65,10 @@ function AuditPage() {
   const session = useRequireSession();
   const { data: logs = [], isLoading, error } = useAuditLogs(session?.tenant_id);
   const { data: users = [] } = useUsers(session?.tenant_id);
+  const deleteLogMutation = useDeleteAuditLog(session?.tenant_id);
+  const deleteAllMutation = useDeleteAllAuditLogs(session?.tenant_id);
+  const { requestConfirm, dialog: passwordDialog } = useOwnerPasswordConfirm();
+  const [actionError, setActionError] = useState<string | null>(null);
 
   if (!session) return null;
 
@@ -64,14 +77,52 @@ function AuditPage() {
     return users.find((u) => u.id === userId)?.full_name ?? userId;
   }
 
+  async function handleDeleteOne(id: string) {
+    setActionError(null);
+    if (!window.confirm("حذف هذا السطر من سجل العمليات نهائيًا؟")) return;
+    const confirmed = await requestConfirm();
+    if (!confirmed) return;
+    try {
+      await deleteLogMutation.mutateAsync(id);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "حدث خطأ أثناء الحذف");
+    }
+  }
+
+  async function handleDeleteAll() {
+    setActionError(null);
+    if (!window.confirm("حذف كل سجل العمليات نهائيًا؟ ده مش بيؤثر على أي بيانات تشغيلية.")) return;
+    const confirmed = await requestConfirm();
+    if (!confirmed) return;
+    try {
+      await deleteAllMutation.mutateAsync();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "حدث خطأ أثناء الحذف");
+    }
+  }
+
   return (
     <div className="flex min-h-screen bg-background">
       <AppSidebar session={session} />
       <main className="flex-1 mx-auto max-w-5xl px-4 py-8">
-        <h1 className="text-2xl font-bold text-foreground">سجل العمليات (Audit Log)</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          سجل غير قابل للتعديل أو الحذف — كل عملية حساسة في النظام تُسجَّل هنا تلقائيًا (§12).
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">سجل العمليات (Audit Log)</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              كل عملية حساسة في النظام تُسجَّل هنا تلقائيًا (§12). الحذف هنا لا يؤثر على أي عملية
+              تشغيلية — فقط سجل المراجعة نفسه.
+            </p>
+          </div>
+          {logs.length > 0 && (
+            <button
+              onClick={() => void handleDeleteAll()}
+              className="whitespace-nowrap rounded-md border border-destructive/40 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/10"
+            >
+              حذف الكل
+            </button>
+          )}
+        </div>
+        {actionError && <p className="mt-2 text-sm text-destructive">{actionError}</p>}
 
         {error && (
           <p className="mt-4 text-sm text-destructive">
@@ -89,6 +140,7 @@ function AuditPage() {
                 <th className="px-4 py-3 font-medium">الكيان</th>
                 <th className="px-4 py-3 font-medium">بواسطة</th>
                 <th className="px-4 py-3 font-medium">السبب</th>
+                <th className="px-4 py-3 font-medium"></th>
               </tr>
             </thead>
             <tbody>
@@ -109,11 +161,19 @@ function AuditPage() {
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{userName(log.user_id)}</td>
                   <td className="px-4 py-3 text-muted-foreground">{log.reason ?? "—"}</td>
+                  <td className="px-4 py-3 text-left">
+                    <button
+                      onClick={() => void handleDeleteOne(log.id)}
+                      className="text-xs font-medium text-destructive hover:underline"
+                    >
+                      حذف
+                    </button>
+                  </td>
                 </tr>
               ))}
               {logs.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">
+                  <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
                     لا توجد عمليات مسجّلة بعد.
                   </td>
                 </tr>
@@ -121,6 +181,7 @@ function AuditPage() {
             </tbody>
           </table>
         </div>
+        {passwordDialog}
       </main>
     </div>
   );

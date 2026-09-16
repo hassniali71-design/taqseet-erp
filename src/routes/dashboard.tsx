@@ -151,7 +151,7 @@ function DashboardPage() {
               value={`${todaySalesTotal.toLocaleString("ar-EG")} ج.م`}
               cta="عرض تقرير المبيعات ←"
               icon={Wallet}
-              tone="primary"
+              tone="navy"
               valueDir="ltr"
             />
           </Link>
@@ -161,6 +161,7 @@ function DashboardPage() {
               value={`${dueTodayAmount.toLocaleString("ar-EG")} ج.م`}
               cta="فتح التحصيل ←"
               icon={Clock}
+              tone="teal"
               valueDir="ltr"
             />
           </Link>
@@ -170,7 +171,7 @@ function DashboardPage() {
               value={`${overdueAmount.toLocaleString("ar-EG")} ج.م`}
               cta="فتح التحصيل ←"
               icon={AlertTriangle}
-              tone={overdueCount > 0 ? "danger" : "primary"}
+              tone={overdueCount > 0 ? "danger" : "navy"}
               valueDir="ltr"
               {...(overdueCount > 0 && { sub: `${overdueCount} قسط متأخر` })}
             />
@@ -181,6 +182,7 @@ function DashboardPage() {
               value={`${cashierBalance.toLocaleString("ar-EG")} ج.م`}
               cta="فتح الخزينة ←"
               icon={Landmark}
+              tone="teal"
               valueDir="ltr"
             />
           </Link>
@@ -190,6 +192,7 @@ function DashboardPage() {
               value={String(sales.length)}
               cta="عرض تقرير المبيعات ←"
               icon={ReceiptText}
+              tone="navy"
             />
           </Link>
           <Link to="/customers">
@@ -198,6 +201,7 @@ function DashboardPage() {
               value={String(customers.length)}
               cta="إدارة العملاء ←"
               icon={Users}
+              tone="teal"
             />
           </Link>
           <Link to="/collections">
@@ -206,6 +210,7 @@ function DashboardPage() {
               value={String(contracts.length)}
               cta="فتح التحصيل ←"
               icon={Percent}
+              tone="navy"
             />
           </Link>
           <Link to="/products">
@@ -214,7 +219,7 @@ function DashboardPage() {
               value={String(lowStockProducts.length)}
               cta="إدارة الأجهزة ←"
               icon={PackageX}
-              tone={lowStockProducts.length > 0 ? "danger" : "primary"}
+              tone={lowStockProducts.length > 0 ? "danger" : "teal"}
             />
           </Link>
           <Link to="/deliveries">
@@ -223,6 +228,7 @@ function DashboardPage() {
               value={String(pendingDeliveries)}
               cta="فتح التوصيل ←"
               icon={Truck}
+              tone="navy"
             />
           </Link>
         </div>

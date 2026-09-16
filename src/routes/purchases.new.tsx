@@ -41,6 +41,8 @@ function NewPurchasePage() {
   const [newProductName, setNewProductName] = useState("");
   const [newProductCash, setNewProductCash] = useState("");
   const [newProductInstallment, setNewProductInstallment] = useState("");
+  const [newProductBrand, setNewProductBrand] = useState("");
+  const [newProductWarrantyMonths, setNewProductWarrantyMonths] = useState("");
   const [newProductSerialRequired, setNewProductSerialRequired] = useState(false);
   const [newProductError, setNewProductError] = useState<string | null>(null);
 
@@ -139,6 +141,10 @@ function NewPurchasePage() {
           min_stock: 0,
           max_stock: 0,
           serial_required: newProductSerialRequired,
+          ...(newProductBrand.trim() && { brand: newProductBrand.trim() }),
+          ...(newProductWarrantyMonths && {
+            warranty_months: Number(newProductWarrantyMonths) || 0,
+          }),
         },
         actorUserId,
       });
@@ -148,6 +154,8 @@ function NewPurchasePage() {
       setNewProductName("");
       setNewProductCash("");
       setNewProductInstallment("");
+      setNewProductBrand("");
+      setNewProductWarrantyMonths("");
       setNewProductSerialRequired(false);
     } catch (e) {
       setNewProductError(e instanceof Error ? e.message : "حدث خطأ");
@@ -318,6 +326,27 @@ function NewPurchasePage() {
                     min="0"
                     value={newProductInstallment}
                     onChange={(e) => setNewProductInstallment(e.target.value)}
+                    className="form-input"
+                    dir="ltr"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">الماركة (اختياري)</span>
+                  <input
+                    value={newProductBrand}
+                    onChange={(e) => setNewProductBrand(e.target.value)}
+                    className="form-input"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">
+                    الضمان بالشهور (اختياري)
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={newProductWarrantyMonths}
+                    onChange={(e) => setNewProductWarrantyMonths(e.target.value)}
                     className="form-input"
                     dir="ltr"
                   />

@@ -90,36 +90,38 @@ function PurchaseReceiptPage() {
             </div>
           )}
 
-          <table className="mt-4 w-full text-right text-sm">
-            <thead className="border-b border-border text-xs text-muted-foreground">
-              <tr>
-                <th className="py-2 font-medium">الصنف</th>
-                <th className="py-2 font-medium">السيريالات</th>
-                <th className="py-2 font-medium">الكمية</th>
-                <th className="py-2 font-medium">سعر التكلفة</th>
-                <th className="py-2 font-medium">الإجمالي</th>
-              </tr>
-            </thead>
-            <tbody>
-              {purchase.items.map((item, i) => (
-                <tr key={i} className="border-b border-border last:border-0">
-                  <td className="py-2 font-medium text-foreground">{item.product_name}</td>
-                  <td className="py-2 text-muted-foreground" dir="ltr">
-                    {item.serial_numbers.length > 0 ? item.serial_numbers.join(", ") : "—"}
-                  </td>
-                  <td className="py-2 text-muted-foreground" dir="ltr">
-                    {item.quantity}
-                  </td>
-                  <td className="py-2 text-muted-foreground" dir="ltr">
-                    {item.unit_cost.toLocaleString("ar-EG")}
-                  </td>
-                  <td className="py-2 font-medium text-foreground" dir="ltr">
-                    {item.line_total.toLocaleString("ar-EG")}
-                  </td>
+          <div className="mt-4 max-h-[26rem] overflow-y-auto overflow-x-auto">
+            <table className="w-full text-right text-sm">
+              <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
+                <tr>
+                  <th className="py-2 font-medium">الصنف</th>
+                  <th className="py-2 font-medium">السيريالات</th>
+                  <th className="py-2 font-medium">الكمية</th>
+                  <th className="py-2 font-medium">سعر التكلفة</th>
+                  <th className="py-2 font-medium">الإجمالي</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {purchase.items.map((item, i) => (
+                  <tr key={i} className="border-b border-border last:border-0">
+                    <td className="py-2 font-medium text-foreground">{item.product_name}</td>
+                    <td className="py-2 text-muted-foreground" dir="ltr">
+                      {item.serial_numbers.length > 0 ? item.serial_numbers.join(", ") : "—"}
+                    </td>
+                    <td className="py-2 text-muted-foreground" dir="ltr">
+                      {item.quantity}
+                    </td>
+                    <td className="py-2 text-muted-foreground" dir="ltr">
+                      {item.unit_cost.toLocaleString("ar-EG")}
+                    </td>
+                    <td className="py-2 font-medium text-foreground" dir="ltr">
+                      {item.line_total.toLocaleString("ar-EG")}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           <div className="mt-4 border-t border-border pt-4 text-left">
             <p className="text-xl font-bold text-foreground" dir="ltr">

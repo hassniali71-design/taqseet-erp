@@ -57,6 +57,7 @@ function SaleReceiptPage() {
 
   const saleId = sale.id;
   const saleItems = sale.items;
+  const saleReturnWindowDays = sale.return_window_days;
   const returns = allReturns
     .filter((r) => r.sale_id === saleId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -100,7 +101,7 @@ function SaleReceiptPage() {
       {
         input: { sale_id: saleId, items, reason: returnReason },
         actorUserId,
-        returnPeriodDays: settings?.return_period_days ?? 14,
+        returnPeriodDays: saleReturnWindowDays ?? settings?.return_period_days ?? 14,
       },
       {
         onSuccess: () => {
@@ -222,6 +223,11 @@ function SaleReceiptPage() {
                 {sale.invoice_number}
               </p>
               <p className="text-xs text-muted-foreground">{sale.customer_name}</p>
+              {sale.return_window_days !== undefined && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  فترة الاسترجاع/الاستبدال: {sale.return_window_days} يوم
+                </p>
+              )}
             </div>
           </div>
 

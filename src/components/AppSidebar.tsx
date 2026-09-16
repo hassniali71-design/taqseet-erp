@@ -133,11 +133,16 @@ export function AppSidebar({ session }: { session: Session }) {
                     className={cn(
                       "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-bold transition-colors",
                       active
-                        ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                        ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-[0_0_12px_2px_rgba(212,170,23,0.55)]"
                         : "text-sidebar-foreground/85 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                     )}
                   >
-                    <Icon className="h-4 w-4 shrink-0" />
+                    <Icon
+                      className={cn(
+                        "h-4 w-4 shrink-0",
+                        active && "drop-shadow-[0_0_4px_rgba(255,255,255,0.7)]",
+                      )}
+                    />
                     {item.label}
                   </Link>
                 );
