@@ -151,7 +151,7 @@
   border-radius: var(--radius-md);
   border-width: 1px;
   border-color: var(--color-input);
-  background-color: var(--color-background);
+  background-color: var(--color-card);
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
   color: var(--color-foreground);
