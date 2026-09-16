@@ -56,7 +56,7 @@ function PlatformLoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-sm text-sidebar-foreground outline-none focus:ring-2 focus:ring-ring"
-                placeholder="platform@hesba.local"
+                placeholder="example@email.com"
                 dir="ltr"
               />
             </div>
@@ -86,10 +86,6 @@ function PlatformLoginPage() {
               دخول
             </button>
           </form>
-
-          <div className="mt-6 rounded-md border border-sidebar-border bg-sidebar/60 p-3 text-xs font-bold text-sidebar-foreground/70">
-            بيانات تجريبية: platform@hesba.local / hesba123
-          </div>
         </div>
 
         <p className="mt-4 text-center text-xs font-bold text-sidebar-foreground/60">

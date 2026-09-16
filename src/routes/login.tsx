@@ -42,11 +42,7 @@ function LoginPage() {
         </div>
 
         <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
-          <h2 className="text-base font-bold text-foreground">تسجيل دخول العملاء</h2>
-          <p className="mt-1 text-xs font-bold text-muted-foreground">
-            تسجيل الدخول حقيقي (Supabase Auth) — باقي بيانات المحل لسه في مرحلة الربط الكامل بقاعدة
-            البيانات.
-          </p>
+          <h2 className="text-base font-bold text-foreground">تسجيل الدخول</h2>
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             <div className="space-y-1.5">
@@ -60,7 +56,7 @@ function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
-                placeholder="owner@demo.local"
+                placeholder="example@email.com"
                 dir="ltr"
               />
             </div>
@@ -90,13 +86,6 @@ function LoginPage() {
               دخول
             </button>
           </form>
-
-          <div className="mt-6 rounded-md bg-muted p-3 text-xs text-muted-foreground">
-            <p className="font-medium text-foreground">بيانات تجريبية:</p>
-            <p dir="ltr" className="mt-1 text-left">
-              owner@demo.local / owner123
-            </p>
-          </div>
         </div>
 
         <p className="mt-4 text-center text-xs font-bold text-muted-foreground">
