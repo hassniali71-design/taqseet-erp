@@ -137,6 +137,7 @@ function ReportsPage() {
 
 function SalesReport({ from, to, tenantId }: { from: number; to: number; tenantId: string }) {
   const { data: allSales = [] } = useSales(tenantId);
+  const { data: allContracts = [] } = useInstallmentContracts(tenantId);
   const [chartMonth, setChartMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const sales = allSales
     .filter((s) => {
@@ -145,6 +146,10 @@ function SalesReport({ from, to, tenantId }: { from: number; to: number; tenantI
     })
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const total = sales.reduce((sum, s) => sum + (s.total ?? 0), 0);
+  const contractsInRange = allContracts.filter((c) => {
+    const t = new Date(c.created_at).getTime();
+    return t >= from && t <= to;
+  });
 
   const [chartYear, chartMonthIndex] = chartMonth.split("-").map(Number) as [number, number];
   const daysInMonth = new Date(chartYear, chartMonthIndex, 0).getDate();
@@ -196,7 +201,13 @@ function SalesReport({ from, to, tenantId }: { from: number; to: number; tenantI
       </Panel>
 
       <p className="mt-6 text-sm text-muted-foreground">
-        عدد الفواتير: {sales.length} — الإجمالي:{" "}
+        فواتير البيع النقدي: <span className="font-bold text-foreground">{sales.length}</span> —
+        عقود التقسيط في نفس الفترة:{" "}
+        <span className="font-bold text-foreground">{contractsInRange.length}</span> (تفاصيلها في
+        تاب "عقود التقسيط")
+      </p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        إجمالي المبيعات النقدية:{" "}
         <span className="font-bold text-foreground" dir="ltr">
           {total.toLocaleString("ar-EG")} ج.م
         </span>

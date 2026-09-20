@@ -223,8 +223,9 @@ function DashboardPage() {
           </Link>
           <Link to="/reports">
             <LinkCard
-              label="إجمالي عدد الفواتير"
-              value={String(sales.length)}
+              label="فواتير كاش / عقود تقسيط"
+              value={`${sales.length} كاش`}
+              sub={`${contractsAll.length} عقد تقسيط`}
               cta="عرض تقرير المبيعات ←"
               icon={ReceiptText}
               tone="navy"
