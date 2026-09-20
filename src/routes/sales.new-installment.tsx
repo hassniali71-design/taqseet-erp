@@ -50,6 +50,7 @@ function NewInstallmentSalePage() {
   const [selectedProductId, setSelectedProductId] = useState("");
   const [selectedSerialId, setSelectedSerialId] = useState("");
   const [quantity, setQuantity] = useState("1");
+  const [unitPriceOverride, setUnitPriceOverride] = useState("");
   const [downPayment, setDownPayment] = useState("0");
   const [planId, setPlanId] = useState("");
   const [customPlan, setCustomPlan] = useState(false);
@@ -112,6 +113,11 @@ function NewInstallmentSalePage() {
       setError("اختر جهاز أولًا");
       return;
     }
+    const unitPrice = Number(unitPriceOverride) || selectedProduct.installment_price;
+    if (unitPrice <= 0) {
+      setError("السعر لازم يكون أكبر من صفر");
+      return;
+    }
     if (selectedProduct.serial_required) {
       if (!selectedSerialId) {
         setError("اختر سيريال");
@@ -130,7 +136,7 @@ function NewInstallmentSalePage() {
           serial_number: serial.serial_number,
           product_name: selectedProduct.name,
           quantity: 1,
-          unit_price: selectedProduct.installment_price,
+          unit_price: unitPrice,
         },
       ]);
       setSelectedSerialId("");
@@ -146,12 +152,13 @@ function NewInstallmentSalePage() {
           product_id: selectedProduct.id,
           product_name: selectedProduct.name,
           quantity: qty,
-          unit_price: selectedProduct.installment_price,
+          unit_price: unitPrice,
         },
       ]);
       setQuantity("1");
     }
     setSelectedProductId("");
+    setUnitPriceOverride("");
   }
 
   function removeLine(index: number) {
@@ -190,6 +197,7 @@ function NewInstallmentSalePage() {
           items: cart.map((l) => ({
             product_id: l.product_id,
             quantity: l.quantity,
+            unit_price: l.unit_price,
             ...(l.serial_id && { serial_id: l.serial_id }),
           })),
           down_payment: downPaymentNum,
@@ -297,7 +305,7 @@ function NewInstallmentSalePage() {
 
         <div className="mt-6 rounded-xl border border-border bg-card p-5 shadow-sm">
           <h2 className="text-sm font-bold text-foreground">إضافة صنف (سعر التقسيط)</h2>
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-5">
             <label className="block space-y-1 sm:col-span-2">
               <span className="text-xs font-medium text-foreground">الجهاز</span>
               <SearchPicker
@@ -306,6 +314,8 @@ function NewInstallmentSalePage() {
                 onChange={(id) => {
                   setSelectedProductId(id);
                   setSelectedSerialId("");
+                  const product = products.find((p) => p.id === id);
+                  setUnitPriceOverride(product ? String(product.installment_price) : "");
                 }}
                 placeholder="بحث باسم الجهاز..."
               />
@@ -341,6 +351,19 @@ function NewInstallmentSalePage() {
               </label>
             )}
 
+            <label className="block space-y-1">
+              <span className="text-xs font-medium text-foreground">سعر البيع</span>
+              <input
+                type="number"
+                min="0"
+                value={unitPriceOverride}
+                onChange={(e) => setUnitPriceOverride(e.target.value)}
+                placeholder={selectedProduct ? String(selectedProduct.installment_price) : ""}
+                className="form-input"
+                dir="ltr"
+              />
+            </label>
+
             <div className="flex items-end">
               <button
                 onClick={addLine}
@@ -351,6 +374,9 @@ function NewInstallmentSalePage() {
               </button>
             </div>
           </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            سعر التقسيط الأساسي المسجّل على الجهاز معروض كمبدئي — تقدر تغيّره براحتك وقت البيع.
+          </p>
         </div>
 
         {error && <p className="mt-3 text-sm text-destructive">{error}</p>}

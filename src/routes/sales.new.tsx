@@ -44,6 +44,7 @@ function NewSalePage() {
   const [selectedProductId, setSelectedProductId] = useState("");
   const [selectedSerialId, setSelectedSerialId] = useState("");
   const [quantity, setQuantity] = useState("1");
+  const [unitPriceOverride, setUnitPriceOverride] = useState("");
   const [discountPct, setDiscountPct] = useState("0");
   const [returnWindowDays, setReturnWindowDays] = useState("");
   const [saleDate, setSaleDate] = useState("");
@@ -93,6 +94,11 @@ function NewSalePage() {
       setError("اختر جهاز أولًا");
       return;
     }
+    const unitPrice = Number(unitPriceOverride) || selectedProduct.cash_price;
+    if (unitPrice <= 0) {
+      setError("السعر لازم يكون أكبر من صفر");
+      return;
+    }
     if (selectedProduct.serial_required) {
       if (!selectedSerialId) {
         setError("اختر سيريال");
@@ -111,7 +117,7 @@ function NewSalePage() {
           serial_number: serial.serial_number,
           product_name: selectedProduct.name,
           quantity: 1,
-          unit_price: selectedProduct.cash_price,
+          unit_price: unitPrice,
         },
       ]);
       setSelectedSerialId("");
@@ -127,12 +133,13 @@ function NewSalePage() {
           product_id: selectedProduct.id,
           product_name: selectedProduct.name,
           quantity: qty,
-          unit_price: selectedProduct.cash_price,
+          unit_price: unitPrice,
         },
       ]);
       setQuantity("1");
     }
     setSelectedProductId("");
+    setUnitPriceOverride("");
   }
 
   function removeLine(index: number) {
@@ -159,6 +166,7 @@ function NewSalePage() {
           items: cart.map((l) => ({
             product_id: l.product_id,
             quantity: l.quantity,
+            unit_price: l.unit_price,
             ...(l.serial_id && { serial_id: l.serial_id }),
           })),
           discount_pct: Number(discountPct) || 0,
@@ -223,7 +231,7 @@ function NewSalePage() {
 
         <div className="mt-6 rounded-xl border border-border bg-card p-5 shadow-sm">
           <h2 className="text-sm font-bold text-foreground">إضافة صنف</h2>
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-5">
             <label className="block space-y-1 sm:col-span-2">
               <span className="text-xs font-medium text-foreground">الجهاز</span>
               <SearchPicker
@@ -232,6 +240,8 @@ function NewSalePage() {
                 onChange={(id) => {
                   setSelectedProductId(id);
                   setSelectedSerialId("");
+                  const product = products.find((p) => p.id === id);
+                  setUnitPriceOverride(product ? String(product.cash_price) : "");
                 }}
                 placeholder="بحث باسم الجهاز..."
               />
@@ -267,6 +277,19 @@ function NewSalePage() {
               </label>
             )}
 
+            <label className="block space-y-1">
+              <span className="text-xs font-medium text-foreground">سعر البيع</span>
+              <input
+                type="number"
+                min="0"
+                value={unitPriceOverride}
+                onChange={(e) => setUnitPriceOverride(e.target.value)}
+                placeholder={selectedProduct ? String(selectedProduct.cash_price) : ""}
+                className="form-input"
+                dir="ltr"
+              />
+            </label>
+
             <div className="flex items-end">
               <button
                 onClick={addLine}
@@ -277,6 +300,9 @@ function NewSalePage() {
               </button>
             </div>
           </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            السعر الأساسي المسجّل على الجهاز معروض كمبدئي — تقدر تغيّره براحتك وقت البيع.
+          </p>
         </div>
 
         {error && <p className="mt-3 text-sm text-destructive">{error}</p>}

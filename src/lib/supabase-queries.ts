@@ -1166,7 +1166,9 @@ async function nextInvoiceNumber(tenantId: string) {
 
 export interface CreateSaleInput {
   customer_id: string | null;
-  items: Array<{ product_id: string; serial_id?: string; quantity: number }>;
+  /** unit_price اختياري — البائع يقدر يغيّر سعر بيع الصنف وقت البيع نفسه (بيتجاهل السعر
+   * المسجّل على المنتج)، بدل ما يفضل مقفول على السعر اللي اتسجل وقت إضافة المنتج. */
+  items: Array<{ product_id: string; serial_id?: string; quantity: number; unit_price?: number }>;
   discount_pct: number;
   return_window_days?: number;
 }
@@ -1262,14 +1264,15 @@ export function useCreateSale(tenantId: string | undefined) {
             throw new Error(`السيريال "${serial.serial_number as string}" غير متاح للبيع`);
           }
           soldSerialIds.add(serial.id as string);
+          const unitPrice = line.unit_price ?? product.cash_price;
           saleItems.push({
             product_id: product.id,
             product_name: product.name,
             serial_id: serial.id as string,
             serial_number: serial.serial_number as string,
             quantity: 1,
-            unit_price: product.cash_price,
-            line_total: product.cash_price,
+            unit_price: unitPrice,
+            line_total: unitPrice,
           });
           stockTracker.set(product.id, stock - 1);
           movementDrafts.push({
@@ -1283,12 +1286,13 @@ export function useCreateSale(tenantId: string | undefined) {
           if (line.quantity > stock) {
             throw new Error(`المخزون غير كافٍ للمنتج "${product.name}" (متاح ${stock})`);
           }
+          const unitPrice = line.unit_price ?? product.cash_price;
           saleItems.push({
             product_id: product.id,
             product_name: product.name,
             quantity: line.quantity,
-            unit_price: product.cash_price,
-            line_total: product.cash_price * line.quantity,
+            unit_price: unitPrice,
+            line_total: unitPrice * line.quantity,
           });
           stockTracker.set(product.id, stock - line.quantity);
           movementDrafts.push({
@@ -1648,7 +1652,9 @@ async function nextInstallmentDocNumber(
 
 export interface CreateInstallmentContractInput {
   customer_id: string;
-  items: Array<{ product_id: string; serial_id?: string; quantity: number }>;
+  /** unit_price اختياري — نفس مبدأ البيع النقدي، بيتجاهل installment_price المسجّل على
+   * المنتج لو البائع غيّره وقت تسجيل الصفقة. */
+  items: Array<{ product_id: string; serial_id?: string; quantity: number; unit_price?: number }>;
   down_payment: number;
   plan_id: string;
 }
@@ -1739,14 +1745,15 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
             throw new Error(`السيريال "${serial.serial_number as string}" غير متاح للبيع`);
           }
           soldSerialIds.add(serial.id as string);
+          const unitPrice = line.unit_price ?? product.installment_price;
           saleItems.push({
             product_id: product.id,
             product_name: product.name,
             serial_id: serial.id as string,
             serial_number: serial.serial_number as string,
             quantity: 1,
-            unit_price: product.installment_price,
-            line_total: product.installment_price,
+            unit_price: unitPrice,
+            line_total: unitPrice,
           });
           stockTracker.set(product.id, stock - 1);
           movementDrafts.push({
@@ -1760,12 +1767,13 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
           if (line.quantity > stock) {
             throw new Error(`المخزون غير كافٍ للمنتج "${product.name}" (متاح ${stock})`);
           }
+          const unitPrice = line.unit_price ?? product.installment_price;
           saleItems.push({
             product_id: product.id,
             product_name: product.name,
             quantity: line.quantity,
-            unit_price: product.installment_price,
-            line_total: product.installment_price * line.quantity,
+            unit_price: unitPrice,
+            line_total: unitPrice * line.quantity,
           });
           stockTracker.set(product.id, stock - line.quantity);
           movementDrafts.push({
