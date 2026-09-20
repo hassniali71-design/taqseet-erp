@@ -9,6 +9,7 @@ import {
   computeCustomerExposure,
   computeCustomerOnCreditHold,
   computeProductStock,
+  dateInputToTimestamp,
   useCreateInstallmentContract,
   useCurrentTenantSettings,
   useCustomers,
@@ -46,6 +47,7 @@ function NewInstallmentSalePage() {
   const [quantity, setQuantity] = useState("1");
   const [downPayment, setDownPayment] = useState("0");
   const [planId, setPlanId] = useState("");
+  const [contractDate, setContractDate] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
@@ -191,6 +193,7 @@ function NewInstallmentSalePage() {
         actorUserId,
         minDownPaymentPct: settings.min_down_payment_pct,
         creditHoldDays: settings.credit_hold_days,
+        ...(contractDate && { createdAt: dateInputToTimestamp(contractDate) }),
       },
       {
         onSuccess: (contract) =>
@@ -355,7 +358,7 @@ function NewInstallmentSalePage() {
           </table>
         </div>
 
-        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <label className="block space-y-1">
             <span className="text-xs font-medium text-foreground">
               المقدّم (الحد الأدنى {minDownPayment.toLocaleString("ar-EG")} ج.م —{" "}
@@ -384,6 +387,18 @@ function NewInstallmentSalePage() {
                 </option>
               ))}
             </select>
+          </label>
+          <label className="block space-y-1">
+            <span className="text-xs font-medium text-foreground">
+              تاريخ العقد (سيبه فاضي لو دلوقتي)
+            </span>
+            <input
+              type="date"
+              value={contractDate}
+              onChange={(e) => setContractDate(e.target.value)}
+              className="form-input"
+              dir="ltr"
+            />
           </label>
         </div>
 

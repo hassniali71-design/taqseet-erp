@@ -6,6 +6,7 @@ import { RiskBadge } from "@/components/ui/StatCard";
 import {
   computeCustomerExposure,
   computeCustomerRiskAssessment,
+  dateInputToTimestamp,
   useCreateCustomer,
   useCurrentTenantSettings,
   useCustomers,
@@ -32,6 +33,7 @@ type FormState = {
   address: string;
   notes: string;
   credit_limit: string;
+  join_date: string;
 };
 
 const EMPTY_FORM: FormState = {
@@ -41,6 +43,7 @@ const EMPTY_FORM: FormState = {
   address: "",
   notes: "",
   credit_limit: "0",
+  join_date: "",
 };
 
 function CustomersPage() {
@@ -80,6 +83,7 @@ function CustomersPage() {
       address: customer.address ?? "",
       notes: customer.notes ?? "",
       credit_limit: String(customer.credit_limit),
+      join_date: "",
     });
     setEditingId(customer.id);
   }
@@ -95,7 +99,11 @@ function CustomersPage() {
       ...(form.notes.trim() && { notes: form.notes.trim() }),
     };
     if (editingId === "new") {
-      createCustomerMutation.mutate({ input: payload, actorUserId });
+      createCustomerMutation.mutate({
+        input: payload,
+        actorUserId,
+        ...(form.join_date && { createdAt: dateInputToTimestamp(form.join_date) }),
+      });
     } else if (editingId) {
       updateCustomerMutation.mutate({ id: editingId, patch: payload, actorUserId });
     }
@@ -196,6 +204,17 @@ function CustomersPage() {
                   dir="ltr"
                 />
               </Field>
+              {editingId === "new" && (
+                <Field label="تاريخ الانضمام (سيبه فاضي لو دلوقتي)">
+                  <input
+                    type="date"
+                    value={form.join_date}
+                    onChange={(e) => setForm({ ...form, join_date: e.target.value })}
+                    className="form-input"
+                    dir="ltr"
+                  />
+                </Field>
+              )}
             </div>
             <Field label="ملاحظات">
               <textarea

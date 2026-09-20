@@ -53,6 +53,25 @@ import type {
  * Cross-tenant reads/writes (the Platform Control Room) go through src/lib/platform-server.ts
  * instead, which uses the service role key from a server function. */
 
+/** يحوّل قيمة `&lt;input type="date"&gt;` (`YYYY-MM-DD`) لـtimestamp كامل صالح لعمود `created_at` —
+ * بيحتفظ بتوقيت اليوم الحالي (UTC) على نفس التاريخ المُختار، عشان عمليات باكديت متعددة في نفس
+ * اليوم يفضل ترتيبها منطقي، وميتلخبطش بفروق المنطقة الزمنية عند منتصف الليل. مُستخدمة لتفعيل
+ * "تاريخ مفتوح" على العميل/البيع/عقد التقسيط/الشراء — انظر تعليق `createdAt` بكل دالة. */
+export function dateInputToTimestamp(dateStr: string): string {
+  const now = new Date();
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(
+    Date.UTC(
+      y as number,
+      (m as number) - 1,
+      d as number,
+      now.getUTCHours(),
+      now.getUTCMinutes(),
+      now.getUTCSeconds(),
+    ),
+  ).toISOString();
+}
+
 export function useCurrentTenant(tenantId: string | undefined) {
   return useQuery({
     queryKey: ["tenant", tenantId],
@@ -419,15 +438,24 @@ export function useCreateCustomer(tenantId: string | undefined) {
     mutationFn: async ({
       input,
       actorUserId,
+      createdAt,
     }: {
       input: Omit<Customer, "id" | "tenant_id" | "code" | "status" | "created_at">;
       actorUserId: string | null;
+      /** تاريخ مفتوح اختياري — لو العميل قديم فعليًا، بيحدّد `created_at` نفسه بدل "الآن". */
+      createdAt?: string;
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
       const code = await nextTenantCode("customers", tenantId, "CUST");
       const { data, error } = await supabase
         .from("customers")
-        .insert({ ...input, tenant_id: tenantId, code, status: "active" })
+        .insert({
+          ...input,
+          tenant_id: tenantId,
+          code,
+          status: "active",
+          ...(createdAt ? { created_at: createdAt } : {}),
+        })
         .select()
         .single();
       if (error) throw new Error(error.message);
@@ -938,6 +966,7 @@ async function performReceiveStock(
   serialNumbers: string[] | undefined,
   actorUserId: string | null,
   reference: string | undefined,
+  createdAt?: string,
 ): Promise<InventoryMovement> {
   if (quantity <= 0) throw new Error("الكمية يجب أن تكون أكبر من صفر");
 
@@ -1001,6 +1030,7 @@ async function performReceiveStock(
       after,
       user_id: actorUserId,
       ...(reference ? { reference } : {}),
+      ...(createdAt ? { created_at: createdAt } : {}),
     })
     .select()
     .single();
@@ -1146,10 +1176,13 @@ export function useCreateSale(tenantId: string | undefined) {
       input,
       actorUserId,
       employeeDiscountLimitPct,
+      createdAt,
     }: {
       input: CreateSaleInput;
       actorUserId: string | null;
       employeeDiscountLimitPct: number;
+      /** تاريخ مفتوح اختياري — لبيع قديم بيسجّله العميل دلوقتي بأثر رجعي على التقارير. */
+      createdAt?: string;
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
       if (input.items.length === 0) throw new Error("لازم تضيف صنف واحد على الأقل");
@@ -1285,6 +1318,7 @@ export function useCreateSale(tenantId: string | undefined) {
           user_id: actorUserId,
           status: "completed",
           ...(input.return_window_days && { return_window_days: input.return_window_days }),
+          ...(createdAt ? { created_at: createdAt } : {}),
         })
         .select()
         .single();
@@ -1309,6 +1343,7 @@ export function useCreateSale(tenantId: string | undefined) {
             after: m.after,
             user_id: actorUserId,
             reference: invoice_number,
+            ...(createdAt ? { created_at: createdAt } : {}),
           })),
         );
         if (movementsInsertError) throw new Error(movementsInsertError.message);
@@ -1337,6 +1372,7 @@ export function useCreateSale(tenantId: string | undefined) {
         `بيع نقدي ${invoice_number}`,
         "sale",
         sale.id as string,
+        createdAt,
       );
 
       return sale as Sale;
@@ -1619,11 +1655,14 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
       actorUserId,
       minDownPaymentPct,
       creditHoldDays,
+      createdAt,
     }: {
       input: CreateInstallmentContractInput;
       actorUserId: string | null;
       minDownPaymentPct: number;
       creditHoldDays: number;
+      /** تاريخ مفتوح اختياري — لعقد قديم بيسجّله العميل دلوقتي بأثر رجعي على التقارير. */
+      createdAt?: string;
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
       if (input.items.length === 0) throw new Error("لازم تضيف صنف واحد على الأقل");
@@ -1806,6 +1845,7 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
           installment_amount: schedule[0]?.amount ?? 0,
           status: "active",
           user_id: actorUserId,
+          ...(createdAt ? { created_at: createdAt } : {}),
         })
         .select()
         .single();
@@ -1842,6 +1882,7 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
             after: m.after,
             user_id: actorUserId,
             reference: contract_number,
+            ...(createdAt ? { created_at: createdAt } : {}),
           })),
         );
         if (movementsInsertError) throw new Error(movementsInsertError.message);
@@ -1870,6 +1911,8 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
               "sale",
               actorUserId,
               contract_number,
+              undefined,
+              createdAt,
             );
           }
         }
@@ -1908,6 +1951,7 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
           `عقد تقسيط ${contract_number}`,
           "installment_contract",
           contract.id as string,
+          createdAt,
         );
       } catch (e) {
         console.warn("فشل ترحيل الحركة المالية:", e instanceof Error ? e.message : e);
@@ -2475,6 +2519,10 @@ export function useCreatePurchase(tenantId: string | undefined) {
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
       if (input.items.length === 0) throw new Error("لازم تضيف صنف واحد على الأقل");
+      // تاريخ إصدار الفاتورة بقى هو نفسه اللي بيقود `created_at` للأمر وحركة المخزون/القيد
+      // المرتبطين بيه، مش عمود عرض منفصل بس زي ما كان قبل كده — عشان يبان صح في ترتيب/فلاتر
+      // التقارير لو العميل بيسجّل عملية قديمة بتاريخ مفتوح.
+      const createdAt = input.issue_date ? dateInputToTimestamp(input.issue_date) : undefined;
 
       const { data: supplier, error: supplierError } = await supabase
         .from("suppliers")
@@ -2562,6 +2610,7 @@ export function useCreatePurchase(tenantId: string | undefined) {
           item.serial_numbers.length > 0 ? item.serial_numbers : undefined,
           actorUserId,
           purchase_number,
+          createdAt,
         );
 
         const newCost =
@@ -2607,6 +2656,7 @@ export function useCreatePurchase(tenantId: string | undefined) {
           ...(input.return_period_days !== undefined && {
             return_period_days: input.return_period_days,
           }),
+          ...(createdAt ? { created_at: createdAt } : {}),
         })
         .select()
         .single();
@@ -2633,6 +2683,7 @@ export function useCreatePurchase(tenantId: string | undefined) {
           `أمر شراء ${purchase_number}`,
           "purchase",
           purchase.id as string,
+          createdAt,
         );
       } catch (e) {
         console.warn("فشل ترحيل قيد الشراء:", e instanceof Error ? e.message : e);
@@ -2867,6 +2918,7 @@ async function performPostTreasuryMovement(
   actorUserId: string | null,
   reference?: string,
   reason?: string,
+  createdAt?: string,
 ): Promise<TreasuryMovement> {
   const { data: movements, error: movementsError } = await supabase
     .from("treasury_movements")
@@ -2889,6 +2941,7 @@ async function performPostTreasuryMovement(
       user_id: actorUserId,
       ...(reference ? { reference } : {}),
       ...(reason ? { reason } : {}),
+      ...(createdAt ? { created_at: createdAt } : {}),
     })
     .select()
     .single();
@@ -2908,6 +2961,7 @@ async function performPostJournalEntry(
   description: string,
   referenceType: string,
   referenceId: string,
+  createdAt?: string,
 ): Promise<JournalEntry> {
   const totalDebit = Math.round(lines.reduce((sum, l) => sum + l.debit, 0) * 100) / 100;
   const totalCredit = Math.round(lines.reduce((sum, l) => sum + l.credit, 0) * 100) / 100;
@@ -2924,6 +2978,7 @@ async function performPostJournalEntry(
       description,
       reference_type: referenceType,
       reference_id: referenceId,
+      ...(createdAt ? { created_at: createdAt } : {}),
     })
     .select()
     .single();
@@ -2965,6 +3020,7 @@ async function postFinancials(
   description: string,
   referenceType: string,
   referenceId: string,
+  createdAt?: string,
 ) {
   try {
     const accountId = await findAccountIdByKind(tenantId, accountKind);
@@ -2979,8 +3035,17 @@ async function postFinancials(
       movementType,
       actorUserId,
       movementReference,
+      undefined,
+      createdAt,
     );
-    await performPostJournalEntry(tenantId, lines, description, referenceType, referenceId);
+    await performPostJournalEntry(
+      tenantId,
+      lines,
+      description,
+      referenceType,
+      referenceId,
+      createdAt,
+    );
   } catch (e) {
     console.warn("فشل ترحيل الحركة المالية:", e instanceof Error ? e.message : e);
   }

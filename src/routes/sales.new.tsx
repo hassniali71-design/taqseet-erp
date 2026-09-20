@@ -6,6 +6,7 @@ import { SearchPicker } from "@/components/ui/SearchPicker";
 import { subscribeData } from "@/lib/data-store";
 import {
   computeProductStock,
+  dateInputToTimestamp,
   useCreateSale,
   useCurrentTenantSettings,
   useCustomers,
@@ -40,6 +41,7 @@ function NewSalePage() {
   const [quantity, setQuantity] = useState("1");
   const [discountPct, setDiscountPct] = useState("0");
   const [returnWindowDays, setReturnWindowDays] = useState("");
+  const [saleDate, setSaleDate] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
@@ -148,6 +150,7 @@ function NewSalePage() {
         },
         actorUserId,
         employeeDiscountLimitPct,
+        ...(saleDate && { createdAt: dateInputToTimestamp(saleDate) }),
       },
       {
         onSuccess: (sale) => void navigate({ to: "/sales/$id", params: { id: sale.id } }),
@@ -312,6 +315,18 @@ function NewSalePage() {
                 className="form-input"
                 dir="ltr"
                 placeholder={`افتراضي: ${settings?.return_period_days ?? 14}`}
+              />
+            </label>
+            <label className="block max-w-xs space-y-1">
+              <span className="text-xs font-medium text-foreground">
+                تاريخ العملية (سيبه فاضي لو دلوقتي)
+              </span>
+              <input
+                type="date"
+                value={saleDate}
+                onChange={(e) => setSaleDate(e.target.value)}
+                className="form-input"
+                dir="ltr"
               />
             </label>
           </div>
