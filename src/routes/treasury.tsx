@@ -57,7 +57,7 @@ function TreasuryPage() {
   const [openingBalance, setOpeningBalance] = useState("0");
   const [countedAmount, setCountedAmount] = useState("");
   const [closeReason, setCloseReason] = useState("");
-  const [allocationAmounts, setAllocationAmounts] = useState<Record<string, string>>({});
+  const [destinationAccountId, setDestinationAccountId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [newAccountName, setNewAccountName] = useState("");
@@ -138,9 +138,11 @@ function TreasuryPage() {
       setError("أدخل المبلغ المعدود فعليًا");
       return;
     }
-    const allocations = Object.entries(allocationAmounts)
-      .map(([accountId, value]) => ({ accountId, amount: Number(value) || 0 }))
-      .filter((a) => a.amount > 0);
+    // اختيار بسيط: يا إما المبلغ المعدود كله يفضل في الكاشير (مفيش تحويل)، يا إما يتحوّل
+    // كامل لخزينة تانية واحدة اخترتها — مش توزيع معقّد على عدة خزائن بأرقام منفصلة.
+    const allocations = destinationAccountId
+      ? [{ accountId: destinationAccountId, amount: counted }]
+      : [];
     closeShiftMutation.mutate(
       {
         shiftId: openShiftRow.id,
@@ -153,7 +155,7 @@ function TreasuryPage() {
         onSuccess: () => {
           setCountedAmount("");
           setCloseReason("");
-          setAllocationAmounts({});
+          setDestinationAccountId("");
         },
         onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
       },
@@ -161,10 +163,6 @@ function TreasuryPage() {
   }
 
   const otherAccounts = accounts.filter((a) => a.id !== cashierAccount?.id);
-  const allocatedTotal = Object.values(allocationAmounts).reduce(
-    (sum, v) => sum + (Number(v) || 0),
-    0,
-  );
 
   // نظرة عامة سهلة وسلسة — بدل ما صاحب المحل يفهم الخزينة من جدول حركات مفصّل، 4 أرقام
   // واضحة بلغته هو: الشركاء ضخوا كام، بعنا بكام، صرفنا كام، وكسبنا كام. الربح هنا نفسه
@@ -270,6 +268,36 @@ function TreasuryPage() {
             الموردين.
           </p>
         )}
+
+        <section className="mt-6 rounded-xl border border-border bg-card p-4">
+          <h2 className="text-sm font-bold text-foreground">إزاي الخزينة شغالة؟</h2>
+          <div className="mt-2 grid grid-cols-1 gap-3 text-sm text-muted-foreground sm:grid-cols-2">
+            <div>
+              <p className="font-bold text-success">بتاخد فلوس (بتزيد) لما:</p>
+              <ul className="mt-1 list-inside list-disc space-y-0.5">
+                <li>تسجّل بيع نقدي</li>
+                <li>تحصّل قسط من عميل</li>
+                <li>تاخد مقدّم عند فتح عقد تقسيط</li>
+                <li>مورد يرجّعلك فلوس (مرتجع/استبدال)</li>
+              </ul>
+            </div>
+            <div>
+              <p className="font-bold text-destructive">بتطلع منها فلوس (بتقل) لما:</p>
+              <ul className="mt-1 list-inside list-disc space-y-0.5">
+                <li>تدفع لمورد (شراء بضاعة أو دفعة من الحساب)</li>
+                <li>تسجّل مصروف</li>
+                <li>تحوّل جزء من الكاشير لخزينة تانية وقت إقفال الوردية</li>
+              </ul>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            تمويل الشركاء نفسه (لما شريك "يضخ فلوس") بيتسجل في دفتره الخاص بصفحة{" "}
+            <Link to="/partners" className="text-primary hover:underline">
+              الشركاء
+            </Link>{" "}
+            — مش حركة خزينة مباشرة، عشان كده الكارت بتاعه هنا معلومة بس بتودّيك لصفحته.
+          </p>
+        </section>
 
         <section className="mt-6">
           <h2 className="text-sm font-bold text-foreground">نظرة عامة (كل الأوقات)</h2>
@@ -391,42 +419,26 @@ function TreasuryPage() {
 
                 {otherAccounts.length > 0 && (
                   <div className="mt-4 rounded-lg border border-border p-3">
-                    <p className="text-xs font-bold text-foreground">
-                      توزيع النقدية على الخزائن (اختياري)
-                    </p>
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      من المبلغ المعدود فعليًا، حدّد قد إيه هيتسلّم لكل خزينة — مثلاً جزء محفظة
-                      إلكترونية، جزء بنك، والباقي يفضل كاش في الكاشير.
-                    </p>
-                    <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                      {otherAccounts.map((account) => (
-                        <label key={account.id} className="block space-y-1">
-                          <span className="text-xs font-medium text-foreground">
-                            {account.name} ({ACCOUNT_KIND_LABELS[account.kind]})
-                          </span>
-                          <input
-                            type="number"
-                            min="0"
-                            value={allocationAmounts[account.id] ?? ""}
-                            onChange={(e) =>
-                              setAllocationAmounts((prev) => ({
-                                ...prev,
-                                [account.id]: e.target.value,
-                              }))
-                            }
-                            className="form-input"
-                            dir="ltr"
-                          />
-                        </label>
-                      ))}
-                    </div>
-                    <p className="mt-2 text-xs text-muted-foreground" dir="ltr">
-                      الموزَّع: {allocatedTotal.toLocaleString("ar-EG")} ج.م — الباقي كاش في
-                      الكاشير:{" "}
-                      {Math.max(0, (Number(countedAmount) || 0) - allocatedTotal).toLocaleString(
-                        "ar-EG",
-                      )}{" "}
-                      ج.م
+                    <label className="block space-y-1">
+                      <span className="text-xs font-bold text-foreground">
+                        فين حط المبلغ المعدود ده؟
+                      </span>
+                      <select
+                        value={destinationAccountId}
+                        onChange={(e) => setDestinationAccountId(e.target.value)}
+                        className="form-input"
+                      >
+                        <option value="">يفضل كاش في الكاشير (مفيش تحويل)</option>
+                        {otherAccounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            حوّل الكل لـ{account.name} ({ACCOUNT_KIND_LABELS[account.kind]})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <p className="mt-2 text-[11px] text-muted-foreground">
+                      اختياري — لو مش هتحوّل الفلوس دلوقتي سيبها "يفضل في الكاشير"، وحوّلها بعدين
+                      وقت ما تحتاج.
                     </p>
                   </div>
                 )}
