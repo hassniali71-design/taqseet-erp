@@ -3000,7 +3000,14 @@ export function useAddPartnerFunding(tenantId: string | undefined) {
 
 /** بيسجّل صف `sale_settlement` واحد لكل شريك مُختار وقت البيع — Best-effort تمامًا (فشلها ميوقفش
  * نجاح البيع نفسه، زي postFinancials بالظبط)، وبتُستدعى بعد نجاح useCreateSale/
- * useCreateInstallmentContract من route الصفحة نفسها. */
+ * useCreateInstallmentContract من route الصفحة نفسها.
+ *
+ * `amount` (اللي بيحرّك رصيد الشريك الفعلي، انظر computePartnerBalance) بيتسجّل بقيمة
+ * `profitAmount` بس — مش `costRecovered + profitAmount`. `costRecovered` نصيب الشريك من
+ * تكلفة الصفقة كان أصلاً معترف بيه ومحسوب في رصيده وقت التمويل نفسه (`funding`)؛ لو اتضاف
+ * تاني هنا كان هيبقى ازدواج حقيقي (نفس الفلوس بتتحسب مرتين). `cost_recovered` يفضل متسجّل في
+ * عموده المنفصل للتقارير/الشفافية بس ("اتخصم منه كذا من تمويله على الصفقة دي")، مش لحساب
+ * الرصيد — ده بالظبط الغرض الموثَّق أصلاً في تعليق PartnerTransaction في types/index.ts. */
 export async function settlePartnersForDeal(
   tenantId: string,
   actorUserId: string | null,
@@ -3021,7 +3028,7 @@ export async function settlePartnersForDeal(
         tenant_id: tenantId,
         partner_id: e.partnerId,
         type: "sale_settlement",
-        amount: Math.round((e.costRecovered + e.profitAmount) * 100) / 100,
+        amount: e.profitAmount,
         cost_recovered: e.costRecovered,
         profit_amount: e.profitAmount,
         reference,
@@ -3035,6 +3042,95 @@ export async function settlePartnersForDeal(
   } catch (e) {
     console.warn("فشل تسوية الشركاء لهذه الصفقة:", e instanceof Error ? e.message : e);
   }
+}
+
+/** إجمالي نصيب الشريك من تكلفة الصفقات المتخصصة له لتاريخه — معلومة شفافية/حوكمة بس ("اتخصم
+ * منه كام من تمويله المتاح")، لا تدخل في حساب رصيده (انظر تعليق settlePartnersForDeal). */
+export function computePartnerAllocatedCost(
+  partnerId: string,
+  transactions: PartnerTransaction[],
+): number {
+  return (
+    Math.round(
+      transactions
+        .filter((t) => t.partner_id === partnerId && t.type === "sale_settlement")
+        .reduce((sum, t) => sum + t.cost_recovered, 0) * 100,
+    ) / 100
+  );
+}
+
+/** إجمالي ما موّله الشريك فعليًا (كل صفوف funding) — بغض النظر عن رصيده الحالي أو أرباحه. */
+export function computePartnerTotalFunded(
+  partnerId: string,
+  transactions: PartnerTransaction[],
+): number {
+  return (
+    Math.round(
+      transactions
+        .filter((t) => t.partner_id === partnerId && t.type === "funding")
+        .reduce((sum, t) => sum + t.amount, 0) * 100,
+    ) / 100
+  );
+}
+
+/** سحب مبلغ من رصيد الشريك المتاح (تمويل لسه متاح + أرباح مستحقة) — تسجيل صف `withdrawal`
+ * بمبلغ سالب، زي useRecordSupplierPayment بالظبط (تحقق من الرصيد قبل السماح بالسحب). */
+export function useWithdrawPartnerFunds(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      partnerId,
+      amount,
+      actorUserId,
+      reason,
+    }: {
+      partnerId: string;
+      amount: number;
+      actorUserId: string | null;
+      reason?: string;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (amount <= 0) throw new Error("المبلغ يجب أن يكون أكبر من صفر");
+      const { data: transactions, error: transactionsError } = await supabase
+        .from("partner_transactions")
+        .select("amount")
+        .eq("tenant_id", tenantId)
+        .eq("partner_id", partnerId);
+      if (transactionsError) throw new Error(transactionsError.message);
+      const balance =
+        Math.round((transactions ?? []).reduce((sum, t) => sum + (t.amount as number), 0) * 100) /
+        100;
+      if (amount > balance) {
+        throw new Error(`المبلغ أكبر من رصيد الشريك المتاح (${balance} ج.م)`);
+      }
+      const { data, error } = await supabase
+        .from("partner_transactions")
+        .insert({
+          tenant_id: tenantId,
+          partner_id: partnerId,
+          type: "withdrawal",
+          amount: -amount,
+          user_id: actorUserId,
+          ...(reason ? { reason } : {}),
+        })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "partner_transaction.withdrawal",
+        entity: "partner_transactions",
+        entity_id: data.id as string,
+        new_value: data,
+      });
+      return data as PartnerTransaction;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["partner_transactions", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
 }
 
 /* ---------------- Treasury (§68) / Shifts (§70) / Expenses (§73) / Accounting (§74-§75) ----

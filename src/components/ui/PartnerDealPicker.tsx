@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { computePartnerDealPreview } from "@/lib/supabase-queries";
 import { SearchPickerMulti } from "@/components/ui/SearchPicker";
 import type { Partner, Purchase } from "@/types";
@@ -6,7 +8,12 @@ import type { Partner, Purchase } from "@/types";
  * نسبة تقسيم لكل شريك (بالتساوي افتراضيًا، قابلة للتعديل يدويًا)، ومعاينة حية لنصيب كل شريك
  * قبل التأكيد. الحساب نفسه (computePartnerDealPreview) بيفترض إن الربح على هامش البضاعة بس
  * (cashSubtotal - cost)، مش على إيراد التمويل — العميل نفسه أوضح كده. مستخدم في sales.new.tsx
- * و sales.new-installment.tsx بنفس الشكل بالظبط. */
+ * و sales.new-installment.tsx بنفس الشكل بالظبط.
+ *
+ * البائع يقدر يدخل نسبة تقسيمه من الصفقة % (زي ما كان) أو مبلغ ربح فلات مباشرة — الاتنين
+ * بيتحوّلوا لنفس splitPct الخارجي (مفيش تغيير في الـcontract الخارجي ولا في sales.new*.tsx)،
+ * وبيتعرض تحويل حي للوحدة التانية جنب الإدخال، فيه لو دخل فلوس يشوف بتمثل كام %، ولو دخل
+ * نسبة يشوف بتمثل كام جنيه. */
 export function PartnerDealPicker({
   partners,
   purchases,
@@ -29,10 +36,28 @@ export function PartnerDealPicker({
   /** لو الصفقة فيها صنف واحد بس — بيُستخدم لعرض معلومة "آخر مرة اتشرى فيها ده" Best-effort. */
   productId?: string;
 }) {
+  const [inputModes, setInputModes] = useState<Record<string, "pct" | "amount">>({});
+  const [amountInputs, setAmountInputs] = useState<Record<string, string>>({});
+
   function handleSelectedChange(ids: string[]) {
     onSelectedIdsChange(ids);
     const equalPct = ids.length > 0 ? Math.round((100 / ids.length) * 100) / 100 : 0;
     onSplitsChange(Object.fromEntries(ids.map((id) => [id, String(equalPct)])));
+  }
+
+  const margin = cashSubtotal - cost;
+
+  /** بيتحوّل مبلغ ربح مطلوب لنسبة تقسيم الصفقة المكافئة (splitPct) — نفس المعادلة العكسية
+   * لـ computePartnerDealPreview لجزء الربح بس: profitAmount = margin * (splitPct/100) *
+   * (profitSharePct/100). */
+  function amountToSplitPct(amount: number, profitSharePct: number): number {
+    const denom = margin * (profitSharePct / 100);
+    if (denom <= 0) return 0;
+    return Math.round((amount / denom) * 100 * 100) / 100;
+  }
+
+  function setPartnerSplitPct(partnerId: string, pct: string) {
+    onSplitsChange({ ...splits, [partnerId]: pct });
   }
 
   const lastPurchaseForProduct = productId
@@ -66,6 +91,7 @@ export function PartnerDealPicker({
           {selectedIds.map((partnerId) => {
             const partner = partners.find((p) => p.id === partnerId);
             if (!partner) return null;
+            const mode = inputModes[partnerId] ?? "pct";
             const splitPct = Number(splits[partnerId]) || 0;
             const preview = computePartnerDealPreview(
               cashSubtotal,
@@ -77,19 +103,72 @@ export function PartnerDealPicker({
               <div key={partnerId} className="rounded-lg border border-border p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-sm font-bold text-foreground">{partner.name}</span>
-                  <label className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">نسبة تقسيمه من الصفقة %</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      value={splits[partnerId] ?? ""}
-                      onChange={(e) => onSplitsChange({ ...splits, [partnerId]: e.target.value })}
-                      className="form-input w-20"
-                      dir="ltr"
-                    />
-                  </label>
+                  <div className="flex items-center gap-2">
+                    <div className="flex overflow-hidden rounded-md border border-input text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setInputModes({ ...inputModes, [partnerId]: "pct" })}
+                        className={`px-2 py-1 font-medium ${
+                          mode === "pct"
+                            ? "bg-primary text-primary-foreground"
+                            : "text-foreground hover:bg-accent"
+                        }`}
+                      >
+                        نسبة %
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setInputModes({ ...inputModes, [partnerId]: "amount" })}
+                        className={`px-2 py-1 font-medium ${
+                          mode === "amount"
+                            ? "bg-primary text-primary-foreground"
+                            : "text-foreground hover:bg-accent"
+                        }`}
+                      >
+                        مبلغ ربح
+                      </button>
+                    </div>
+                    {mode === "pct" ? (
+                      <label className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">نسبة تقسيمه من الصفقة</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={splits[partnerId] ?? ""}
+                          onChange={(e) => setPartnerSplitPct(partnerId, e.target.value)}
+                          className="form-input w-20"
+                          dir="ltr"
+                        />
+                      </label>
+                    ) : (
+                      <label className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">مبلغ ربحه (ج.م)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={amountInputs[partnerId] ?? ""}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            setAmountInputs({ ...amountInputs, [partnerId]: raw });
+                            const amount = Number(raw) || 0;
+                            setPartnerSplitPct(
+                              partnerId,
+                              String(amountToSplitPct(amount, partner.profit_share_pct)),
+                            );
+                          }}
+                          className="form-input w-24"
+                          dir="ltr"
+                        />
+                      </label>
+                    )}
+                  </div>
                 </div>
+                <p className="mt-2 text-xs text-muted-foreground" dir="rtl">
+                  {mode === "pct"
+                    ? `بتمثل ${preview.profitAmount.toLocaleString("ar-EG")} ج.م ربح`
+                    : `بتمثل ${splitPct.toLocaleString("ar-EG")}% من الصفقة`}
+                </p>
                 <p className="mt-2 text-sm text-muted-foreground" dir="rtl">
                   اتباعت بـ{cashSubtotal.toLocaleString("ar-EG")} ج.م، وهترجع لك{" "}
                   <span className="font-bold text-foreground">

@@ -4,12 +4,15 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { subscribeData } from "@/lib/data-store";
 import {
+  computePartnerAllocatedCost,
   computePartnerBalance,
+  computePartnerTotalFunded,
   dateInputToTimestamp,
   useAddPartnerFunding,
   useCreatePartner,
   usePartners,
   usePartnerTransactions,
+  useWithdrawPartnerFunds,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
@@ -39,9 +42,10 @@ function PartnersPage() {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [query, setQuery] = useState("");
-  const [fundingForId, setFundingForId] = useState<string | null>(null);
-  const [fundingAmount, setFundingAmount] = useState("");
-  const [fundingError, setFundingError] = useState<string | null>(null);
+  const [actionForId, setActionForId] = useState<string | null>(null);
+  const [actionMode, setActionMode] = useState<"funding" | "withdrawal">("funding");
+  const [actionAmount, setActionAmount] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -49,6 +53,7 @@ function PartnersPage() {
   const { data: transactions = [] } = usePartnerTransactions(session?.tenant_id);
   const createPartnerMutation = useCreatePartner(session?.tenant_id);
   const addFundingMutation = useAddPartnerFunding(session?.tenant_id);
+  const withdrawMutation = useWithdrawPartnerFunds(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
@@ -69,26 +74,47 @@ function PartnersPage() {
     setForm(EMPTY_FORM);
   }
 
-  function handleAddFunding(partnerId: string) {
-    setFundingError(null);
-    const amount = Number(fundingAmount);
-    if (!fundingAmount || amount <= 0) {
-      setFundingError("أدخل مبلغ صحيح");
+  function handleConfirmAction(partnerId: string) {
+    setActionError(null);
+    const amount = Number(actionAmount);
+    if (!actionAmount || amount <= 0) {
+      setActionError("أدخل مبلغ صحيح");
       return;
     }
-    addFundingMutation.mutate(
-      { partnerId, amount, actorUserId },
-      {
-        onSuccess: () => {
-          setFundingForId(null);
-          setFundingAmount("");
-        },
-        onError: (e) => setFundingError(e instanceof Error ? e.message : "حدث خطأ"),
+    const onSettled = {
+      onSuccess: () => {
+        setActionForId(null);
+        setActionAmount("");
       },
-    );
+      onError: (e: unknown) => setActionError(e instanceof Error ? e.message : "حدث خطأ"),
+    };
+    if (actionMode === "funding") {
+      addFundingMutation.mutate({ partnerId, amount, actorUserId }, onSettled);
+    } else {
+      withdrawMutation.mutate({ partnerId, amount, actorUserId }, onSettled);
+    }
   }
 
   const filtered = partners.filter((p) => p.name.includes(query.trim()));
+
+  // نظرة عامة على مستوى كل الشركاء — حوكمة/داش بورد يطلب العميل صراحة، مش بس كارت لكل شريك
+  // لوحده. المكاسب هنا بتحرّك رصيد الشريك فعليًا؛ "اتخصم منه" معلومة شفافية بس (انظر تعليق
+  // settlePartnersForDeal في supabase-queries.ts) — رأس ماله يفضل معترف بيه وقت التمويل نفسه.
+  const totalFundedAll = partners.reduce(
+    (sum, p) => sum + computePartnerTotalFunded(p.id, transactions),
+    0,
+  );
+  const totalAllocatedAll = partners.reduce(
+    (sum, p) => sum + computePartnerAllocatedCost(p.id, transactions),
+    0,
+  );
+  const totalProfitAll = transactions
+    .filter((t) => t.type === "sale_settlement")
+    .reduce((sum, t) => sum + t.profit_amount, 0);
+  const totalBalanceAll = partners.reduce(
+    (sum, p) => sum + computePartnerBalance(p.id, transactions),
+    0,
+  );
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -106,9 +132,41 @@ function PartnersPage() {
           )}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          شركاء تمويل بيموّلوا شراء بضاعة — لما تتباع، النظام بيرجعلهم رأس مالهم + نصيبهم من الربح
-          تلقائيًا.
+          شركاء تمويل بيموّلوا شراء بضاعة — لما تتباع، النظام بيسجّل نصيبهم من كل صفقة (كام اتخصم من
+          تمويلهم، وكام ربحهم) تلقائيًا.
         </p>
+
+        {partners.length > 0 && (
+          <section className="mt-6">
+            <h2 className="text-sm font-bold text-foreground">نظرة عامة على كل الشركاء</h2>
+            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="rounded-xl border border-border bg-card p-4">
+                <p className="text-xs text-muted-foreground">إجمالي التمويل</p>
+                <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
+                  {totalFundedAll.toLocaleString("ar-EG")} ج.م
+                </p>
+              </div>
+              <div className="rounded-xl border border-border bg-card p-4">
+                <p className="text-xs text-muted-foreground">مخصص لصفقات (اتخصم من التمويل)</p>
+                <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
+                  {totalAllocatedAll.toLocaleString("ar-EG")} ج.م
+                </p>
+              </div>
+              <div className="rounded-xl border border-border bg-card p-4">
+                <p className="text-xs text-muted-foreground">إجمالي أرباح الشركاء</p>
+                <p className="mt-1 text-xl font-bold text-success" dir="ltr">
+                  {totalProfitAll.toLocaleString("ar-EG")} ج.م
+                </p>
+              </div>
+              <div className="rounded-xl border-2 border-primary/40 bg-primary/5 p-4">
+                <p className="text-xs text-muted-foreground">إجمالي أرصدة الشركاء الآن</p>
+                <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
+                  {totalBalanceAll.toLocaleString("ar-EG")} ج.م
+                </p>
+              </div>
+            </div>
+          </section>
+        )}
 
         {creating && (
           <form
@@ -193,12 +251,17 @@ function PartnersPage() {
           />
         </label>
 
-        <div className="mt-4 grid max-h-[42rem] grid-cols-1 gap-4 overflow-y-auto sm:grid-cols-2">
+        <div className="mt-4 grid max-h-[48rem] grid-cols-1 gap-4 overflow-y-auto sm:grid-cols-2">
           {filtered.map((partner) => {
             const balance = computePartnerBalance(partner.id, transactions);
+            const totalFunded = computePartnerTotalFunded(partner.id, transactions);
+            const totalAllocated = computePartnerAllocatedCost(partner.id, transactions);
             const totalProfit = transactions
-              .filter((t) => t.partner_id === partner.id)
+              .filter((t) => t.partner_id === partner.id && t.type === "sale_settlement")
               .reduce((sum, t) => sum + t.profit_amount, 0);
+            const dealCount = transactions.filter(
+              (t) => t.partner_id === partner.id && t.type === "sale_settlement",
+            ).length;
             return (
               <div
                 key={partner.id}
@@ -214,55 +277,83 @@ function PartnersPage() {
                       {partner.name}
                     </Link>
                     <p className="mt-0.5 text-xs text-muted-foreground" dir="ltr">
-                      {partner.code} · نسبة الربح {partner.profit_share_pct}%
+                      {partner.code} · نسبة الربح {partner.profit_share_pct}% · {dealCount} صفقة
                     </p>
                   </div>
-                  <button
-                    onClick={() => {
-                      setFundingForId(fundingForId === partner.id ? null : partner.id);
-                      setFundingError(null);
-                      setFundingAmount("");
-                    }}
-                    className="whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
-                  >
-                    + إضافة تمويل
-                  </button>
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      onClick={() => {
+                        setActionForId(actionForId === partner.id ? null : partner.id);
+                        setActionMode("funding");
+                        setActionError(null);
+                        setActionAmount("");
+                      }}
+                      className="whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
+                    >
+                      + تمويل
+                    </button>
+                    <button
+                      onClick={() => {
+                        setActionForId(actionForId === partner.id ? null : partner.id);
+                        setActionMode("withdrawal");
+                        setActionError(null);
+                        setActionAmount("");
+                      }}
+                      className="whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
+                    >
+                      سحب
+                    </button>
+                  </div>
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <div>
-                    <p className="text-xs text-muted-foreground">الرصيد الحالي</p>
-                    <p className="mt-0.5 text-lg font-bold text-foreground" dir="ltr">
-                      {balance.toLocaleString("ar-EG")} ج.م
+                    <p className="text-xs text-muted-foreground">دفع كام (إجمالي التمويل)</p>
+                    <p className="mt-0.5 text-base font-bold text-foreground" dir="ltr">
+                      {totalFunded.toLocaleString("ar-EG")} ج.م
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">إجمالي الأرباح لتاريخه</p>
-                    <p className="mt-0.5 text-lg font-bold text-success" dir="ltr">
+                    <p className="text-xs text-muted-foreground">اتخصم منه (مخصص لصفقات)</p>
+                    <p className="mt-0.5 text-base font-bold text-foreground" dir="ltr">
+                      {totalAllocated.toLocaleString("ar-EG")} ج.م
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">هيكسب (إجمالي الأرباح)</p>
+                    <p className="mt-0.5 text-base font-bold text-success" dir="ltr">
                       {totalProfit.toLocaleString("ar-EG")} ج.م
                     </p>
                   </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">رصيده الحالي (بعد الربح)</p>
+                    <p className="mt-0.5 text-base font-bold text-primary" dir="ltr">
+                      {balance.toLocaleString("ar-EG")} ج.م
+                    </p>
+                  </div>
                 </div>
-                {fundingForId === partner.id && (
+                {actionForId === partner.id && (
                   <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3">
                     <label className="block space-y-1">
-                      <span className="text-xs font-medium text-foreground">مبلغ التمويل</span>
+                      <span className="text-xs font-medium text-foreground">
+                        مبلغ {actionMode === "funding" ? "التمويل" : "السحب"}
+                      </span>
                       <input
                         type="number"
                         min="0"
-                        value={fundingAmount}
-                        onChange={(e) => setFundingAmount(e.target.value)}
+                        value={actionAmount}
+                        onChange={(e) => setActionAmount(e.target.value)}
                         className="form-input"
                         dir="ltr"
                       />
                     </label>
                     <button
-                      onClick={() => handleAddFunding(partner.id)}
+                      onClick={() => handleConfirmAction(partner.id)}
                       className="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
                     >
                       تأكيد
                     </button>
-                    {fundingError && (
-                      <p className="w-full text-xs text-destructive">{fundingError}</p>
+                    {actionError && (
+                      <p className="w-full text-xs text-destructive">{actionError}</p>
                     )}
                   </div>
                 )}
