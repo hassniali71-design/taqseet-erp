@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
@@ -7,7 +7,11 @@ import {
   computeAccountBalance,
   useCloseShift,
   useCreateTreasuryAccount,
+  useInstallmentContracts,
+  useJournalEntries,
   useOpenShift,
+  usePartnerTransactions,
+  useSales,
   useShifts,
   useTreasuryAccounts,
   useTreasuryMovements,
@@ -64,6 +68,10 @@ function TreasuryPage() {
   const { data: allAccounts = [] } = useTreasuryAccounts(session?.tenant_id);
   const { data: allMovements = [] } = useTreasuryMovements(session?.tenant_id);
   const { data: allShifts = [] } = useShifts(session?.tenant_id);
+  const { data: allSales = [] } = useSales(session?.tenant_id);
+  const { data: allContracts = [] } = useInstallmentContracts(session?.tenant_id);
+  const { data: allJournalEntries = [] } = useJournalEntries(session?.tenant_id);
+  const { data: allPartnerTransactions = [] } = usePartnerTransactions(session?.tenant_id);
   const createAccountMutation = useCreateTreasuryAccount(session?.tenant_id);
   const openShiftMutation = useOpenShift(session?.tenant_id);
   const closeShiftMutation = useCloseShift(session?.tenant_id);
@@ -158,6 +166,37 @@ function TreasuryPage() {
     0,
   );
 
+  // نظرة عامة سهلة وسلسة — بدل ما صاحب المحل يفهم الخزينة من جدول حركات مفصّل، 4 أرقام
+  // واضحة بلغته هو: الشركاء ضخوا كام، بعنا بكام، صرفنا كام، وكسبنا كام. الربح هنا نفسه
+  // المصدر المحاسبي الموحّد (إيراد 3000+3100 ناقص مصروفات 5000) اللي التقرير المالي
+  // بيستخدمه — مفيش منطق مالي موازي جديد.
+  const totalPartnerFunding = allPartnerTransactions
+    .filter((t) => t.type === "funding")
+    .reduce((sum, t) => sum + t.amount, 0);
+  const totalSold =
+    allSales.filter((s) => s.status === "completed").reduce((sum, s) => sum + (s.total ?? 0), 0) +
+    allContracts.reduce((sum, c) => sum + (c.total_amount ?? 0), 0);
+  const totalSpent = allMovements
+    .filter((m) => m.type === "purchase_payment" || m.type === "expense")
+    .reduce((sum, m) => sum + Math.abs(m.amount), 0);
+  const byAccountAllTime = new Map<string, { debit: number; credit: number }>();
+  for (const entry of allJournalEntries) {
+    for (const line of entry.lines ?? []) {
+      const current = byAccountAllTime.get(line.account_code) ?? { debit: 0, credit: 0 };
+      current.debit += line.debit ?? 0;
+      current.credit += line.credit ?? 0;
+      byAccountAllTime.set(line.account_code, current);
+    }
+  }
+  const totalEarned =
+    (byAccountAllTime.get("3000")?.credit ?? 0) +
+    (byAccountAllTime.get("3100")?.credit ?? 0) -
+    (byAccountAllTime.get("5000")?.debit ?? 0);
+  const currentTreasuryBalance = accounts.reduce(
+    (sum, a) => sum + computeAccountBalance(a.id, allMovements),
+    0,
+  );
+
   return (
     <div className="flex min-h-screen bg-background">
       <AppSidebar session={session} />
@@ -232,18 +271,44 @@ function TreasuryPage() {
           </p>
         )}
 
-        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {accounts.length > 0 && (
-            <div className="rounded-xl border-2 border-primary/40 bg-primary/5 p-4 sm:col-span-2">
-              <p className="text-xs text-muted-foreground">إجمالي كل الخزائن الآن</p>
-              <p className="mt-1 text-2xl font-bold text-foreground" dir="ltr">
-                {accounts
-                  .reduce((sum, a) => sum + computeAccountBalance(a.id, allMovements), 0)
-                  .toLocaleString("ar-EG")}{" "}
-                ج.م
+        <section className="mt-6">
+          <h2 className="text-sm font-bold text-foreground">نظرة عامة (كل الأوقات)</h2>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
+            <div className="rounded-xl border-2 border-primary/40 bg-primary/5 p-4">
+              <p className="text-xs text-muted-foreground">رصيد الخزينة الآن</p>
+              <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
+                {currentTreasuryBalance.toLocaleString("ar-EG")} ج.م
               </p>
             </div>
-          )}
+            <Link to="/partners" className="block rounded-xl border border-border bg-card p-4">
+              <p className="text-xs text-muted-foreground">الشركاء ضخوا فينا</p>
+              <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
+                {totalPartnerFunding.toLocaleString("ar-EG")} ج.م
+              </p>
+              <p className="mt-1 text-[11px] font-medium text-primary">فتح صفحة الشركاء ←</p>
+            </Link>
+            <div className="rounded-xl border border-border bg-card p-4">
+              <p className="text-xs text-muted-foreground">بعنا بكام (كاش + تقسيط)</p>
+              <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
+                {totalSold.toLocaleString("ar-EG")} ج.م
+              </p>
+            </div>
+            <div className="rounded-xl border border-border bg-card p-4">
+              <p className="text-xs text-muted-foreground">صرفنا كام (موردين + مصروفات)</p>
+              <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
+                {totalSpent.toLocaleString("ar-EG")} ج.م
+              </p>
+            </div>
+            <div className="rounded-xl border border-border bg-card p-4">
+              <p className="text-xs text-muted-foreground">كسبنا كام (صافي الربح)</p>
+              <p className="mt-1 text-xl font-bold text-success" dir="ltr">
+                {totalEarned.toLocaleString("ar-EG")} ج.م
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
           {accounts.map((account) => (
             <div key={account.id} className="rounded-xl border border-border bg-card p-4">
               <p className="text-xs text-muted-foreground">
