@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { SearchPicker } from "@/components/ui/SearchPicker";
 import { subscribeData } from "@/lib/data-store";
 import {
   computeProductStock,
@@ -164,18 +165,13 @@ function NewSalePage() {
         <div className="mt-4">
           <label className="block max-w-sm space-y-1">
             <span className="text-xs font-medium text-foreground">العميل</span>
-            <select
+            <SearchPicker
+              items={customers.map((c) => ({ id: c.id, label: `${c.name} (${c.code})` }))}
               value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
-              className="form-input"
-            >
-              <option value="">عميل نقدي</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({c.code})
-                </option>
-              ))}
-            </select>
+              onChange={setCustomerId}
+              emptyLabel="عميل نقدي"
+              placeholder="بحث باسم العميل..."
+            />
           </label>
         </div>
 
@@ -184,21 +180,15 @@ function NewSalePage() {
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
             <label className="block space-y-1 sm:col-span-2">
               <span className="text-xs font-medium text-foreground">الجهاز</span>
-              <select
+              <SearchPicker
+                items={products.map((p) => ({ id: p.id, label: p.name }))}
                 value={selectedProductId}
-                onChange={(e) => {
-                  setSelectedProductId(e.target.value);
+                onChange={(id) => {
+                  setSelectedProductId(id);
                   setSelectedSerialId("");
                 }}
-                className="form-input"
-              >
-                <option value="">اختر جهاز</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} — {p.cash_price.toLocaleString("ar-EG")} ج.م
-                  </option>
-                ))}
-              </select>
+                placeholder="بحث باسم الجهاز..."
+              />
             </label>
 
             {selectedProduct?.serial_required ? (

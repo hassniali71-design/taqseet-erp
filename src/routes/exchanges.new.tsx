@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { SearchPicker } from "@/components/ui/SearchPicker";
 import {
   useCreateExchange,
   useProducts,
@@ -272,21 +273,15 @@ function NewExchangePage() {
                   أصناف جديدة (بسعر البيع النقدي)
                 </h2>
                 <div className="mt-3 space-y-2">
-                  <select
+                  <SearchPicker
+                    items={products.map((p) => ({ id: p.id, label: p.name }))}
                     value={selectedNewProductId}
-                    onChange={(e) => {
-                      setSelectedNewProductId(e.target.value);
+                    onChange={(id) => {
+                      setSelectedNewProductId(id);
                       setNewSerialId("");
                     }}
-                    className="form-input"
-                  >
-                    <option value="">اختر جهاز</option>
-                    {products.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} — {p.cash_price.toLocaleString("ar-EG")} ج.م
-                      </option>
-                    ))}
-                  </select>
+                    placeholder="بحث باسم الجهاز..."
+                  />
                   {newProduct?.serial_required ? (
                     <select
                       value={newSerialId}

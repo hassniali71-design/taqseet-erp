@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import { SalesTrendChart } from "@/components/ui/Charts";
+import { SearchPicker } from "@/components/ui/SearchPicker";
 import { Panel, StatCard } from "@/components/ui/StatCard";
 import {
   computeAccountBalance,
@@ -348,18 +349,12 @@ function StatementReport({
     <section className="mt-6">
       <label className="block max-w-sm space-y-1">
         <span className="text-xs font-medium text-foreground">اختر عميل</span>
-        <select
+        <SearchPicker
+          items={customers.map((c) => ({ id: c.id, label: `${c.name} (${c.code})` }))}
           value={customerId}
-          onChange={(e) => onCustomerChange(e.target.value)}
-          className="form-input"
-        >
-          <option value="">اختر عميل</option>
-          {customers.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} ({c.code})
-            </option>
-          ))}
-        </select>
+          onChange={onCustomerChange}
+          placeholder="بحث باسم العميل..."
+        />
       </label>
 
       {customer && (

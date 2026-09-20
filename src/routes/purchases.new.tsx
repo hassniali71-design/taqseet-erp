@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { SearchPicker } from "@/components/ui/SearchPicker";
 import {
   useCreateProduct,
   useCreatePurchase,
@@ -10,8 +11,6 @@ import {
   useSuppliers,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
-
-const NEW_PRODUCT_VALUE = "__new__";
 
 export const Route = createFileRoute("/purchases/new")({
   component: NewPurchasePage,
@@ -206,18 +205,12 @@ function NewPurchasePage() {
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <label className="block space-y-1">
             <span className="text-xs font-medium text-foreground">المورد *</span>
-            <select
+            <SearchPicker
+              items={suppliers.map((s) => ({ id: s.id, label: `${s.name} (${s.code})` }))}
               value={supplierId}
-              onChange={(e) => setSupplierId(e.target.value)}
-              className="form-input"
-            >
-              <option value="">اختر مورد</option>
-              {suppliers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} ({s.code})
-                </option>
-              ))}
-            </select>
+              onChange={setSupplierId}
+              placeholder="بحث باسم المورد..."
+            />
           </label>
           <label className="block space-y-1">
             <span className="text-xs font-medium text-foreground">تاريخ إصدار الفاتورة</span>
@@ -248,27 +241,22 @@ function NewPurchasePage() {
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
             <label className="block space-y-1 sm:col-span-2">
               <span className="text-xs font-medium text-foreground">الجهاز</span>
-              <select
+              <SearchPicker
+                items={products.map((p) => ({ id: p.id, label: p.name }))}
                 value={selectedProductId}
-                onChange={(e) => {
-                  if (e.target.value === NEW_PRODUCT_VALUE) {
-                    setShowNewProductForm(true);
-                    setSelectedProductId("");
-                    return;
-                  }
-                  setSelectedProductId(e.target.value);
+                onChange={(id) => {
+                  setSelectedProductId(id);
                   setSerialInputs([""]);
                 }}
-                className="form-input"
-              >
-                <option value="">اختر جهاز</option>
-                <option value={NEW_PRODUCT_VALUE}>+ إضافة جهاز جديد</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} (تكلفة حالية: {p.cost_price.toLocaleString("ar-EG")} ج.م)
-                  </option>
-                ))}
-              </select>
+                placeholder="بحث باسم الجهاز..."
+                extraAction={{
+                  label: "+ إضافة جهاز جديد",
+                  onSelect: () => {
+                    setShowNewProductForm(true);
+                    setSelectedProductId("");
+                  },
+                }}
+              />
             </label>
             <label className="block space-y-1">
               <span className="text-xs font-medium text-foreground">الكمية</span>
