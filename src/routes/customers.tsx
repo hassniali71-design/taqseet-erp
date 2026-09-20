@@ -247,10 +247,10 @@ function CustomersPage() {
                 const totalPurchased =
                   sales
                     .filter((s) => s.customer_id === customer.id)
-                    .reduce((sum, s) => sum + s.total, 0) +
+                    .reduce((sum, s) => sum + (s.total ?? 0), 0) +
                   contracts
                     .filter((c) => c.customer_id === customer.id)
-                    .reduce((sum, c) => sum + c.total_amount, 0);
+                    .reduce((sum, c) => sum + (c.total_amount ?? 0), 0);
                 const exposure = computeCustomerExposure(customer.id, contracts, installments);
                 return (
                   <tr key={customer.id} className="border-b border-border last:border-0">
@@ -280,7 +280,7 @@ function CustomersPage() {
                       {exposure.toLocaleString("ar-EG")} ج.م
                     </td>
                     <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
-                      {customer.credit_limit.toLocaleString("ar-EG")} ج.م
+                      {(customer.credit_limit ?? 0).toLocaleString("ar-EG")} ج.م
                     </td>
                     <td className="px-4 py-3">
                       <RiskBadge

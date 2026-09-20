@@ -137,7 +137,7 @@ function SalesReport({ from, to, tenantId }: { from: number; to: number; tenantI
       return t >= from && t <= to && s.status === "completed";
     })
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const total = sales.reduce((sum, s) => sum + s.total, 0);
+  const total = sales.reduce((sum, s) => sum + (s.total ?? 0), 0);
 
   const [chartYear, chartMonthIndex] = chartMonth.split("-").map(Number) as [number, number];
   const daysInMonth = new Date(chartYear, chartMonthIndex, 0).getDate();
@@ -153,7 +153,7 @@ function SalesReport({ from, to, tenantId }: { from: number; to: number; tenantI
     const day = i + 1;
     const total = monthlySales
       .filter((s) => new Date(s.created_at).getDate() === day)
-      .reduce((sum, s) => sum + s.total, 0);
+      .reduce((sum, s) => sum + (s.total ?? 0), 0);
     return { label: String(day), value: total };
   });
   const bestDay = dailyChartData.reduce(
@@ -212,7 +212,7 @@ function SalesReport({ from, to, tenantId }: { from: number; to: number; tenantI
                 </td>
                 <td className="px-4 py-3 text-muted-foreground">{s.customer_name}</td>
                 <td className="px-4 py-3 text-muted-foreground" dir="ltr">
-                  {s.total.toLocaleString("ar-EG")}
+                  {(s.total ?? 0).toLocaleString("ar-EG")}
                 </td>
                 <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
                   {new Date(s.created_at).toLocaleDateString("ar-EG")}
@@ -263,7 +263,7 @@ function ContractsReport({ tenantId }: { tenantId: string }) {
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{c.customer_name}</td>
                   <td className="px-4 py-3 text-muted-foreground" dir="ltr">
-                    {c.total_amount.toLocaleString("ar-EG")}
+                    {(c.total_amount ?? 0).toLocaleString("ar-EG")}
                   </td>
                   <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
                     {remaining.toLocaleString("ar-EG")}
@@ -310,8 +310,8 @@ function StatementReport({
   const returns = customer ? allReturns.filter((r) => r.customer_id === customer.id) : [];
 
   const totalPurchased =
-    sales.reduce((sum, s) => sum + s.total, 0) +
-    contracts.reduce((sum, c) => sum + c.total_amount, 0);
+    sales.reduce((sum, s) => sum + (s.total ?? 0), 0) +
+    contracts.reduce((sum, c) => sum + (c.total_amount ?? 0), 0);
   const exposure = customer
     ? computeCustomerExposure(customer.id, allContracts, allInstallments)
     : 0;
@@ -323,12 +323,12 @@ function StatementReport({
     ...sales.map((s) => ({
       date: s.created_at,
       label: `فاتورة ${s.invoice_number}`,
-      amount: s.total,
+      amount: s.total ?? 0,
     })),
     ...contracts.map((c) => ({
       date: c.created_at,
       label: `عقد تقسيط ${c.contract_number}`,
-      amount: c.total_amount,
+      amount: c.total_amount ?? 0,
     })),
     ...payments.map((p) => ({
       date: p.created_at,
@@ -452,7 +452,7 @@ function MovementReport({ from, to, tenantId }: { from: number; to: number; tena
 
   const soldQtyByProduct = new Map<string, number>();
   for (const s of sales) {
-    for (const item of s.items) {
+    for (const item of s.items ?? []) {
       soldQtyByProduct.set(
         item.product_id,
         (soldQtyByProduct.get(item.product_id) ?? 0) + item.quantity,
@@ -460,7 +460,7 @@ function MovementReport({ from, to, tenantId }: { from: number; to: number; tena
     }
   }
   for (const c of contracts) {
-    for (const item of c.items) {
+    for (const item of c.items ?? []) {
       soldQtyByProduct.set(
         item.product_id,
         (soldQtyByProduct.get(item.product_id) ?? 0) + item.quantity,
@@ -553,24 +553,24 @@ function FinancialReport({ from, to, tenantId }: { from: number; to: number; ten
 
   const byAccount = new Map<string, { debit: number; credit: number }>();
   for (const entry of entries) {
-    for (const line of entry.lines) {
+    for (const line of entry.lines ?? []) {
       const current = byAccount.get(line.account_code) ?? { debit: 0, credit: 0 };
-      current.debit += line.debit;
-      current.credit += line.credit;
+      current.debit += line.debit ?? 0;
+      current.credit += line.credit ?? 0;
       byAccount.set(line.account_code, current);
     }
   }
 
   const cashSalesTotal = allSales
     .filter((s) => s.status === "completed" && inPeriod(s.created_at))
-    .reduce((sum, s) => sum + s.total, 0);
+    .reduce((sum, s) => sum + (s.total ?? 0), 0);
   const installmentSalesTotal = allContracts
     .filter((c) => inPeriod(c.created_at))
-    .reduce((sum, c) => sum + c.total_amount, 0);
+    .reduce((sum, c) => sum + (c.total_amount ?? 0), 0);
   const totalSales = cashSalesTotal + installmentSalesTotal;
   const collectionsTotal = allPayments
     .filter((p) => inPeriod(p.created_at))
-    .reduce((sum, p) => sum + p.amount, 0);
+    .reduce((sum, p) => sum + (p.amount ?? 0), 0);
 
   const salesRevenue = byAccount.get("3000")?.credit ?? 0;
   const financeRevenue = byAccount.get("3100")?.credit ?? 0;

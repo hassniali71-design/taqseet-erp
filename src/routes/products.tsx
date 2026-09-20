@@ -564,10 +564,10 @@ function ProductsPage() {
                     )}
                   </td>
                   <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
-                    {product.cash_price.toLocaleString("ar-EG")} ج.م
+                    {(product.cash_price ?? 0).toLocaleString("ar-EG")} ج.م
                   </td>
                   <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
-                    {product.installment_price.toLocaleString("ar-EG")} ج.م
+                    {(product.installment_price ?? 0).toLocaleString("ar-EG")} ج.م
                   </td>
                   <td className="px-4 py-3">
                     <span

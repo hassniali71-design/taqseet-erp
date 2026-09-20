@@ -44,17 +44,39 @@ function isH3SwallowedErrorBody(body: string): boolean {
   }
 }
 
+// The SSR document (the HTML shell that references hashed /assets/*.js chunks) is generated
+// fresh on every request and carries no explicit Cache-Control by default, so a browser can
+// still hold onto a previous deploy's copy under its own heuristics. That stale HTML then
+// points at chunk filenames a newer deploy no longer serves, so the module load 404s and the
+// page never hydrates — a blank white screen with nothing for the error boundary to catch,
+// since React never mounted. Force revalidation on every HTML response so a redeploy is always
+// picked up on next load; hashed assets keep their own long-lived immutable cache untouched.
+function withNoCacheForHtml(response: Response): Response {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/html")) return response;
+  const headers = new Headers(response.headers);
+  headers.set("cache-control", "no-cache, must-revalidate");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
-      return await normalizeCatastrophicSsrResponse(response);
+      return withNoCacheForHtml(await normalizeCatastrophicSsrResponse(response));
     } catch (error) {
       console.error(error);
       return new Response(renderErrorPage(), {
         status: 500,
-        headers: { "content-type": "text/html; charset=utf-8" },
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-cache, must-revalidate",
+        },
       });
     }
   },
