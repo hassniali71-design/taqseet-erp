@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { getDaysOverdue, getEffectiveInstallmentStatus, subscribeData } from "@/lib/data-store";
 import {
+  dateInputToTimestamp,
   useCollectPayment,
   useCurrentTenantSettings,
   useInstallmentContracts,
@@ -51,6 +52,7 @@ function CollectionsWorkbenchPage() {
   const [, forceRerender] = useState(0);
   const [filter, setFilter] = useState<"all" | "due" | "overdue">("all");
   const [amounts, setAmounts] = useState<Record<string, string>>({});
+  const [collectDates, setCollectDates] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -118,11 +120,18 @@ function CollectionsWorkbenchPage() {
       setError(`المبلغ أكبر من المتبقي على العقد (${outstanding} ج.م)`);
       return;
     }
+    const collectDate = collectDates[contractId];
     collectPaymentMutation.mutate(
-      { contractId, amount, actorUserId },
+      {
+        contractId,
+        amount,
+        actorUserId,
+        ...(collectDate && { createdAt: dateInputToTimestamp(collectDate) }),
+      },
       {
         onSuccess: (payment) => {
           setAmounts((prev) => ({ ...prev, [contractId]: "" }));
+          setCollectDates((prev) => ({ ...prev, [contractId]: "" }));
           // A page-level message (not a per-row indicator) — a fully-collected overdue/due
           // contract moves out of the current filter tab immediately, which would unmount a
           // per-row "✓" before the user ever sees it.
@@ -217,6 +226,16 @@ function CollectionsWorkbenchPage() {
                           setAmounts((prev) => ({ ...prev, [row.contractId]: e.target.value }))
                         }
                         className="form-input w-24"
+                        dir="ltr"
+                      />
+                      <input
+                        type="date"
+                        title="تاريخ التحصيل (سيبه فاضي لو دلوقتي)"
+                        value={collectDates[row.contractId] ?? ""}
+                        onChange={(e) =>
+                          setCollectDates((prev) => ({ ...prev, [row.contractId]: e.target.value }))
+                        }
+                        className="form-input w-32"
                         dir="ltr"
                       />
                       <button

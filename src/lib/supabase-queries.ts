@@ -1958,6 +1958,7 @@ async function performCollectPayment(
   contractId: string,
   amount: number,
   actorUserId: string | null,
+  createdAt?: string,
 ): Promise<InstallmentPayment> {
   if (amount <= 0) throw new Error("المبلغ يجب أن يكون أكبر من صفر");
   const { data: contract, error: contractError } = await supabase
@@ -2021,6 +2022,7 @@ async function performCollectPayment(
       amount,
       allocations,
       user_id: actorUserId,
+      ...(createdAt ? { created_at: createdAt } : {}),
     })
     .select()
     .single();
@@ -2092,6 +2094,7 @@ async function performCollectPayment(
     `تحصيل ${payment.receipt_number as string}`,
     "installment_payment",
     payment.id as string,
+    createdAt,
   );
 
   return payment as InstallmentPayment;
@@ -2104,13 +2107,16 @@ export function useCollectPayment(tenantId: string | undefined) {
       contractId,
       amount,
       actorUserId,
+      createdAt,
     }: {
       contractId: string;
       amount: number;
       actorUserId: string | null;
+      /** تاريخ تحصيل مفتوح اختياري — لتحصيلة قديمة بتتسجّل دلوقتي بأثر رجعي. */
+      createdAt?: string;
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
-      return performCollectPayment(tenantId, contractId, amount, actorUserId);
+      return performCollectPayment(tenantId, contractId, amount, actorUserId, createdAt);
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["installments", tenantId] });
