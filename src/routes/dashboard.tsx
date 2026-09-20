@@ -67,7 +67,9 @@ const MONTH_LABELS_AR = [
 
 function DashboardPage() {
   const session = useRequireSession();
-  const [hideMoney, setHideMoney] = useState(false);
+  // اللوحة سرية افتراضيًا — الأرقام المالية مخفية لحد ما الأونر يدخل الباسورد يظهرها، مش
+  // العكس (ظاهرة افتراضيًا وتقدر تخفيها).
+  const [hideMoney, setHideMoney] = useState(true);
   const { requestConfirm, dialog } = useOwnerPasswordConfirm();
 
   const { data: tenant } = useCurrentTenant(session?.tenant_id);
