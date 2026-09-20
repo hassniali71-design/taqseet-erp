@@ -4,6 +4,7 @@ import {
   Bell,
   Calculator,
   ClipboardList,
+  Handshake,
   History,
   LayoutDashboard,
   LogOut,
@@ -74,6 +75,10 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/suppliers", label: "الموردون", icon: Truck },
       { to: "/purchases/new", label: "شراء جديد", icon: PackagePlus },
     ],
+  },
+  {
+    label: "الشركاء",
+    items: [{ to: "/partners", label: "الشركاء", icon: Handshake }],
   },
   {
     label: "المالية",

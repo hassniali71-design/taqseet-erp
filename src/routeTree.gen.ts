@@ -19,6 +19,7 @@ import { Route as DeliveriesRouteImport } from './routes/deliveries'
 import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as NotificationsRouteImport } from './routes/notifications'
+import { Route as PartnersRouteImport } from './routes/partners'
 import { Route as PlatformRouteImport } from './routes/platform'
 import { Route as ProductsRouteImport } from './routes/products'
 import { Route as ReportsRouteImport } from './routes/reports'
@@ -31,6 +32,7 @@ import { Route as WarrantyRouteImport } from './routes/warranty'
 import { Route as ContractsIdRouteImport } from './routes/contracts_.$id'
 import { Route as CustomersIdRouteImport } from './routes/customers_.$id'
 import { Route as ExchangesNewRouteImport } from './routes/exchanges.new'
+import { Route as PartnersIdRouteImport } from './routes/partners_.$id'
 import { Route as PlatformLoginRouteImport } from './routes/platform_.login'
 import { Route as ProductsIdRouteImport } from './routes/products_.$id'
 import { Route as PurchasesIdRouteImport } from './routes/purchases.$id'
@@ -89,6 +91,11 @@ const LoginRoute = LoginRouteImport.update({
 const NotificationsRoute = NotificationsRouteImport.update({
   id: '/notifications',
   path: '/notifications',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PartnersRoute = PartnersRouteImport.update({
+  id: '/partners',
+  path: '/partners',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PlatformRoute = PlatformRouteImport.update({
@@ -151,6 +158,11 @@ const ExchangesNewRoute = ExchangesNewRouteImport.update({
   path: '/exchanges/new',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PartnersIdRoute = PartnersIdRouteImport.update({
+  id: '/partners_/$id',
+  path: '/partners/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PlatformLoginRoute = PlatformLoginRouteImport.update({
   id: '/platform_/login',
   path: '/platform/login',
@@ -208,6 +220,7 @@ export interface FileRoutesByFullPath {
   '/expenses': typeof ExpensesRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
+  '/partners': typeof PartnersRoute
   '/platform': typeof PlatformRoute
   '/products': typeof ProductsRoute
   '/reports': typeof ReportsRoute
@@ -220,6 +233,7 @@ export interface FileRoutesByFullPath {
   '/contracts/$id': typeof ContractsIdRoute
   '/customers/$id': typeof CustomersIdRoute
   '/exchanges/new': typeof ExchangesNewRoute
+  '/partners/$id': typeof PartnersIdRoute
   '/platform/login': typeof PlatformLoginRoute
   '/products/$id': typeof ProductsIdRoute
   '/purchases/$id': typeof PurchasesIdRoute
@@ -241,6 +255,7 @@ export interface FileRoutesByTo {
   '/expenses': typeof ExpensesRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
+  '/partners': typeof PartnersRoute
   '/platform': typeof PlatformRoute
   '/products': typeof ProductsRoute
   '/reports': typeof ReportsRoute
@@ -253,6 +268,7 @@ export interface FileRoutesByTo {
   '/contracts/$id': typeof ContractsIdRoute
   '/customers/$id': typeof CustomersIdRoute
   '/exchanges/new': typeof ExchangesNewRoute
+  '/partners/$id': typeof PartnersIdRoute
   '/platform/login': typeof PlatformLoginRoute
   '/products/$id': typeof ProductsIdRoute
   '/purchases/$id': typeof PurchasesIdRoute
@@ -275,6 +291,7 @@ export interface FileRoutesById {
   '/expenses': typeof ExpensesRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
+  '/partners': typeof PartnersRoute
   '/platform': typeof PlatformRoute
   '/products': typeof ProductsRoute
   '/reports': typeof ReportsRoute
@@ -287,6 +304,7 @@ export interface FileRoutesById {
   '/contracts_/$id': typeof ContractsIdRoute
   '/customers_/$id': typeof CustomersIdRoute
   '/exchanges/new': typeof ExchangesNewRoute
+  '/partners_/$id': typeof PartnersIdRoute
   '/platform_/login': typeof PlatformLoginRoute
   '/products_/$id': typeof ProductsIdRoute
   '/purchases/$id': typeof PurchasesIdRoute
@@ -310,6 +328,7 @@ export interface FileRouteTypes {
     | '/expenses'
     | '/login'
     | '/notifications'
+    | '/partners'
     | '/platform'
     | '/products'
     | '/reports'
@@ -322,6 +341,7 @@ export interface FileRouteTypes {
     | '/contracts/$id'
     | '/customers/$id'
     | '/exchanges/new'
+    | '/partners/$id'
     | '/platform/login'
     | '/products/$id'
     | '/purchases/$id'
@@ -343,6 +363,7 @@ export interface FileRouteTypes {
     | '/expenses'
     | '/login'
     | '/notifications'
+    | '/partners'
     | '/platform'
     | '/products'
     | '/reports'
@@ -355,6 +376,7 @@ export interface FileRouteTypes {
     | '/contracts/$id'
     | '/customers/$id'
     | '/exchanges/new'
+    | '/partners/$id'
     | '/platform/login'
     | '/products/$id'
     | '/purchases/$id'
@@ -376,6 +398,7 @@ export interface FileRouteTypes {
     | '/expenses'
     | '/login'
     | '/notifications'
+    | '/partners'
     | '/platform'
     | '/products'
     | '/reports'
@@ -388,6 +411,7 @@ export interface FileRouteTypes {
     | '/contracts_/$id'
     | '/customers_/$id'
     | '/exchanges/new'
+    | '/partners_/$id'
     | '/platform_/login'
     | '/products_/$id'
     | '/purchases/$id'
@@ -410,6 +434,7 @@ export interface RootRouteChildren {
   ExpensesRoute: typeof ExpensesRoute
   LoginRoute: typeof LoginRoute
   NotificationsRoute: typeof NotificationsRoute
+  PartnersRoute: typeof PartnersRoute
   PlatformRoute: typeof PlatformRoute
   ProductsRoute: typeof ProductsRoute
   ReportsRoute: typeof ReportsRoute
@@ -422,6 +447,7 @@ export interface RootRouteChildren {
   ContractsIdRoute: typeof ContractsIdRoute
   CustomersIdRoute: typeof CustomersIdRoute
   ExchangesNewRoute: typeof ExchangesNewRoute
+  PartnersIdRoute: typeof PartnersIdRoute
   PlatformLoginRoute: typeof PlatformLoginRoute
   ProductsIdRoute: typeof ProductsIdRoute
   PurchasesIdRoute: typeof PurchasesIdRoute
@@ -503,6 +529,13 @@ declare module '@tanstack/react-router' {
       path: '/notifications'
       fullPath: '/notifications'
       preLoaderRoute: typeof NotificationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/partners': {
+      id: '/partners'
+      path: '/partners'
+      fullPath: '/partners'
+      preLoaderRoute: typeof PartnersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/platform': {
@@ -589,6 +622,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ExchangesNewRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/partners_/$id': {
+      id: '/partners_/$id'
+      path: '/partners/$id'
+      fullPath: '/partners/$id'
+      preLoaderRoute: typeof PartnersIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/platform_/login': {
       id: '/platform_/login'
       path: '/platform/login'
@@ -666,6 +706,7 @@ const rootRouteChildren: RootRouteChildren = {
   ExpensesRoute: ExpensesRoute,
   LoginRoute: LoginRoute,
   NotificationsRoute: NotificationsRoute,
+  PartnersRoute: PartnersRoute,
   PlatformRoute: PlatformRoute,
   ProductsRoute: ProductsRoute,
   ReportsRoute: ReportsRoute,
@@ -678,6 +719,7 @@ const rootRouteChildren: RootRouteChildren = {
   ContractsIdRoute: ContractsIdRoute,
   CustomersIdRoute: CustomersIdRoute,
   ExchangesNewRoute: ExchangesNewRoute,
+  PartnersIdRoute: PartnersIdRoute,
   PlatformLoginRoute: PlatformLoginRoute,
   ProductsIdRoute: ProductsIdRoute,
   PurchasesIdRoute: PurchasesIdRoute,

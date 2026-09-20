@@ -467,6 +467,45 @@ export interface SupplierPayment {
   created_at: string;
 }
 
+/** شركاء تمويل — بيموّلوا العميل يشتري بضاعة، وبيرجعلهم رأس مالهم + نصيبهم من الربح لما
+ * تتباع. `profit_share_pct` خاص بكل شريك لوحده (مش نسبة موحّدة). `created_at` تاريخ انضمام
+ * مفتوح — قابل للتحديد يدويًا زي customers/sales/installment_contracts/purchases. §11: لا حذف
+ * فعلي — `active` بس (زي customers/products/suppliers). */
+export interface Partner {
+  id: string;
+  tenant_id: string;
+  code: string;
+  name: string;
+  phone?: string;
+  profit_share_pct: number;
+  notes?: string;
+  active: boolean;
+  created_at: string;
+}
+
+/** دفتر حركة الشريك — append-only (زي treasury_movements/installment_payments)، لا تعديل ولا
+ * حذف. `amount` الموقّع هو اللي بيحرّك رصيد الشريك الفعلي (رصيد = مجموع amount، محسوب وقت
+ * القراءة — انظر computePartnerBalance في supabase-queries.ts)؛ `cost_recovered`/`profit_amount`
+ * أعمدة منفصلة للتقارير بس (رأس مال مسترد مقابل ربح)، لا تُستخدم في حساب الرصيد. طبقة موازية
+ * تمامًا لمحاسبة البيع نفسه — إنشاء صف هنا لا يمس `journal_entries`/`treasury_movements`
+ * الخاصة بالبيع/العقد الأصلي بأي شكل. */
+export interface PartnerTransaction {
+  id: string;
+  tenant_id: string;
+  partner_id: string;
+  type: "funding" | "withdrawal" | "sale_settlement" | "adjustment";
+  amount: number;
+  cost_recovered: number;
+  profit_amount: number;
+  reference?: string;
+  reason?: string;
+  related_sale_id?: string;
+  related_contract_id?: string;
+  related_product_id?: string;
+  user_id: string | null;
+  created_at: string;
+}
+
 /**
  * §68 Treasury — multiple accounts (main + at least one cashier float). A balance is never
  * stored on the account itself; it's always the sum of that account's `TreasuryMovement` rows

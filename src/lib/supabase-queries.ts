@@ -23,6 +23,8 @@ import type {
   InventoryMovement,
   JournalEntry,
   JournalLine,
+  Partner,
+  PartnerTransaction,
   Product,
   ProductBrand,
   ProductCategory,
@@ -2786,6 +2788,193 @@ export function useRecordSupplierPayment(tenantId: string | undefined) {
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
   });
+}
+
+/* ---------------- Partners (شركاء التمويل) — parallel funding-partner ledger, layered on
+ * top of the sale/installment flows above without ever touching their own treasury/journal
+ * postings. A partner's balance is never stored — always the sum of their `partner_transactions`
+ * rows, same "balance = sum of the ledger" principle as computeAccountBalance/getSupplierBalance
+ * above. `useCreatePartner`/`useAddPartnerFunding` are independent of any sale; the sale-time
+ * settlement path (writing one `sale_settlement` row per partner picked on a deal) lives in
+ * the sale/installment-contract route files themselves — best-effort, same discipline as
+ * postFinancials, since the sale has already succeeded by the time partner attribution runs. */
+
+export function usePartners(tenantId: string | undefined) {
+  return useTenantList<Partner>("partners", tenantId, { orderBy: "created_at", ascending: false });
+}
+
+export function usePartnerTransactions(tenantId: string | undefined) {
+  return useTenantList<PartnerTransaction>("partner_transactions", tenantId, {
+    orderBy: "created_at",
+    ascending: false,
+  });
+}
+
+/** Mirrors computeAccountBalance/getSupplierBalance exactly — a partner's balance (capital
+ * still owed to them + profit not yet withdrawn) is the running sum of their signed
+ * `partner_transactions.amount`, never a stored counter. */
+export function computePartnerBalance(
+  partnerId: string,
+  transactions: PartnerTransaction[],
+): number {
+  return (
+    Math.round(
+      transactions.filter((t) => t.partner_id === partnerId).reduce((sum, t) => sum + t.amount, 0) *
+        100,
+    ) / 100
+  );
+}
+
+/** Pure calculation, no DB — one partner's cut of one deal. `splitPct` is this partner's share
+ * of the deal itself (equal by default among however many partners are picked, editable per
+ * partner at sale time); `profitSharePct` is that partner's own permanent profit-sharing rate
+ * (Partner.profit_share_pct). Profit is computed on goods margin only (cashSubtotal - cost),
+ * never on installment financing revenue — matches the existing 3000/3100 account split. */
+export function computePartnerDealPreview(
+  cashSubtotal: number,
+  cost: number,
+  splitPct: number,
+  profitSharePct: number,
+): { costRecovered: number; profitAmount: number; total: number } {
+  const shareOfCost = Math.round(cost * (splitPct / 100) * 100) / 100;
+  const shareOfMargin = Math.round((cashSubtotal - cost) * (splitPct / 100) * 100) / 100;
+  const profitAmount = Math.round(shareOfMargin * (profitSharePct / 100) * 100) / 100;
+  return {
+    costRecovered: shareOfCost,
+    profitAmount,
+    total: Math.round((shareOfCost + profitAmount) * 100) / 100,
+  };
+}
+
+export function useCreatePartner(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      input,
+      actorUserId,
+      createdAt,
+    }: {
+      input: Omit<Partner, "id" | "tenant_id" | "code" | "active" | "created_at">;
+      actorUserId: string | null;
+      /** تاريخ انضمام مفتوح — لشريك موجود فعليًا من قبل بيتسجّل دلوقتي بس. */
+      createdAt?: string;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const code = await nextTenantCode("partners", tenantId, "PTR");
+      const { data, error } = await supabase
+        .from("partners")
+        .insert({
+          ...input,
+          tenant_id: tenantId,
+          code,
+          active: true,
+          ...(createdAt ? { created_at: createdAt } : {}),
+        })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "partner.create",
+        entity: "partners",
+        entity_id: data.id as string,
+        new_value: data,
+      });
+      return data as Partner;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["partners", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+/** إضافة تمويل لشريك في أي وقت (Top-up) — تسجّل صف `funding` في دفتره، بيزوّد رصيده مباشرة.
+ * مفيش سقف/تحقق تاني غير المبلغ لازم يكون أكبر من صفر (نفس بساطة useRecordSupplierPayment). */
+export function useAddPartnerFunding(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      partnerId,
+      amount,
+      actorUserId,
+      reason,
+    }: {
+      partnerId: string;
+      amount: number;
+      actorUserId: string | null;
+      reason?: string;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (amount <= 0) throw new Error("المبلغ يجب أن يكون أكبر من صفر");
+      const { data, error } = await supabase
+        .from("partner_transactions")
+        .insert({
+          tenant_id: tenantId,
+          partner_id: partnerId,
+          type: "funding",
+          amount,
+          user_id: actorUserId,
+          ...(reason ? { reason } : {}),
+        })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "partner_transaction.funding",
+        entity: "partner_transactions",
+        entity_id: data.id as string,
+        new_value: data,
+      });
+      return data as PartnerTransaction;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["partner_transactions", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+/** بيسجّل صف `sale_settlement` واحد لكل شريك مُختار وقت البيع — Best-effort تمامًا (فشلها ميوقفش
+ * نجاح البيع نفسه، زي postFinancials بالظبط)، وبتُستدعى بعد نجاح useCreateSale/
+ * useCreateInstallmentContract من route الصفحة نفسها. */
+export async function settlePartnersForDeal(
+  tenantId: string,
+  actorUserId: string | null,
+  reference: string,
+  relatedSaleId: string | undefined,
+  relatedContractId: string | undefined,
+  entries: Array<{
+    partnerId: string;
+    productId: string;
+    costRecovered: number;
+    profitAmount: number;
+  }>,
+): Promise<void> {
+  if (entries.length === 0) return;
+  try {
+    const { error } = await supabase.from("partner_transactions").insert(
+      entries.map((e) => ({
+        tenant_id: tenantId,
+        partner_id: e.partnerId,
+        type: "sale_settlement",
+        amount: Math.round((e.costRecovered + e.profitAmount) * 100) / 100,
+        cost_recovered: e.costRecovered,
+        profit_amount: e.profitAmount,
+        reference,
+        ...(relatedSaleId ? { related_sale_id: relatedSaleId } : {}),
+        ...(relatedContractId ? { related_contract_id: relatedContractId } : {}),
+        related_product_id: e.productId,
+        user_id: actorUserId,
+      })),
+    );
+    if (error) throw new Error(error.message);
+  } catch (e) {
+    console.warn("فشل تسوية الشركاء لهذه الصفقة:", e instanceof Error ? e.message : e);
+  }
 }
 
 /* ---------------- Treasury (§68) / Shifts (§70) / Expenses (§73) / Accounting (§74-§75) ----
