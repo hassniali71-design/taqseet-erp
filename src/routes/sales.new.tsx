@@ -2,17 +2,22 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { PartnerDealPicker } from "@/components/ui/PartnerDealPicker";
 import { SearchPicker } from "@/components/ui/SearchPicker";
 import { subscribeData } from "@/lib/data-store";
 import {
+  computePartnerDealPreview,
   computeProductStock,
   dateInputToTimestamp,
+  settlePartnersForDeal,
   useCreateSale,
   useCurrentTenantSettings,
   useCustomers,
   useInventoryMovements,
+  usePartners,
   useProductSerials,
   useProducts,
+  usePurchases,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
@@ -43,6 +48,8 @@ function NewSalePage() {
   const [returnWindowDays, setReturnWindowDays] = useState("");
   const [saleDate, setSaleDate] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [selectedPartnerIds, setSelectedPartnerIds] = useState<string[]>([]);
+  const [partnerSplits, setPartnerSplits] = useState<Record<string, string>>({});
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -51,6 +58,8 @@ function NewSalePage() {
   const { data: allProducts = [] } = useProducts(session?.tenant_id);
   const { data: allSerials = [] } = useProductSerials(session?.tenant_id);
   const { data: allMovements = [] } = useInventoryMovements(session?.tenant_id);
+  const { data: allPartners = [] } = usePartners(session?.tenant_id);
+  const { data: allPurchases = [] } = usePurchases(session?.tenant_id);
   const createSaleMutation = useCreateSale(session?.tenant_id);
 
   if (!session) return null;
@@ -133,6 +142,13 @@ function NewSalePage() {
   const subtotal = cart.reduce((sum, l) => sum + l.unit_price * l.quantity, 0);
   const discount = Math.round(subtotal * ((Number(discountPct) || 0) / 100) * 100) / 100;
   const total = subtotal - discount;
+  const cartCost = cart.reduce((sum, l) => {
+    const product = allProducts.find((p) => p.id === l.product_id);
+    return sum + (product?.cost_price ?? 0) * l.quantity;
+  }, 0);
+  const distinctProductIds = new Set(cart.map((l) => l.product_id));
+  const singleProductId = distinctProductIds.size === 1 ? cart[0]?.product_id : undefined;
+  const activePartners = allPartners.filter((p) => p.active);
 
   function handleConfirm() {
     setError(null);
@@ -153,7 +169,34 @@ function NewSalePage() {
         ...(saleDate && { createdAt: dateInputToTimestamp(saleDate) }),
       },
       {
-        onSuccess: (sale) => void navigate({ to: "/sales/$id", params: { id: sale.id } }),
+        onSuccess: (sale) => {
+          if (selectedPartnerIds.length > 0 && session) {
+            void settlePartnersForDeal(
+              session.tenant_id,
+              actorUserId,
+              sale.invoice_number,
+              sale.id,
+              undefined,
+              selectedPartnerIds.map((partnerId) => {
+                const partner = activePartners.find((p) => p.id === partnerId);
+                const splitPct = Number(partnerSplits[partnerId]) || 0;
+                const preview = computePartnerDealPreview(
+                  subtotal,
+                  cartCost,
+                  splitPct,
+                  partner?.profit_share_pct ?? 0,
+                );
+                return {
+                  partnerId,
+                  ...(singleProductId ? { productId: singleProductId } : {}),
+                  costRecovered: preview.costRecovered,
+                  profitAmount: preview.profitAmount,
+                };
+              }),
+            );
+          }
+          void navigate({ to: "/sales/$id", params: { id: sale.id } });
+        },
         onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
       },
     );
@@ -343,6 +386,20 @@ function NewSalePage() {
             </p>
           </div>
         </div>
+
+        {cart.length > 0 && activePartners.length > 0 && (
+          <PartnerDealPicker
+            partners={activePartners}
+            purchases={allPurchases}
+            selectedIds={selectedPartnerIds}
+            onSelectedIdsChange={setSelectedPartnerIds}
+            splits={partnerSplits}
+            onSplitsChange={setPartnerSplits}
+            cashSubtotal={subtotal}
+            cost={cartCost}
+            {...(singleProductId ? { productId: singleProductId } : {})}
+          />
+        )}
 
         <button
           onClick={handleConfirm}

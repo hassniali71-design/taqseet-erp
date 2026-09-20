@@ -2,14 +2,17 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { PartnerDealPicker } from "@/components/ui/PartnerDealPicker";
 import { SearchPicker } from "@/components/ui/SearchPicker";
 import { subscribeData } from "@/lib/data-store";
 import { calculateFinance, generateSchedule } from "@/lib/finance-engine";
 import {
   computeCustomerExposure,
   computeCustomerOnCreditHold,
+  computePartnerDealPreview,
   computeProductStock,
   dateInputToTimestamp,
+  settlePartnersForDeal,
   useCreateInstallmentContract,
   useCurrentTenantSettings,
   useCustomers,
@@ -17,8 +20,10 @@ import {
   useInstallmentPlans,
   useInstallments,
   useInventoryMovements,
+  usePartners,
   useProductSerials,
   useProducts,
+  usePurchases,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
@@ -49,6 +54,8 @@ function NewInstallmentSalePage() {
   const [planId, setPlanId] = useState("");
   const [contractDate, setContractDate] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [selectedPartnerIds, setSelectedPartnerIds] = useState<string[]>([]);
+  const [partnerSplits, setPartnerSplits] = useState<Record<string, string>>({});
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -60,6 +67,8 @@ function NewInstallmentSalePage() {
   const { data: allMovements = [] } = useInventoryMovements(session?.tenant_id);
   const { data: allContracts = [] } = useInstallmentContracts(session?.tenant_id);
   const { data: allInstallments = [] } = useInstallments(session?.tenant_id);
+  const { data: allPartners = [] } = usePartners(session?.tenant_id);
+  const { data: allPurchases = [] } = usePurchases(session?.tenant_id);
   const createContractMutation = useCreateInstallmentContract(session?.tenant_id);
 
   if (!session) return null;
@@ -168,6 +177,14 @@ function NewInstallmentSalePage() {
       )
     : false;
 
+  const cartCost = cart.reduce((sum, l) => {
+    const product = allProducts.find((p) => p.id === l.product_id);
+    return sum + (product?.cost_price ?? 0) * l.quantity;
+  }, 0);
+  const distinctProductIds = new Set(cart.map((l) => l.product_id));
+  const singleProductId = distinctProductIds.size === 1 ? cart[0]?.product_id : undefined;
+  const activePartners = allPartners.filter((p) => p.active);
+
   function handleConfirm() {
     setError(null);
     if (!customerId) {
@@ -196,8 +213,34 @@ function NewInstallmentSalePage() {
         ...(contractDate && { createdAt: dateInputToTimestamp(contractDate) }),
       },
       {
-        onSuccess: (contract) =>
-          void navigate({ to: "/contracts/$id", params: { id: contract.id } }),
+        onSuccess: (contract) => {
+          if (selectedPartnerIds.length > 0 && session) {
+            void settlePartnersForDeal(
+              session.tenant_id,
+              actorUserId,
+              contract.contract_number,
+              undefined,
+              contract.id,
+              selectedPartnerIds.map((partnerId) => {
+                const partner = activePartners.find((p) => p.id === partnerId);
+                const splitPct = Number(partnerSplits[partnerId]) || 0;
+                const preview = computePartnerDealPreview(
+                  cashSubtotal,
+                  cartCost,
+                  splitPct,
+                  partner?.profit_share_pct ?? 0,
+                );
+                return {
+                  partnerId,
+                  ...(singleProductId ? { productId: singleProductId } : {}),
+                  costRecovered: preview.costRecovered,
+                  profitAmount: preview.profitAmount,
+                };
+              }),
+            );
+          }
+          void navigate({ to: "/contracts/$id", params: { id: contract.id } });
+        },
         onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
       },
     );
@@ -438,6 +481,20 @@ function NewInstallmentSalePage() {
               </table>
             </div>
           </div>
+        )}
+
+        {cart.length > 0 && activePartners.length > 0 && (
+          <PartnerDealPicker
+            partners={activePartners}
+            purchases={allPurchases}
+            selectedIds={selectedPartnerIds}
+            onSelectedIdsChange={setSelectedPartnerIds}
+            splits={partnerSplits}
+            onSplitsChange={setPartnerSplits}
+            cashSubtotal={cashSubtotal}
+            cost={cartCost}
+            {...(singleProductId ? { productId: singleProductId } : {})}
+          />
         )}
 
         <button

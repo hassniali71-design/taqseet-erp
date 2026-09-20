@@ -2949,7 +2949,7 @@ export async function settlePartnersForDeal(
   relatedContractId: string | undefined,
   entries: Array<{
     partnerId: string;
-    productId: string;
+    productId?: string;
     costRecovered: number;
     profitAmount: number;
   }>,
@@ -2967,7 +2967,7 @@ export async function settlePartnersForDeal(
         reference,
         ...(relatedSaleId ? { related_sale_id: relatedSaleId } : {}),
         ...(relatedContractId ? { related_contract_id: relatedContractId } : {}),
-        related_product_id: e.productId,
+        ...(e.productId ? { related_product_id: e.productId } : {}),
         user_id: actorUserId,
       })),
     );
