@@ -31,24 +31,25 @@ function StockCountPage() {
   if (!session) return null;
   const actorUserId = session.user_id;
 
-  // جرد المخزون بيعرض كل الأجهزة النشطة دلوقتي (كاملة، مش بس اللي بتتجرد بكمية) — منتجات
-  // السيريال بتتعرض للقراءة فقط (تعديلها من صفحة الجهاز نفسه عبر قائمة السيريالات، زي ما
-  // useAdjustStock نفسه بيرفض تعديلها بهذه الطريقة)، وبحث بالاسم عشان الجرد الكامل يبقى
-  // عملي حتى لو الكتالوج كبير.
+  // جرد المخزون — قائمة واحدة موحّدة لكل الأجهزة النشطة (مش جدولين منفصلين)، فيها كل
+  // الكتالوج مع بعض. الأجهزة غير المرتبطة بسيريال قابلة للتعديل المباشر هنا؛ أجهزة السيريال
+  // بتتعرض بنفس القائمة بس بعدّاد للقراءة فقط (تعديلها من قائمة السيريالات في صفحة الجهاز
+  // نفسه، زي ما useAdjustStock نفسه بيرفض تعديلها بطريقة "كمية واحدة" — كل سيريال له حالة
+  // مستقلة). بحث بالاسم عشان الجرد يبقى عملي حتى لو الكتالوج كبير.
   const searchLower = search.trim().toLowerCase();
   const allActiveProducts = allProducts.filter((p) => p.active);
-  const filteredProducts = searchLower
-    ? allActiveProducts.filter((p) => p.name.toLowerCase().includes(searchLower))
-    : allActiveProducts;
-  const products = filteredProducts.filter((p) => !p.serial_required);
-  const serialProducts = filteredProducts.filter((p) => p.serial_required);
+  const filteredProducts = (
+    searchLower
+      ? allActiveProducts.filter((p) => p.name.toLowerCase().includes(searchLower))
+      : allActiveProducts
+  ).sort((a, b) => a.name.localeCompare(b.name, "ar"));
 
   function submitRow(productId: string) {
     setError(null);
     const actualRaw = actuals[productId];
     if (actualRaw === undefined || actualRaw.trim() === "") return;
     const actual = Number(actualRaw);
-    const product = products.find((p) => p.id === productId);
+    const product = allActiveProducts.find((p) => p.id === productId);
     if (!product) return;
     const expected = computeProductStock(productId, false, allSerials, allMovements);
     const diff = actual - expected;
@@ -78,11 +79,12 @@ function StockCountPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <AppSidebar session={session} />
-      <main className="flex-1 mx-auto max-w-5xl px-4 py-8">
+      <main className="flex-1 mx-auto max-w-6xl px-4 py-8">
         <h1 className="text-2xl font-bold text-foreground">جرد المخزون</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          جرد كامل لكل الأجهزة النشطة (§30). الأجهزة غير المرتبطة بسيريال تُعدَّل هنا مباشرة — أجهزة
-          السيريال تُعرض للقراءة فقط ودقتها تأتي من قائمة السيريالات في صفحة كل جهاز.
+          جرد كامل لكل أجهزة المخزون النشطة ({filteredProducts.length} جهاز) في قائمة واحدة —
+          الأجهزة غير المرتبطة بسيريال تُعدَّل هنا مباشرة، وأجهزة السيريال (§30) للقراءة فقط — دقتها
+          تأتي من قائمة السيريالات في صفحة كل جهاز، وليها رابط مباشر هنا.
         </p>
 
         <label className="mt-4 block max-w-sm space-y-1">
@@ -97,11 +99,12 @@ function StockCountPage() {
 
         {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
 
-        <div className="mt-6 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
+        <div className="mt-6 max-h-[40rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-right text-sm">
             <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">الجهاز</th>
+                <th className="px-4 py-3 font-medium">النوع</th>
                 <th className="px-4 py-3 font-medium">المتوقع</th>
                 <th className="px-4 py-3 font-medium">الفعلي</th>
                 <th className="px-4 py-3 font-medium">السبب (لو فيه فرق)</th>
@@ -109,13 +112,50 @@ function StockCountPage() {
               </tr>
             </thead>
             <tbody>
-              {products.map((product) => {
-                const expected = computeProductStock(product.id, false, allSerials, allMovements);
+              {filteredProducts.map((product) => {
+                const expected = computeProductStock(
+                  product.id,
+                  product.serial_required,
+                  allSerials,
+                  allMovements,
+                );
+                if (product.serial_required) {
+                  return (
+                    <tr key={product.id} className="border-b border-border last:border-0">
+                      <td className="px-4 py-3 font-medium text-foreground">{product.name}</td>
+                      <td className="px-4 py-3">
+                        <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                          سيريال
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground" dir="ltr">
+                        {expected}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground" colSpan={2}>
+                        للقراءة فقط — عدّل من صفحة الجهاز
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-left">
+                        <Link
+                          to="/products/$id"
+                          params={{ id: product.id }}
+                          className="text-xs font-medium text-primary hover:underline"
+                        >
+                          فتح صفحة الجهاز ←
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                }
                 const actualValue = actuals[product.id] ?? "";
                 const diff = actualValue !== "" ? Number(actualValue) - expected : null;
                 return (
                   <tr key={product.id} className="border-b border-border last:border-0">
                     <td className="px-4 py-3 font-medium text-foreground">{product.name}</td>
+                    <td className="px-4 py-3">
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                        بالكمية
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground" dir="ltr">
                       {expected}
                     </td>
@@ -164,57 +204,16 @@ function StockCountPage() {
                   </tr>
                 );
               })}
-              {products.length === 0 && (
+              {filteredProducts.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">
-                    {search
-                      ? "لا يوجد أجهزة مطابقة للبحث."
-                      : "لا توجد أجهزة غير مرتبطة بسيريال للجرد."}
+                  <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
+                    {search ? "لا يوجد أجهزة مطابقة للبحث." : "لا توجد أجهزة نشطة بعد."}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
-
-        {serialProducts.length > 0 && (
-          <section className="mt-8">
-            <h2 className="text-lg font-bold text-foreground">أجهزة السيريال (للقراءة فقط)</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              الكمية هنا محسوبة من عدد السيريالات المتاحة فعليًا — للتعديل ادخل صفحة الجهاز نفسه.
-            </p>
-            <div className="mt-3 max-h-[20rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
-              <table className="w-full text-right text-sm">
-                <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
-                  <tr>
-                    <th className="px-4 py-3 font-medium">الجهاز</th>
-                    <th className="px-4 py-3 font-medium">المتاح (سيريال)</th>
-                    <th className="px-4 py-3 font-medium"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {serialProducts.map((product) => (
-                    <tr key={product.id} className="border-b border-border last:border-0">
-                      <td className="px-4 py-3 font-medium text-foreground">{product.name}</td>
-                      <td className="px-4 py-3 text-muted-foreground" dir="ltr">
-                        {computeProductStock(product.id, true, allSerials, allMovements)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-left">
-                        <Link
-                          to="/products/$id"
-                          params={{ id: product.id }}
-                          className="text-xs font-medium text-primary hover:underline"
-                        >
-                          فتح صفحة الجهاز ←
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
       </main>
     </div>
   );
