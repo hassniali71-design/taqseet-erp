@@ -8,7 +8,6 @@ import { subscribeData } from "@/lib/data-store";
 import { calculateFinance, generateSchedule } from "@/lib/finance-engine";
 import {
   computeCustomerExposure,
-  computeCustomerOnCreditHold,
   computePartnerDealPreview,
   computeProductStock,
   dateInputToTimestamp,
@@ -174,15 +173,6 @@ function NewInstallmentSalePage() {
   const exposure = customer
     ? computeCustomerExposure(customer.id, allContracts, allInstallments)
     : 0;
-  const availableCredit = customer ? customer.credit_limit - exposure : 0;
-  const onCreditHold = customer
-    ? computeCustomerOnCreditHold(
-        customer.id,
-        settings.credit_hold_days,
-        allContracts,
-        allInstallments,
-      )
-    : false;
 
   const cartCost = cart.reduce((sum, l) => {
     const product = allProducts.find((p) => p.id === l.product_id);
@@ -207,7 +197,6 @@ function NewInstallmentSalePage() {
         },
         actorUserId,
         minDownPaymentPct: settings.min_down_payment_pct,
-        creditHoldDays: settings.credit_hold_days,
         ...(contractDate && { createdAt: dateInputToTimestamp(contractDate) }),
       },
       {
@@ -296,29 +285,13 @@ function NewInstallmentSalePage() {
             />
           </label>
 
-          {customer && (
-            <div className="mt-3 grid max-w-xl grid-cols-3 gap-3">
-              <div className="rounded-lg border border-border bg-card p-3">
-                <p className="text-xs text-muted-foreground">حد الائتمان</p>
-                <p className="mt-1 text-sm font-bold text-foreground" dir="ltr">
-                  {(customer.credit_limit ?? 0).toLocaleString("ar-EG")} ج.م
-                </p>
-              </div>
-              <div className="rounded-lg border border-border bg-card p-3">
-                <p className="text-xs text-muted-foreground">المتاح الآن</p>
-                <p className="mt-1 text-sm font-bold text-foreground" dir="ltr">
-                  {availableCredit.toLocaleString("ar-EG")} ج.م
-                </p>
-              </div>
-              <div className="rounded-lg border border-border bg-card p-3">
-                <p className="text-xs text-muted-foreground">حالة الائتمان</p>
-                <p
-                  className={`mt-1 text-sm font-bold ${onCreditHold ? "text-destructive" : "text-success"}`}
-                >
-                  {onCreditHold ? "موقوف (Credit Hold)" : "طبيعية"}
-                </p>
-              </div>
-            </div>
+          {customer && exposure > 0 && (
+            <p className="mt-3 text-sm text-muted-foreground">
+              مديونية العميل الحالية:{" "}
+              <span className="font-bold text-warning" dir="ltr">
+                {exposure.toLocaleString("ar-EG")} ج.م
+              </span>
+            </p>
           )}
         </div>
 

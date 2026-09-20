@@ -32,7 +32,6 @@ type FormState = {
   alt_phone: string;
   address: string;
   notes: string;
-  credit_limit: string;
   join_date: string;
 };
 
@@ -42,7 +41,6 @@ const EMPTY_FORM: FormState = {
   alt_phone: "",
   address: "",
   notes: "",
-  credit_limit: "0",
   join_date: "",
 };
 
@@ -82,7 +80,6 @@ function CustomersPage() {
       alt_phone: customer.alt_phone ?? "",
       address: customer.address ?? "",
       notes: customer.notes ?? "",
-      credit_limit: String(customer.credit_limit),
       join_date: "",
     });
     setEditingId(customer.id);
@@ -93,7 +90,6 @@ function CustomersPage() {
     const payload = {
       name: form.name.trim(),
       phone: form.phone.trim(),
-      credit_limit: Number(form.credit_limit) || 0,
       ...(form.alt_phone.trim() && { alt_phone: form.alt_phone.trim() }),
       ...(form.address.trim() && { address: form.address.trim() }),
       ...(form.notes.trim() && { notes: form.notes.trim() }),
@@ -194,16 +190,6 @@ function CustomersPage() {
                   className="form-input"
                 />
               </Field>
-              <Field label="حد الائتمان (للتقسيط)">
-                <input
-                  type="number"
-                  min="0"
-                  value={form.credit_limit}
-                  onChange={(e) => setForm({ ...form, credit_limit: e.target.value })}
-                  className="form-input"
-                  dir="ltr"
-                />
-              </Field>
               {editingId === "new" && (
                 <Field label="تاريخ الانضمام (سيبه فاضي لو دلوقتي)">
                   <input
@@ -255,7 +241,6 @@ function CustomersPage() {
                 <th className="px-4 py-3 font-medium">العنوان</th>
                 <th className="px-4 py-3 font-medium">إجمالي المشتريات</th>
                 <th className="px-4 py-3 font-medium">المديونية الحالية</th>
-                <th className="px-4 py-3 font-medium">حد الائتمان</th>
                 <th className="px-4 py-3 font-medium">التقييم</th>
                 <th className="px-4 py-3 font-medium">الحالة</th>
                 <th className="px-4 py-3 font-medium"></th>
@@ -297,9 +282,6 @@ function CustomersPage() {
                       dir="ltr"
                     >
                       {exposure.toLocaleString("ar-EG")} ج.م
-                    </td>
-                    <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
-                      {(customer.credit_limit ?? 0).toLocaleString("ar-EG")} ج.م
                     </td>
                     <td className="px-4 py-3">
                       <RiskBadge
@@ -349,7 +331,7 @@ function CustomersPage() {
               })}
               {customers.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">
+                  <td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">
                     {isLoading ? "جارٍ التحميل..." : "لا يوجد عملاء بعد."}
                   </td>
                 </tr>

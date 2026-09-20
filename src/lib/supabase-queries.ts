@@ -1660,14 +1660,13 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
       input,
       actorUserId,
       minDownPaymentPct,
-      creditHoldDays,
       createdAt,
     }: {
       input: CreateInstallmentContractInput;
       actorUserId: string | null;
       minDownPaymentPct: number;
-      creditHoldDays: number;
-      /** تاريخ مفتوح اختياري — لعقد قديم بيسجّله العميل دلوقتي بأثر رجعي على التقارير. */
+      /** تاريخ مفتوح اختياري — لعقد قديم بيسجّله العميل دلوقتي بأثر رجعي على التقارير. جدول
+       * الأقساط نفسه بيتحسب بادئًا من التاريخ ده (مش من النهاردة) — أول قسط يستحق بعده بشهر. */
       createdAt?: string;
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
@@ -1679,8 +1678,6 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
         { data: products, error: productsError },
         { data: allSerials, error: serialsError },
         { data: movements, error: movementsError },
-        { data: contracts, error: contractsError },
-        { data: installments, error: installmentsError },
       ] = await Promise.all([
         supabase.from("customers").select("*").eq("id", input.customer_id).single(),
         supabase.from("installment_plans").select("*").eq("id", input.plan_id).single(),
@@ -1690,34 +1687,17 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
           .from("inventory_movements")
           .select("product_id, quantity")
           .eq("tenant_id", tenantId),
-        supabase.from("installment_contracts").select("*").eq("tenant_id", tenantId),
-        supabase.from("installments").select("*").eq("tenant_id", tenantId),
       ]);
       if (customerError || !customerRow) throw new Error("العميل غير موجود");
       if (planError || !planRow) throw new Error("خطة التقسيط غير موجودة");
       if (productsError) throw new Error(productsError.message);
       if (serialsError) throw new Error(serialsError.message);
       if (movementsError) throw new Error(movementsError.message);
-      if (contractsError) throw new Error(contractsError.message);
-      if (installmentsError) throw new Error(installmentsError.message);
 
       const customer = customerRow as Customer;
       const plan = planRow as InstallmentPlan;
       if (customer.status !== "active") throw new Error("العميل غير نشط");
       if (!plan.active) throw new Error("خطة التقسيط غير مفعّلة");
-
-      if (
-        computeCustomerOnCreditHold(
-          customer.id,
-          creditHoldDays,
-          contracts as InstallmentContract[],
-          installments as Installment[],
-        )
-      ) {
-        throw new Error(
-          "العميل موقوف عن التقسيط لتأخره في السداد (Credit Hold) — راجع صفحة العميل",
-        );
-      }
 
       const saleItems: SaleItem[] = [];
       const soldSerialIds = new Set<string>();
@@ -1812,19 +1792,13 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
       const principal = Math.round((cash_subtotal - input.down_payment) * 100) / 100;
       const { financeAmount, totalAmount } = calculateFinance(principal, plan.rate_pct);
 
-      const exposure = computeCustomerExposure(
-        customer.id,
-        contracts as InstallmentContract[],
-        installments as Installment[],
+      // جدول الأقساط بيتحسب من تاريخ العقد نفسه (لو اتحدد يدويًا) مش من النهاردة — عقد بتاريخ
+      // مفتوح قديم لازم أول قسط فيه يستحق بعد شهر من تاريخه الحقيقي، مش من تاريخ التسجيل.
+      const schedule = generateSchedule(
+        totalAmount,
+        plan.duration_months,
+        createdAt ? new Date(createdAt) : undefined,
       );
-      const availableCredit = customer.credit_limit - exposure;
-      if (totalAmount > availableCredit) {
-        throw new Error(
-          `تجاوز حد الائتمان: المتاح ${availableCredit} ج.م، والعقد يحتاج ${totalAmount} ج.م (الحد الكلي ${customer.credit_limit} ج.م، المستحق حاليًا ${exposure} ج.م)`,
-        );
-      }
-
-      const schedule = generateSchedule(totalAmount, plan.duration_months);
       const contract_number = await nextInstallmentDocNumber(
         "installment_contracts",
         "contract_number",

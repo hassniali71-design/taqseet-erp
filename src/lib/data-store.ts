@@ -330,7 +330,6 @@ function seedCustomers(): Customer[] {
       name: "أحمد محمود",
       phone: "01012345678",
       address: "القاهرة",
-      credit_limit: 30000,
       status: "active",
       created_at: now,
     },
@@ -341,7 +340,6 @@ function seedCustomers(): Customer[] {
       name: "منى سعيد",
       phone: "01098765432",
       address: "الجيزة",
-      credit_limit: 20000,
       status: "active",
       created_at: now,
     },
@@ -2026,14 +2024,6 @@ export function createInstallmentContract(
 
   const principal = Math.round((cash_subtotal - input.down_payment) * 100) / 100;
   const { financeAmount, totalAmount } = calculateFinance(principal, plan.rate_pct);
-
-  const exposure = getCustomerExposure(customer.id);
-  const availableCredit = customer.credit_limit - exposure;
-  if (totalAmount > availableCredit) {
-    throw new Error(
-      `تجاوز حد الائتمان: المتاح ${availableCredit} ج.م، والعقد يحتاج ${totalAmount} ج.م (الحد الكلي ${customer.credit_limit} ج.م، المستحق حاليًا ${exposure} ج.م)`,
-    );
-  }
 
   const schedule = generateSchedule(totalAmount, plan.duration_months);
   const created_at = new Date().toISOString();

@@ -157,11 +157,12 @@ function CustomerDetailPage() {
             </p>
           </div>
           <div className="rounded-xl border border-border bg-card p-4">
-            <p className="text-xs text-muted-foreground">
-              حد الائتمان (المستحق حاليًا {exposure.toLocaleString("ar-EG")})
-            </p>
-            <p className="mt-1 text-2xl font-bold text-foreground" dir="ltr">
-              {customer.credit_limit.toLocaleString("ar-EG")} ج.م
+            <p className="text-xs text-muted-foreground">المديونية الحالية</p>
+            <p
+              className={`mt-1 text-2xl font-bold ${exposure > 0 ? "text-warning" : "text-foreground"}`}
+              dir="ltr"
+            >
+              {exposure.toLocaleString("ar-EG")} ج.م
             </p>
           </div>
         </div>

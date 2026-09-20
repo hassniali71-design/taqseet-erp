@@ -9,10 +9,7 @@ import { supabase } from "@/lib/supabase-client";
 export async function exportTenantDataCsv(tenantId: string, tenantName: string): Promise<void> {
   const [{ data: customers }, { data: products }, { data: sales }, { data: contracts }] =
     await Promise.all([
-      supabase
-        .from("customers")
-        .select("code, name, phone, credit_limit, status")
-        .eq("tenant_id", tenantId),
+      supabase.from("customers").select("code, name, phone, status").eq("tenant_id", tenantId),
       supabase
         .from("products")
         .select("code, name, brand, model, cash_price, installment_price, active")

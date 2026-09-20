@@ -138,9 +138,6 @@ export interface Customer {
   alt_phone?: string;
   address?: string;
   notes?: string;
-  /** §16 Credit Profile — used by Phase 4's Credit Check (`Available Credit = credit_limit -
-   * current exposure`). 0 = no installment credit extended yet. */
-  credit_limit: number;
   status: "active" | "inactive";
   created_at: string;
 }
