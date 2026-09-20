@@ -2497,6 +2497,9 @@ export interface CreatePurchaseInput {
   }>;
   issue_date?: string;
   return_period_days?: number;
+  /** دفعة فورية اختيارية للمورد وقت أمر الشراء نفسه — مش شرط يفضل الكل آجل (على الحساب)،
+   * الشراء ممكن يتسدد بالكامل أو جزء منه دلوقتي والباقي براحة صاحب المحل. */
+  immediate_payment?: number;
 }
 
 export function useCreatePurchase(tenantId: string | undefined) {
@@ -2576,6 +2579,13 @@ export function useCreatePurchase(tenantId: string | undefined) {
         });
       }
 
+      const total = Math.round(purchaseItems.reduce((sum, i) => sum + i.line_total, 0) * 100) / 100;
+      const immediatePayment = input.immediate_payment ?? 0;
+      if (immediatePayment < 0) throw new Error("الدفعة الفورية لا يمكن أن تكون سالبة");
+      if (immediatePayment > total) {
+        throw new Error(`الدفعة الفورية أكبر من إجمالي أمر الشراء (${total} ج.م)`);
+      }
+
       const purchase_number = await nextInstallmentDocNumber(
         "purchases",
         "purchase_number",
@@ -2635,7 +2645,6 @@ export function useCreatePurchase(tenantId: string | undefined) {
         });
       }
 
-      const total = Math.round(purchaseItems.reduce((sum, i) => sum + i.line_total, 0) * 100) / 100;
       const { data: purchase, error: purchaseError } = await supabase
         .from("purchases")
         .insert({
@@ -2665,8 +2674,10 @@ export function useCreatePurchase(tenantId: string | undefined) {
         new_value: purchase,
       });
 
-      // No treasury movement here — a purchase creates a payable, it doesn't pay cash
-      // immediately; useRecordSupplierPayment is what moves money later.
+      // الشراء نفسه بيتسجل كدين على المحل (Payable) بإجمالي القيمة، بغض النظر عن أي دفعة
+      // فورية — الدفعة الفورية (لو فيه) بتتسجل كسداد منفصل بعد كده مباشرة، زي أي دفعة مورد
+      // عادية، عشان القيد يفضل متوازن (Dr 1200 / Cr 2000 بالإجمالي، وبعدها Dr 2000 / Cr 1000
+      // بقيمة المدفوع لو حصل).
       try {
         await performPostJournalEntry(
           tenantId,
@@ -2683,6 +2694,61 @@ export function useCreatePurchase(tenantId: string | undefined) {
         console.warn("فشل ترحيل قيد الشراء:", e instanceof Error ? e.message : e);
       }
 
+      // دفعة فورية اختيارية وقت الشراء نفسه — مش شرط يفضل كل شيء آجل على المورد؛ صاحب
+      // المحل ممكن يدفع كامل المبلغ أو جزء منه دلوقتي والباقي براحته لاحقًا من /suppliers.
+      if (immediatePayment > 0) {
+        try {
+          const { data: payment, error: paymentError } = await supabase
+            .from("supplier_payments")
+            .insert({
+              tenant_id: tenantId,
+              supplier_id: supplier.id as string,
+              amount: immediatePayment,
+              user_id: actorUserId,
+              ...(createdAt ? { created_at: createdAt } : {}),
+            })
+            .select()
+            .single();
+          if (paymentError) throw new Error(paymentError.message);
+          await insertAuditLog({
+            tenant_id: tenantId,
+            user_id: actorUserId,
+            action: "supplier_payment.record",
+            entity: "supplier_payments",
+            entity_id: payment.id as string,
+            new_value: payment,
+          });
+          await postFinancials(
+            tenantId,
+            "main",
+            "purchase_payment",
+            -immediatePayment,
+            actorUserId,
+            purchase_number,
+            [
+              {
+                account_code: "2000",
+                account_name: ACCOUNT_NAMES["2000"],
+                debit: immediatePayment,
+                credit: 0,
+              },
+              {
+                account_code: "1000",
+                account_name: ACCOUNT_NAMES["1000"],
+                debit: 0,
+                credit: immediatePayment,
+              },
+            ],
+            `دفعة فورية عند الشراء ${purchase_number} لمورد ${supplier.name as string}`,
+            "supplier_payment",
+            payment.id as string,
+            createdAt,
+          );
+        } catch (e) {
+          console.warn("فشل تسجيل الدفعة الفورية للمورد:", e instanceof Error ? e.message : e);
+        }
+      }
+
       return purchase as Purchase;
     },
     onSuccess: () => {
@@ -2691,6 +2757,8 @@ export function useCreatePurchase(tenantId: string | undefined) {
       void queryClient.invalidateQueries({ queryKey: ["product_serials", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["inventory_movements", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["journal_entries", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["supplier_payments", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["treasury_movements", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
   });

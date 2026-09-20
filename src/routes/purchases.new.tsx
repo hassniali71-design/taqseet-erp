@@ -36,6 +36,7 @@ function NewPurchasePage() {
   const [error, setError] = useState<string | null>(null);
   const [issueDate, setIssueDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [returnPeriodDays, setReturnPeriodDays] = useState("");
+  const [immediatePayment, setImmediatePayment] = useState("");
   const [showNewProductForm, setShowNewProductForm] = useState(false);
   const [newProductName, setNewProductName] = useState("");
   const [newProductCash, setNewProductCash] = useState("");
@@ -169,6 +170,11 @@ function NewPurchasePage() {
       setError("اختر مورد");
       return;
     }
+    const immediatePaymentNum = Number(immediatePayment) || 0;
+    if (immediatePaymentNum > total) {
+      setError(`الدفعة الفورية أكبر من إجمالي أمر الشراء (${total.toLocaleString("ar-EG")} ج.م)`);
+      return;
+    }
     createPurchaseMutation.mutate(
       {
         input: {
@@ -181,6 +187,7 @@ function NewPurchasePage() {
           })),
           ...(issueDate && { issue_date: issueDate }),
           ...(returnPeriodDays && { return_period_days: Number(returnPeriodDays) }),
+          ...(immediatePaymentNum > 0 && { immediate_payment: immediatePaymentNum }),
         },
         actorUserId,
         costingMethod: settings?.costing_method ?? "average",
@@ -452,17 +459,35 @@ function NewPurchasePage() {
           </table>
         </div>
 
-        <div className="mt-6 flex items-center justify-between">
-          <p className="text-xl font-bold text-foreground" dir="ltr">
-            الإجمالي: {total.toLocaleString("ar-EG")} ج.م
-          </p>
-          <button
-            onClick={handleConfirm}
-            disabled={cart.length === 0 || createPurchaseMutation.isPending}
-            className="rounded-md bg-primary px-6 py-3 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {createPurchaseMutation.isPending ? "جارٍ الحفظ..." : "تأكيد أمر الشراء"}
-          </button>
+        <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
+          <label className="block max-w-xs space-y-1">
+            <span className="text-xs font-medium text-foreground">
+              دفعة فورية للمورد الآن (اختياري — سيبها فاضية لو كله على الحساب)
+            </span>
+            <input
+              type="number"
+              min="0"
+              max={total || undefined}
+              value={immediatePayment}
+              onChange={(e) => setImmediatePayment(e.target.value)}
+              className="form-input"
+              dir="ltr"
+              placeholder="0"
+            />
+          </label>
+
+          <div className="text-left">
+            <p className="text-xl font-bold text-foreground" dir="ltr">
+              الإجمالي: {total.toLocaleString("ar-EG")} ج.م
+            </p>
+            <button
+              onClick={handleConfirm}
+              disabled={cart.length === 0 || createPurchaseMutation.isPending}
+              className="mt-2 rounded-md bg-primary px-6 py-3 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {createPurchaseMutation.isPending ? "جارٍ الحفظ..." : "تأكيد أمر الشراء"}
+            </button>
+          </div>
         </div>
       </main>
     </div>
