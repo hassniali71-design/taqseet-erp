@@ -1408,10 +1408,14 @@ export function useCreateInstallmentPlan(tenantId: string | undefined) {
       durationMonths,
       ratePct,
       actorUserId,
+      active = true,
     }: {
       durationMonths: number;
       ratePct: number;
       actorUserId: string | null;
+      /** false لخطة مخصصة لصفقة واحدة بس (من شاشة بيع التقسيط) — تتسجّل بدون ما تظهر في
+       * قائمة الخطط العادية بـ/settings. */
+      active?: boolean;
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
       const { data, error } = await supabase
@@ -1420,7 +1424,7 @@ export function useCreateInstallmentPlan(tenantId: string | undefined) {
           tenant_id: tenantId,
           duration_months: durationMonths,
           rate_pct: ratePct,
-          active: true,
+          active,
         })
         .select()
         .single();

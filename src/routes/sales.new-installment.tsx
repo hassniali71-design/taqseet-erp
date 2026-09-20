@@ -14,6 +14,7 @@ import {
   dateInputToTimestamp,
   settlePartnersForDeal,
   useCreateInstallmentContract,
+  useCreateInstallmentPlan,
   useCurrentTenantSettings,
   useCustomers,
   useInstallmentContracts,
@@ -52,6 +53,9 @@ function NewInstallmentSalePage() {
   const [quantity, setQuantity] = useState("1");
   const [downPayment, setDownPayment] = useState("0");
   const [planId, setPlanId] = useState("");
+  const [customPlan, setCustomPlan] = useState(false);
+  const [customDuration, setCustomDuration] = useState("12");
+  const [customRate, setCustomRate] = useState("0");
   const [contractDate, setContractDate] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [selectedPartnerIds, setSelectedPartnerIds] = useState<string[]>([]);
@@ -70,6 +74,7 @@ function NewInstallmentSalePage() {
   const { data: allPartners = [] } = usePartners(session?.tenant_id);
   const { data: allPurchases = [] } = usePurchases(session?.tenant_id);
   const createContractMutation = useCreateInstallmentContract(session?.tenant_id);
+  const createPlanMutation = useCreateInstallmentPlan(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
@@ -159,7 +164,9 @@ function NewInstallmentSalePage() {
   const minDownPayment =
     Math.round(cashSubtotal * (settings.min_down_payment_pct / 100) * 100) / 100;
   const principal = Math.round((cashSubtotal - downPaymentNum) * 100) / 100;
-  const plan = plans.find((p) => p.id === planId);
+  const plan = customPlan
+    ? { duration_months: Number(customDuration) || 0, rate_pct: Number(customRate) || 0 }
+    : plans.find((p) => p.id === planId);
   const preview = plan && principal > 0 ? calculateFinance(principal, plan.rate_pct) : null;
   const schedulePreview =
     plan && preview ? generateSchedule(preview.totalAmount, plan.duration_months) : [];
@@ -185,16 +192,7 @@ function NewInstallmentSalePage() {
   const singleProductId = distinctProductIds.size === 1 ? cart[0]?.product_id : undefined;
   const activePartners = allPartners.filter((p) => p.active);
 
-  function handleConfirm() {
-    setError(null);
-    if (!customerId) {
-      setError("اختر عميل — التقسيط لازم يكون على عميل مسجّل");
-      return;
-    }
-    if (!planId) {
-      setError("اختر خطة تقسيط");
-      return;
-    }
+  function submitContract(finalPlanId: string) {
     createContractMutation.mutate(
       {
         input: {
@@ -205,7 +203,7 @@ function NewInstallmentSalePage() {
             ...(l.serial_id && { serial_id: l.serial_id }),
           })),
           down_payment: downPaymentNum,
-          plan_id: planId,
+          plan_id: finalPlanId,
         },
         actorUserId,
         minDownPaymentPct: settings.min_down_payment_pct,
@@ -244,6 +242,38 @@ function NewInstallmentSalePage() {
         onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
       },
     );
+  }
+
+  function handleConfirm() {
+    setError(null);
+    if (!customerId) {
+      setError("اختر عميل — التقسيط لازم يكون على عميل مسجّل");
+      return;
+    }
+    if (customPlan) {
+      if (!customDuration || Number(customDuration) <= 0) {
+        setError("أدخل مدة التقسيط بالشهور");
+        return;
+      }
+      createPlanMutation.mutate(
+        {
+          durationMonths: Number(customDuration),
+          ratePct: Number(customRate) || 0,
+          actorUserId,
+          active: false,
+        },
+        {
+          onSuccess: (newPlan) => submitContract(newPlan.id),
+          onError: (e) => setError(e instanceof Error ? e.message : "تعذّر إنشاء الخطة المخصصة"),
+        },
+      );
+      return;
+    }
+    if (!planId) {
+      setError("اختر خطة تقسيط");
+      return;
+    }
+    submitContract(planId);
   }
 
   return (
@@ -416,21 +446,53 @@ function NewInstallmentSalePage() {
               dir="ltr"
             />
           </label>
-          <label className="block space-y-1">
-            <span className="text-xs font-medium text-foreground">خطة التقسيط *</span>
-            <select
-              value={planId}
-              onChange={(e) => setPlanId(e.target.value)}
-              className="form-input"
-            >
-              <option value="">اختر خطة</option>
-              {plans.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.duration_months} شهر — {p.rate_pct}%
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-foreground">خطة التقسيط *</span>
+              <button
+                type="button"
+                onClick={() => setCustomPlan((v) => !v)}
+                className="text-xs font-medium text-primary hover:underline"
+              >
+                {customPlan ? "استخدام خطة من الإعدادات" : "خطة مخصصة لهذه الصفقة"}
+              </button>
+            </div>
+            {customPlan ? (
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="المدة (شهر)"
+                  value={customDuration}
+                  onChange={(e) => setCustomDuration(e.target.value)}
+                  className="form-input"
+                  dir="ltr"
+                />
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="نسبة التمويل %"
+                  value={customRate}
+                  onChange={(e) => setCustomRate(e.target.value)}
+                  className="form-input"
+                  dir="ltr"
+                />
+              </div>
+            ) : (
+              <select
+                value={planId}
+                onChange={(e) => setPlanId(e.target.value)}
+                className="form-input"
+              >
+                <option value="">اختر خطة</option>
+                {plans.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.duration_months} شهر — {p.rate_pct}%
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
           <label className="block space-y-1">
             <span className="text-xs font-medium text-foreground">
               تاريخ العقد (سيبه فاضي لو دلوقتي)
@@ -499,10 +561,14 @@ function NewInstallmentSalePage() {
 
         <button
           onClick={handleConfirm}
-          disabled={cart.length === 0 || createContractMutation.isPending}
+          disabled={
+            cart.length === 0 || createContractMutation.isPending || createPlanMutation.isPending
+          }
           className="mt-6 rounded-md bg-primary px-6 py-3 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {createContractMutation.isPending ? "جارٍ الحفظ..." : "تأكيد عقد التقسيط"}
+          {createContractMutation.isPending || createPlanMutation.isPending
+            ? "جارٍ الحفظ..."
+            : "تأكيد عقد التقسيط"}
         </button>
       </main>
     </div>
