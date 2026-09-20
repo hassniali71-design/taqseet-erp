@@ -357,6 +357,13 @@ function PartnersPage() {
                     )}
                   </div>
                 )}
+                <Link
+                  to="/partners/$id"
+                  params={{ id: partner.id }}
+                  className="mt-3 block rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-center text-xs font-bold text-primary hover:bg-primary/10"
+                >
+                  عرض كل التفاصيل — صفقاته، أقساطه، وكشف حسابه ←
+                </Link>
               </div>
             );
           })}
