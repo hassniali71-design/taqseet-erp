@@ -199,6 +199,9 @@ function NewSalePage() {
                   ...(singleProductId ? { productId: singleProductId } : {}),
                   costRecovered: preview.costRecovered,
                   profitAmount: preview.profitAmount,
+                  dealValue: subtotal,
+                  splitPct,
+                  profitSharePct: partner?.profit_share_pct ?? 0,
                 };
               }),
             );

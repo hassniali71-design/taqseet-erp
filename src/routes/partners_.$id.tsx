@@ -105,6 +105,7 @@ function PartnerDetailPage() {
             to: "/contracts/$id" as const,
             customerName: contract.customer_name,
             dealValue: contract.cash_subtotal,
+            planLabel: `تقسيط ${contract.plan_duration_months} شهر @ ${contract.plan_rate_pct}%`,
           }
         : null;
     }
@@ -251,7 +252,9 @@ function PartnerDetailPage() {
                   <th className="px-4 py-3 font-medium">الجهاز</th>
                   <th className="px-4 py-3 font-medium">العميل / الفاتورة</th>
                   <th className="px-4 py-3 font-medium">قيمة الصفقة</th>
+                  <th className="px-4 py-3 font-medium">نصيبه من الصفقة</th>
                   <th className="px-4 py-3 font-medium">اتخصم منه (تكلفته)</th>
+                  <th className="px-4 py-3 font-medium">نسبة ربحه</th>
                   <th className="px-4 py-3 font-medium">هيكسب (ربحه)</th>
                   <th className="px-4 py-3 font-medium">التاريخ</th>
                 </tr>
@@ -259,6 +262,7 @@ function PartnerDetailPage() {
               <tbody>
                 {deals.map((t) => {
                   const source = dealSource(t);
+                  const dealValue = t.deal_value ?? source?.dealValue;
                   return (
                     <tr key={t.id} className="border-b border-border last:border-0">
                       <td className="px-4 py-3 font-medium text-foreground">
@@ -278,16 +282,32 @@ function PartnerDetailPage() {
                             >
                               {source.label}
                             </Link>
+                            {"planLabel" in source && (
+                              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                {source.planLabel}
+                              </p>
+                            )}
                           </>
                         ) : (
                           "—"
                         )}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground" dir="ltr">
-                        {source ? `${source.dealValue.toLocaleString("ar-EG")} ج.م` : "—"}
+                        {dealValue !== undefined ? `${dealValue.toLocaleString("ar-EG")} ج.م` : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground" dir="ltr">
+                        {t.split_pct !== undefined && t.split_pct !== null
+                          ? `${t.split_pct.toLocaleString("ar-EG")}%`
+                          : "—"}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground" dir="ltr">
                         {t.cost_recovered.toLocaleString("ar-EG")} ج.م
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground" dir="ltr">
+                        {t.profit_share_pct_snapshot !== undefined &&
+                        t.profit_share_pct_snapshot !== null
+                          ? `${t.profit_share_pct_snapshot.toLocaleString("ar-EG")}%`
+                          : "—"}
                       </td>
                       <td className="px-4 py-3 font-medium text-success" dir="ltr">
                         {t.profit_amount.toLocaleString("ar-EG")} ج.م
@@ -300,7 +320,7 @@ function PartnerDetailPage() {
                 })}
                 {deals.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
+                    <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">
                       لا يوجد صفقات ممولة بعد.
                     </td>
                   </tr>

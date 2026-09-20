@@ -3019,6 +3019,12 @@ export async function settlePartnersForDeal(
     productId?: string;
     costRecovered: number;
     profitAmount: number;
+    /** Snapshot تاريخي (migration 0015) — قيمة الصفقة كاملة، نسبة تقسيم هذا الشريك منها،
+     * ونسبة ربحه وقت التسوية بالظبط — عشان الشفافية/الحوكمة، بيثبّتوا حتى لو partners.
+     * profit_share_pct اتغيّر بعدين. */
+    dealValue: number;
+    splitPct: number;
+    profitSharePct: number;
   }>,
 ): Promise<void> {
   if (entries.length === 0) return;
@@ -3031,6 +3037,9 @@ export async function settlePartnersForDeal(
         amount: e.profitAmount,
         cost_recovered: e.costRecovered,
         profit_amount: e.profitAmount,
+        deal_value: e.dealValue,
+        split_pct: e.splitPct,
+        profit_share_pct_snapshot: e.profitSharePct,
         reference,
         ...(relatedSaleId ? { related_sale_id: relatedSaleId } : {}),
         ...(relatedContractId ? { related_contract_id: relatedContractId } : {}),

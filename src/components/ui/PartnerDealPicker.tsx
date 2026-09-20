@@ -169,17 +169,40 @@ export function PartnerDealPicker({
                     ? `بتمثل ${preview.profitAmount.toLocaleString("ar-EG")} ج.م ربح`
                     : `بتمثل ${splitPct.toLocaleString("ar-EG")}% من الصفقة`}
                 </p>
-                <p className="mt-2 text-sm text-muted-foreground" dir="rtl">
-                  اتباعت بـ{cashSubtotal.toLocaleString("ar-EG")} ج.م، وهترجع لك{" "}
-                  <span className="font-bold text-foreground">
+
+                {/* تفصيل الحسبة سطر سطر — عشان البائع يشوف بالظبط منين طلع الرقم النهائي
+                    (سعر البيع، تكلفة الشراء، الهامش، نصيبه من الاتنين، ونسبة ربحه من هامشه)،
+                    مش جملة واحدة مجمّعة. */}
+                <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 rounded-md bg-muted/50 p-2 text-xs">
+                  <span className="text-muted-foreground">سعر البيع (الصفقة كلها)</span>
+                  <span className="text-left font-medium text-foreground" dir="ltr">
+                    {cashSubtotal.toLocaleString("ar-EG")} ج.م
+                  </span>
+                  <span className="text-muted-foreground">تكلفة الشراء (الصفقة كلها)</span>
+                  <span className="text-left font-medium text-foreground" dir="ltr">
+                    {cost.toLocaleString("ar-EG")} ج.م
+                  </span>
+                  <span className="text-muted-foreground">هامش الربح الكلي (بيع − تكلفة)</span>
+                  <span className="text-left font-medium text-foreground" dir="ltr">
+                    {margin.toLocaleString("ar-EG")} ج.م
+                  </span>
+                  <span className="text-muted-foreground">نصيبه من الصفقة</span>
+                  <span className="text-left font-medium text-foreground" dir="ltr">
+                    {splitPct.toLocaleString("ar-EG")}%
+                  </span>
+                  <span className="text-muted-foreground">نصيبه من التكلفة (اتخصم منه)</span>
+                  <span className="text-left font-medium text-foreground" dir="ltr">
                     {preview.costRecovered.toLocaleString("ar-EG")} ج.م
-                  </span>{" "}
-                  من رأس مالك، وهتكسب{" "}
-                  <span className="font-bold text-success">
+                  </span>
+                  <span className="text-muted-foreground">نسبة ربحه من نصيبه في الهامش</span>
+                  <span className="text-left font-medium text-foreground" dir="ltr">
+                    {partner.profit_share_pct.toLocaleString("ar-EG")}%
+                  </span>
+                  <span className="font-bold text-foreground">ربحه النهائي (هيكسب)</span>
+                  <span className="text-left font-bold text-success" dir="ltr">
                     {preview.profitAmount.toLocaleString("ar-EG")} ج.م
-                  </span>{" "}
-                  يا {partner.name}.
-                </p>
+                  </span>
+                </div>
               </div>
             );
           })}

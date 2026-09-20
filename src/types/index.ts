@@ -501,6 +501,14 @@ export interface PartnerTransaction {
   related_product_id?: string;
   user_id: string | null;
   created_at: string;
+  /** Snapshot تاريخي لتفاصيل الصفقة وقت التسوية (sale_settlement فقط) — null لأي نوع تاني
+   * وللصفوف القديمة قبل migration 0015. `deal_value` قيمة الصفقة كاملة (cash_subtotal/total)،
+   * `split_pct` نسبة تقسيم هذا الشريك من الصفقة، `profit_share_pct_snapshot` نسبة ربحه
+   * الثابتة وقت التسوية (مش الحالية على partners.profit_share_pct اللي ممكن تكون اتغيّرت
+   * بعدين). */
+  deal_value?: number | null;
+  split_pct?: number | null;
+  profit_share_pct_snapshot?: number | null;
 }
 
 /**

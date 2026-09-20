@@ -230,6 +230,9 @@ function NewInstallmentSalePage() {
                   ...(singleProductId ? { productId: singleProductId } : {}),
                   costRecovered: preview.costRecovered,
                   profitAmount: preview.profitAmount,
+                  dealValue: cashSubtotal,
+                  splitPct,
+                  profitSharePct: partner?.profit_share_pct ?? 0,
                 };
               }),
             );
