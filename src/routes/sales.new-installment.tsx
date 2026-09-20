@@ -396,7 +396,7 @@ function NewInstallmentSalePage() {
               <Stat label="مبلغ التمويل" value={preview.financeAmount} />
               <Stat label="الإجمالي المستحق" value={preview.totalAmount} />
             </div>
-            <div className="mt-4 overflow-x-auto rounded-lg border border-border">
+            <div className="mt-4 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-lg border border-border">
               <table className="w-full text-right text-sm">
                 <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
                   <tr>

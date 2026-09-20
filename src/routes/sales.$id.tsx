@@ -231,36 +231,38 @@ function SaleReceiptPage() {
             </div>
           </div>
 
-          <table className="mt-4 w-full text-right text-sm">
-            <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
-              <tr>
-                <th className="py-2 font-medium">الصنف</th>
-                <th className="py-2 font-medium">السيريال</th>
-                <th className="py-2 font-medium">الكمية</th>
-                <th className="py-2 font-medium">السعر</th>
-                <th className="py-2 font-medium">الإجمالي</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sale.items.map((item, i) => (
-                <tr key={i} className="border-b border-border last:border-0">
-                  <td className="py-2 font-medium text-foreground">{item.product_name}</td>
-                  <td className="py-2 text-muted-foreground" dir="ltr">
-                    {item.serial_number ?? "—"}
-                  </td>
-                  <td className="py-2 text-muted-foreground" dir="ltr">
-                    {item.quantity}
-                  </td>
-                  <td className="py-2 text-muted-foreground" dir="ltr">
-                    {item.unit_price.toLocaleString("ar-EG")}
-                  </td>
-                  <td className="py-2 font-medium text-foreground" dir="ltr">
-                    {item.line_total.toLocaleString("ar-EG")}
-                  </td>
+          <div className="mt-4 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-right text-sm">
+              <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-2 py-2 font-medium">الصنف</th>
+                  <th className="px-2 py-2 font-medium">السيريال</th>
+                  <th className="px-2 py-2 font-medium">الكمية</th>
+                  <th className="px-2 py-2 font-medium">السعر</th>
+                  <th className="px-2 py-2 font-medium">الإجمالي</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {sale.items.map((item, i) => (
+                  <tr key={i} className="border-b border-border last:border-0">
+                    <td className="px-2 py-2 font-medium text-foreground">{item.product_name}</td>
+                    <td className="px-2 py-2 text-muted-foreground" dir="ltr">
+                      {item.serial_number ?? "—"}
+                    </td>
+                    <td className="px-2 py-2 text-muted-foreground" dir="ltr">
+                      {item.quantity}
+                    </td>
+                    <td className="px-2 py-2 text-muted-foreground" dir="ltr">
+                      {item.unit_price.toLocaleString("ar-EG")}
+                    </td>
+                    <td className="px-2 py-2 font-medium text-foreground" dir="ltr">
+                      {item.line_total.toLocaleString("ar-EG")}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           <div className="mt-4 space-y-1 border-t border-border pt-4 text-left">
             <p className="text-sm text-muted-foreground" dir="ltr">

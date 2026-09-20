@@ -21,6 +21,8 @@ import {
   useProducts,
   useProductSerials,
   usePromisesToPay,
+  usePurchases,
+  useSales,
 } from "@/lib/supabase-queries";
 import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
@@ -36,7 +38,17 @@ const CATEGORY_LABEL: Record<AppNotification["category"], string> = {
   promise_failed: "وعد دفع فشل",
   low_stock: "مخزون منخفض",
   expense_approval: "مصروف يحتاج اعتماد",
+  new_sale: "بيع جديد",
+  new_purchase: "أمر شراء جديد",
+  new_contract: "عقد تقسيط جديد",
 };
+
+/** إشعارات "نشاط حديث" (بيع/شراء/عقد جديد) بتتشال تلقائيًا بعد يومين — أرشيف طويل هنا
+ * هيغرق الشاشة، والغرض هنا تنبيه سريع مش سجل دائم (ده دور صفحة `/audit`). */
+const RECENT_ACTIVITY_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
+function isRecent(isoDate: string): boolean {
+  return Date.now() - new Date(isoDate).getTime() <= RECENT_ACTIVITY_WINDOW_MS;
+}
 
 const SEVERITY_CLASS: Record<AppNotification["severity"], string> = {
   info: "border-border bg-card",
@@ -65,6 +77,8 @@ function NotificationsPage() {
   const { data: allSerials = [] } = useProductSerials(session?.tenant_id);
   const { data: allMovements = [] } = useInventoryMovements(session?.tenant_id);
   const { data: expenses = [] } = useExpenses(session?.tenant_id);
+  const { data: sales = [] } = useSales(session?.tenant_id);
+  const { data: purchases = [] } = usePurchases(session?.tenant_id);
 
   if (!session) return null;
 
@@ -132,6 +146,39 @@ function NotificationsPage() {
         id: `expense_${expense.id}`,
         category: "expense_approval",
         message: `مصروف يحتاج اعتماد: ${expense.category} بمبلغ ${expense.amount.toLocaleString("ar-EG")} ج.م`,
+        severity: "info",
+      });
+    }
+  }
+
+  for (const sale of sales) {
+    if (sale.status === "completed" && isRecent(sale.created_at)) {
+      derived.push({
+        id: `new_sale_${sale.id}`,
+        category: "new_sale",
+        message: `بيع جديد ${sale.invoice_number} (${sale.customer_name}) بمبلغ ${(sale.total ?? 0).toLocaleString("ar-EG")} ج.م`,
+        severity: "info",
+      });
+    }
+  }
+
+  for (const purchase of purchases) {
+    if (isRecent(purchase.created_at)) {
+      derived.push({
+        id: `new_purchase_${purchase.id}`,
+        category: "new_purchase",
+        message: `أمر شراء جديد ${purchase.purchase_number} من ${purchase.supplier_name} بمبلغ ${(purchase.total ?? 0).toLocaleString("ar-EG")} ج.م`,
+        severity: "info",
+      });
+    }
+  }
+
+  for (const contract of contracts) {
+    if (isRecent(contract.created_at)) {
+      derived.push({
+        id: `new_contract_${contract.id}`,
+        category: "new_contract",
+        message: `عقد تقسيط جديد ${contract.contract_number} (${contract.customer_name}) بإجمالي ${(contract.total_amount ?? 0).toLocaleString("ar-EG")} ج.م`,
         severity: "info",
       });
     }

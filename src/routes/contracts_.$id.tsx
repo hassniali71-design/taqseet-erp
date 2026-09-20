@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { CONTRACT_STATUS_LABEL } from "@/lib/contract-status";
 import {
   getDaysOverdue,
   getEffectiveInstallmentStatus,
@@ -251,7 +252,7 @@ function ContractDetailPage() {
           </div>
           <div className="flex items-center gap-2">
             <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-              {contract.status}
+              {CONTRACT_STATUS_LABEL[contract.status]}
             </span>
             {canAct && remaining > 0 && (
               <>

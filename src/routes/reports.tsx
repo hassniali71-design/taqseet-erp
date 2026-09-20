@@ -1,10 +1,11 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import { SalesTrendChart } from "@/components/ui/Charts";
 import { SearchPicker } from "@/components/ui/SearchPicker";
 import { Panel, StatCard } from "@/components/ui/StatCard";
+import { CONTRACT_STATUS_LABEL } from "@/lib/contract-status";
 import {
   computeAccountBalance,
   computeCustomerExposure,
@@ -14,6 +15,7 @@ import {
   useInstallments,
   useJournalEntries,
   useProducts,
+  usePurchases,
   useSaleReturns,
   useSales,
   useTreasuryAccounts,
@@ -26,7 +28,7 @@ export const Route = createFileRoute("/reports")({
   component: ReportsPage,
 });
 
-type Tab = "sales" | "contracts" | "statement" | "movement" | "financial";
+type Tab = "sales" | "contracts" | "statement" | "movement" | "financial" | "prices";
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "sales", label: "المبيعات" },
@@ -34,6 +36,7 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "statement", label: "كشف حساب عميل" },
   { id: "movement", label: "حركة الأصناف" },
   { id: "financial", label: "التقرير المالي" },
+  { id: "prices", label: "تحليل الأسعار" },
 ];
 
 const ACCOUNT_LABELS: Record<AccountCode, string> = {
@@ -86,7 +89,7 @@ function ReportsPage() {
           ))}
         </div>
 
-        {(tab === "sales" || tab === "movement" || tab === "financial") && (
+        {(tab === "sales" || tab === "movement" || tab === "financial" || tab === "prices") && (
           <div className="mt-4 flex flex-wrap items-end gap-3">
             <label className="block space-y-1">
               <span className="text-xs font-medium text-foreground">من تاريخ</span>
@@ -123,6 +126,9 @@ function ReportsPage() {
         {tab === "movement" && <MovementReport from={from} to={to} tenantId={session.tenant_id} />}
         {tab === "financial" && (
           <FinancialReport from={from} to={to} tenantId={session.tenant_id} />
+        )}
+        {tab === "prices" && (
+          <PriceHistoryReport from={from} to={to} tenantId={session.tenant_id} />
         )}
       </main>
     </div>
@@ -259,8 +265,15 @@ function ContractsReport({ tenantId }: { tenantId: string }) {
                 .reduce((sum, i) => sum + Math.max(0, i.amount - i.paid_amount), 0);
               return (
                 <tr key={c.id} className="border-b border-border last:border-0">
-                  <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
-                    {c.contract_number}
+                  <td className="px-4 py-3 font-medium text-foreground">
+                    <Link
+                      to="/contracts/$id"
+                      params={{ id: c.id }}
+                      className="text-primary hover:underline"
+                      dir="ltr"
+                    >
+                      {c.contract_number}
+                    </Link>
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{c.customer_name}</td>
                   <td className="px-4 py-3 text-muted-foreground" dir="ltr">
@@ -269,7 +282,9 @@ function ContractsReport({ tenantId }: { tenantId: string }) {
                   <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
                     {remaining.toLocaleString("ar-EG")}
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground">{c.status}</td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {CONTRACT_STATUS_LABEL[c.status]}
+                  </td>
                 </tr>
               );
             })}
@@ -679,6 +694,111 @@ function FinancialReport({ from, to, tenantId }: { from: number; to: number; ten
           </table>
         </div>
       </Panel>
+    </section>
+  );
+}
+
+/** مقارنة سعر شراء منتج عبر الزمن — بتقرأ من `purchases.items` jsonb الموجود بالفعل (بدون أي
+ * تغيير Schema)، مفيدة خصوصًا لعميل بيشتري "عند الطلب" ومحتاج يعرف هل سعر الجهاز ده غلي أو رخص
+ * عن آخر مرة اشتراه. */
+function PriceHistoryReport({
+  from,
+  to,
+  tenantId,
+}: {
+  from: number;
+  to: number;
+  tenantId: string;
+}) {
+  const { data: products = [] } = useProducts(tenantId);
+  const { data: purchases = [] } = usePurchases(tenantId);
+  const [productId, setProductId] = useState("");
+
+  const entries = purchases
+    .filter((p) => {
+      const t = new Date(p.created_at).getTime();
+      return t >= from && t <= to;
+    })
+    .flatMap((p) =>
+      (p.items ?? [])
+        .filter((item) => item.product_id === productId)
+        .map((item) => ({
+          date: p.created_at,
+          supplierName: p.supplier_name,
+          unitCost: item.unit_cost,
+        })),
+    )
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  return (
+    <section className="mt-6">
+      <label className="block max-w-sm space-y-1">
+        <span className="text-xs font-medium text-foreground">اختر جهاز</span>
+        <SearchPicker
+          items={products.map((p) => ({ id: p.id, label: p.name }))}
+          value={productId}
+          onChange={setProductId}
+          placeholder="بحث باسم الجهاز..."
+        />
+      </label>
+
+      {!productId && (
+        <p className="mt-3 text-sm text-muted-foreground">اختر جهاز لعرض تاريخ أسعار شرائه.</p>
+      )}
+
+      {productId && (
+        <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
+          <table className="w-full text-right text-sm">
+            <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3 font-medium">التاريخ</th>
+                <th className="px-4 py-3 font-medium">المورد</th>
+                <th className="px-4 py-3 font-medium">سعر الوحدة</th>
+                <th className="px-4 py-3 font-medium">التغيّر عن آخر مرة</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((entry, i) => {
+                const prev = entries[i - 1];
+                const delta = prev ? entry.unitCost - prev.unitCost : 0;
+                const pct = prev && prev.unitCost > 0 ? (delta / prev.unitCost) * 100 : 0;
+                return (
+                  <tr key={i} className="border-b border-border last:border-0">
+                    <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
+                      {new Date(entry.date).toLocaleDateString("ar-EG")}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">{entry.supplierName}</td>
+                    <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
+                      {entry.unitCost.toLocaleString("ar-EG")} ج.م
+                    </td>
+                    <td
+                      className={`px-4 py-3 font-medium ${
+                        delta > 0
+                          ? "text-destructive"
+                          : delta < 0
+                            ? "text-success"
+                            : "text-muted-foreground"
+                      }`}
+                      dir="ltr"
+                    >
+                      {prev
+                        ? `${delta > 0 ? "+" : ""}${delta.toLocaleString("ar-EG")} ج.م (${pct > 0 ? "+" : ""}${pct.toFixed(1)}%)`
+                        : "أول شراء مسجّل"}
+                    </td>
+                  </tr>
+                );
+              })}
+              {entries.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">
+                    لا يوجد عمليات شراء لهذا الجهاز في الفترة المحددة.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }

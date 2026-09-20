@@ -3,6 +3,7 @@ import { useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import { RiskBadge } from "@/components/ui/StatCard";
+import { CONTRACT_STATUS_LABEL } from "@/lib/contract-status";
 import {
   computeCustomerExposure,
   computeCustomerRiskAssessment,
@@ -296,9 +297,11 @@ function CustomerDetailPage() {
                       </Link>
                     </td>
                     <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
-                      {contract.total_amount.toLocaleString("ar-EG")} ج.م
+                      {(contract.total_amount ?? 0).toLocaleString("ar-EG")} ج.م
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">{contract.status}</td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {CONTRACT_STATUS_LABEL[contract.status]}
+                    </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
                       {new Date(contract.created_at).toLocaleString("ar-EG")}
                     </td>

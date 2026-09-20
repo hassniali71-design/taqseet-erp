@@ -1,7 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState } from "react";
 import {
   AlertTriangle,
   Clock,
+  Eye,
+  EyeOff,
   Landmark,
   PackageX,
   Percent,
@@ -31,6 +34,7 @@ import {
   useTreasuryAccounts,
   useTreasuryMovements,
 } from "@/lib/supabase-queries";
+import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/dashboard")({
@@ -63,6 +67,8 @@ const MONTH_LABELS_AR = [
 
 function DashboardPage() {
   const session = useRequireSession();
+  const [hideMoney, setHideMoney] = useState(false);
+  const { requestConfirm, dialog } = useOwnerPasswordConfirm();
 
   const { data: tenant } = useCurrentTenant(session?.tenant_id);
   const { data: customers = [] } = useCustomers(session?.tenant_id);
@@ -135,20 +141,49 @@ function DashboardPage() {
     ? computeAccountBalance(cashierAccount.id, allTreasuryMovements)
     : 0;
 
+  const money = (n: number) => (hideMoney ? "••••" : `${n.toLocaleString("ar-EG")} ج.م`);
+
+  async function toggleHideMoney() {
+    if (!hideMoney) {
+      setHideMoney(true);
+      return;
+    }
+    const confirmed = await requestConfirm();
+    if (confirmed) setHideMoney(false);
+  }
+
   return (
     <div className="flex min-h-screen bg-background">
       <AppSidebar session={session} />
       <main className="flex-1 mx-auto max-w-6xl px-4 py-8">
-        <h1 className="text-2xl text-foreground">لوحة التحكم</h1>
-        <p className="mt-1 text-sm font-bold text-muted-foreground">
-          محل: {tenant?.name} — حالة الاشتراك: {tenant?.status}
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl text-foreground">لوحة التحكم</h1>
+            <p className="mt-1 text-sm font-bold text-muted-foreground">
+              محل: {tenant?.name} — حالة الاشتراك: {tenant?.status}
+            </p>
+          </div>
+          <button
+            onClick={() => void toggleHideMoney()}
+            className="flex items-center gap-1.5 rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
+          >
+            {hideMoney ? (
+              <>
+                <Eye className="h-3.5 w-3.5" /> إظهار الأرقام المالية
+              </>
+            ) : (
+              <>
+                <EyeOff className="h-3.5 w-3.5" /> إخفاء الأرقام المالية
+              </>
+            )}
+          </button>
+        </div>
 
         <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
           <Link to="/reports">
             <LinkCard
               label="مبيعات اليوم"
-              value={`${todaySalesTotal.toLocaleString("ar-EG")} ج.م`}
+              value={money(todaySalesTotal)}
               cta="عرض تقرير المبيعات ←"
               icon={Wallet}
               tone="navy"
@@ -158,7 +193,7 @@ function DashboardPage() {
           <Link to="/collections">
             <LinkCard
               label="مستحق اليوم (تقسيط)"
-              value={`${dueTodayAmount.toLocaleString("ar-EG")} ج.م`}
+              value={money(dueTodayAmount)}
               cta="فتح التحصيل ←"
               icon={Clock}
               tone="teal"
@@ -168,7 +203,7 @@ function DashboardPage() {
           <Link to="/collections">
             <LinkCard
               label="متأخرات (تقسيط)"
-              value={`${overdueAmount.toLocaleString("ar-EG")} ج.م`}
+              value={money(overdueAmount)}
               cta="فتح التحصيل ←"
               icon={AlertTriangle}
               tone={overdueCount > 0 ? "danger" : "navy"}
@@ -179,7 +214,7 @@ function DashboardPage() {
           <Link to="/treasury">
             <LinkCard
               label="رصيد خزينة الكاشير"
-              value={`${cashierBalance.toLocaleString("ar-EG")} ج.م`}
+              value={money(cashierBalance)}
               cta="فتح الخزينة ←"
               icon={Landmark}
               tone="teal"
@@ -246,7 +281,7 @@ function DashboardPage() {
               {overdueCount > 0 && (
                 <li>
                   <Link to="/collections" className="text-primary hover:underline">
-                    {overdueCount} قسط متأخر بإجمالي {overdueAmount.toLocaleString("ar-EG")} ج.م ←
+                    {overdueCount} قسط متأخر بإجمالي {money(overdueAmount)} ←
                   </Link>
                 </li>
               )}
@@ -268,6 +303,7 @@ function DashboardPage() {
           </div>
         )}
       </main>
+      {dialog}
     </div>
   );
 }

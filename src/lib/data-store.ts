@@ -3568,7 +3568,14 @@ export function getWarrantyInfo(serialNumberRaw: string, tenantId: string): Warr
 export interface AppNotification {
   id: string;
   category:
-    "installment_due" | "installment_overdue" | "promise_failed" | "low_stock" | "expense_approval";
+    | "installment_due"
+    | "installment_overdue"
+    | "promise_failed"
+    | "low_stock"
+    | "expense_approval"
+    | "new_sale"
+    | "new_purchase"
+    | "new_contract";
   message: string;
   severity: "info" | "warning" | "danger";
   read: boolean;
