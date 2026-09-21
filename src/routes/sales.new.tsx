@@ -10,6 +10,8 @@ import {
   computeProductStock,
   dateInputToTimestamp,
   settlePartnersForDeal,
+  useCreateCustomer,
+  useCreateProduct,
   useCreateSale,
   useCurrentTenantSettings,
   useCustomers,
@@ -18,6 +20,7 @@ import {
   useProductSerials,
   useProducts,
   usePurchases,
+  useReceiveStock,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 
@@ -53,6 +56,20 @@ function NewSalePage() {
   const [partnerSplits, setPartnerSplits] = useState<Record<string, string>>({});
   const [partnerProfitShares, setPartnerProfitShares] = useState<Record<string, string>>({});
 
+  const [showNewCustomerForm, setShowNewCustomerForm] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState("");
+  const [newCustomerAddress, setNewCustomerAddress] = useState("");
+  const [newCustomerPhone, setNewCustomerPhone] = useState("");
+  const [newCustomerNotes, setNewCustomerNotes] = useState("");
+  const [newCustomerError, setNewCustomerError] = useState<string | null>(null);
+
+  const [showNewProductForm, setShowNewProductForm] = useState(false);
+  const [newProductName, setNewProductName] = useState("");
+  const [newProductCost, setNewProductCost] = useState("");
+  const [newProductPrice, setNewProductPrice] = useState("");
+  const [newProductQty, setNewProductQty] = useState("1");
+  const [newProductError, setNewProductError] = useState<string | null>(null);
+
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
   const { data: settings } = useCurrentTenantSettings(session?.tenant_id);
@@ -63,6 +80,9 @@ function NewSalePage() {
   const { data: allPartners = [] } = usePartners(session?.tenant_id);
   const { data: allPurchases = [] } = usePurchases(session?.tenant_id);
   const createSaleMutation = useCreateSale(session?.tenant_id);
+  const createCustomerMutation = useCreateCustomer(session?.tenant_id);
+  const createProductMutation = useCreateProduct(session?.tenant_id);
+  const receiveStockMutation = useReceiveStock(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
@@ -145,6 +165,94 @@ function NewSalePage() {
 
   function removeLine(index: number) {
     setCart((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  // إنشاء عميل جديد من جوّه شاشة البيع نفسها — لعميل جاي "من بره" مش مسجّل عندنا، بدل ما
+  // البائع يضطر يسيب البيع ويروح صفحة العملاء الأول. نفس مبدأ الحد الأدنى المطلوب (الاسم
+  // والعنوان بس)، والعميل الجديد ده بيظهر عادي بعد كده في صفحة /customers.
+  async function handleCreateNewCustomer() {
+    setNewCustomerError(null);
+    if (!newCustomerName.trim()) {
+      setNewCustomerError("اسم العميل مطلوب");
+      return;
+    }
+    if (!newCustomerAddress.trim()) {
+      setNewCustomerError("عنوان العميل مطلوب");
+      return;
+    }
+    try {
+      const customer = await createCustomerMutation.mutateAsync({
+        input: {
+          name: newCustomerName.trim(),
+          address: newCustomerAddress.trim(),
+          ...(newCustomerPhone.trim() && { phone: newCustomerPhone.trim() }),
+          ...(newCustomerNotes.trim() && { notes: newCustomerNotes.trim() }),
+        },
+        actorUserId,
+      });
+      setCustomerId(customer.id);
+      setShowNewCustomerForm(false);
+      setNewCustomerName("");
+      setNewCustomerAddress("");
+      setNewCustomerPhone("");
+      setNewCustomerNotes("");
+    } catch (e) {
+      setNewCustomerError(e instanceof Error ? e.message : "حدث خطأ");
+    }
+  }
+
+  // إنشاء جهاز جديد من جوّه شاشة البيع نفسها — لعميل جاي بجهازه هو (مش من مخزون المحل)
+  // وعايز يبيعه فورًا. بيتسجل بالكمية بس (بدون سيريال، زي أي إضافة سريعة تانية في المشروع)،
+  // والكمية المدخلة بتتسجل فورًا كمخزون افتتاحي عشان تبقى متاحة للبيع على طول في نفس
+  // الفاتورة، والجهاز الجديد ده بيظهر عادي بعد كده في صفحة /products.
+  async function handleCreateNewProduct() {
+    setNewProductError(null);
+    if (!newProductName.trim()) {
+      setNewProductError("اسم الجهاز مطلوب");
+      return;
+    }
+    const price = Number(newProductPrice);
+    if (!newProductPrice || price <= 0) {
+      setNewProductError("أدخل سعر بيع صحيح");
+      return;
+    }
+    const qty = Number(newProductQty) || 0;
+    if (qty <= 0) {
+      setNewProductError("أدخل كمية صحيحة");
+      return;
+    }
+    try {
+      const product = await createProductMutation.mutateAsync({
+        input: {
+          name: newProductName.trim(),
+          unit: "قطعة",
+          cost_price: Number(newProductCost) || 0,
+          cash_price: price,
+          installment_price: price,
+          min_stock: 0,
+          max_stock: 0,
+          serial_required: false,
+        },
+        actorUserId,
+      });
+      await receiveStockMutation.mutateAsync({
+        product,
+        quantity: qty,
+        serialNumbers: undefined,
+        actorUserId,
+        reference: "إضافة سريعة وقت البيع",
+      });
+      setSelectedProductId(product.id);
+      setUnitPriceOverride(String(price));
+      setQuantity(String(qty));
+      setShowNewProductForm(false);
+      setNewProductName("");
+      setNewProductCost("");
+      setNewProductPrice("");
+      setNewProductQty("1");
+    } catch (e) {
+      setNewProductError(e instanceof Error ? e.message : "حدث خطأ");
+    }
   }
 
   const subtotal = cart.reduce((sum, l) => sum + l.unit_price * l.quantity, 0);
@@ -231,8 +339,79 @@ function NewSalePage() {
               onChange={setCustomerId}
               emptyLabel="عميل نقدي"
               placeholder="بحث باسم العميل..."
+              extraAction={{
+                label: "+ إضافة عميل جديد",
+                onSelect: () => {
+                  setShowNewCustomerForm(true);
+                  setCustomerId("");
+                },
+              }}
             />
           </label>
+
+          {showNewCustomerForm && (
+            <div className="mt-3 max-w-xl space-y-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
+              <p className="text-xs font-bold text-foreground">
+                عميل جديد — هيتضاف لقائمة العملاء ويتسجل عليه البيع ده فورًا
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">الاسم *</span>
+                  <input
+                    value={newCustomerName}
+                    onChange={(e) => setNewCustomerName(e.target.value)}
+                    className="form-input"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">العنوان *</span>
+                  <input
+                    value={newCustomerAddress}
+                    onChange={(e) => setNewCustomerAddress(e.target.value)}
+                    className="form-input"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">الهاتف (اختياري)</span>
+                  <input
+                    value={newCustomerPhone}
+                    onChange={(e) => setNewCustomerPhone(e.target.value)}
+                    className="form-input"
+                    dir="ltr"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">ملاحظات (اختياري)</span>
+                  <input
+                    value={newCustomerNotes}
+                    onChange={(e) => setNewCustomerNotes(e.target.value)}
+                    className="form-input"
+                  />
+                </label>
+              </div>
+              {newCustomerError && <p className="text-sm text-destructive">{newCustomerError}</p>}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleCreateNewCustomer()}
+                  disabled={createCustomerMutation.isPending}
+                  className="rounded-md bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {createCustomerMutation.isPending ? "جارٍ الإنشاء..." : "إنشاء واستخدام"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNewCustomerForm(false);
+                    setNewCustomerError(null);
+                  }}
+                  className="rounded-md border border-input px-4 py-2 text-xs font-medium text-foreground hover:bg-accent"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="mt-6 rounded-xl border border-border bg-card p-5 shadow-sm">
@@ -250,6 +429,13 @@ function NewSalePage() {
                   setUnitPriceOverride(product ? String(product.cash_price) : "");
                 }}
                 placeholder="بحث باسم الجهاز..."
+                extraAction={{
+                  label: "+ إضافة جهاز جديد",
+                  onSelect: () => {
+                    setShowNewProductForm(true);
+                    setSelectedProductId("");
+                  },
+                }}
               />
             </label>
 
@@ -306,6 +492,83 @@ function NewSalePage() {
               </button>
             </div>
           </div>
+
+          {showNewProductForm && (
+            <div className="mt-3 space-y-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
+              <p className="text-xs font-bold text-foreground">
+                جهاز جديد — هيتضاف لقائمة الأجهزة ويتسجل عليه الكمية دي فورًا جاهزة للبيع
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">الاسم *</span>
+                  <input
+                    value={newProductName}
+                    onChange={(e) => setNewProductName(e.target.value)}
+                    className="form-input"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">
+                    تكلفته (بكام جابه — اختياري)
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={newProductCost}
+                    onChange={(e) => setNewProductCost(e.target.value)}
+                    className="form-input"
+                    dir="ltr"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">سعر البيع *</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={newProductPrice}
+                    onChange={(e) => setNewProductPrice(e.target.value)}
+                    className="form-input"
+                    dir="ltr"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">الكمية معاه *</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={newProductQty}
+                    onChange={(e) => setNewProductQty(e.target.value)}
+                    className="form-input"
+                    dir="ltr"
+                  />
+                </label>
+              </div>
+              {newProductError && <p className="text-sm text-destructive">{newProductError}</p>}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleCreateNewProduct()}
+                  disabled={createProductMutation.isPending || receiveStockMutation.isPending}
+                  className="rounded-md bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {createProductMutation.isPending || receiveStockMutation.isPending
+                    ? "جارٍ الإنشاء..."
+                    : "إنشاء واستخدام"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNewProductForm(false);
+                    setNewProductError(null);
+                  }}
+                  className="rounded-md border border-input px-4 py-2 text-xs font-medium text-foreground hover:bg-accent"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </div>
+          )}
+
           <p className="mt-2 text-xs text-muted-foreground">
             السعر الأساسي المسجّل على الجهاز معروض كمبدئي — تقدر تغيّره براحتك وقت البيع.
           </p>
