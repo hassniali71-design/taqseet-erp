@@ -117,7 +117,8 @@ function CustomerDetailPage() {
           <div>
             <h1 className="text-2xl font-bold text-foreground">{customer.name}</h1>
             <p className="mt-1 text-sm text-muted-foreground" dir="ltr">
-              {customer.code} · {customer.phone}
+              {customer.code}
+              {customer.phone ? ` · ${customer.phone}` : ""}
             </p>
           </div>
           <div className="flex items-center gap-2">

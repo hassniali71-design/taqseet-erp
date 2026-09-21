@@ -76,7 +76,7 @@ function CustomersPage() {
   function startEdit(customer: Customer) {
     setForm({
       name: customer.name,
-      phone: customer.phone,
+      phone: customer.phone ?? "",
       alt_phone: customer.alt_phone ?? "",
       address: customer.address ?? "",
       notes: customer.notes ?? "",
@@ -89,9 +89,9 @@ function CustomersPage() {
     event.preventDefault();
     const payload = {
       name: form.name.trim(),
-      phone: form.phone.trim(),
+      address: form.address.trim(),
+      ...(form.phone.trim() && { phone: form.phone.trim() }),
       ...(form.alt_phone.trim() && { alt_phone: form.alt_phone.trim() }),
-      ...(form.address.trim() && { address: form.address.trim() }),
       ...(form.notes.trim() && { notes: form.notes.trim() }),
     };
     if (editingId === "new") {
@@ -166,28 +166,28 @@ function CustomersPage() {
                   className="form-input"
                 />
               </Field>
-              <Field label="الهاتف *">
+              <Field label="العنوان *">
                 <input
                   required
+                  value={form.address}
+                  onChange={(e) => setForm({ ...form, address: e.target.value })}
+                  className="form-input"
+                />
+              </Field>
+              <Field label="الهاتف (اختياري)">
+                <input
                   value={form.phone}
                   onChange={(e) => setForm({ ...form, phone: e.target.value })}
                   className="form-input"
                   dir="ltr"
                 />
               </Field>
-              <Field label="هاتف بديل">
+              <Field label="هاتف بديل (اختياري)">
                 <input
                   value={form.alt_phone}
                   onChange={(e) => setForm({ ...form, alt_phone: e.target.value })}
                   className="form-input"
                   dir="ltr"
-                />
-              </Field>
-              <Field label="العنوان">
-                <input
-                  value={form.address}
-                  onChange={(e) => setForm({ ...form, address: e.target.value })}
-                  className="form-input"
                 />
               </Field>
               {editingId === "new" && (
@@ -271,7 +271,7 @@ function CustomersPage() {
                       </Link>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground" dir="ltr">
-                      {customer.phone}
+                      {customer.phone ?? "—"}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{customer.address ?? "—"}</td>
                     <td className="px-4 py-3 font-medium text-foreground" dir="ltr">

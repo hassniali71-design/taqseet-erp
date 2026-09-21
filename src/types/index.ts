@@ -134,7 +134,8 @@ export interface Customer {
   tenant_id: string;
   code: string;
   name: string;
-  phone: string;
+  /** اختياري تمامًا — الاسم والعنوان بس المفروضين وقت التسجيل (migration 0016). */
+  phone?: string;
   alt_phone?: string;
   address?: string;
   notes?: string;
