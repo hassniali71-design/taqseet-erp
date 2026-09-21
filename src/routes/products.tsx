@@ -37,7 +37,6 @@ type FormState = {
   min_stock: string;
   max_stock: string;
   warranty_months: string;
-  serial_required: boolean;
   opening_stock: string;
 };
 
@@ -53,7 +52,6 @@ const EMPTY_FORM: FormState = {
   min_stock: "0",
   max_stock: "0",
   warranty_months: "",
-  serial_required: true,
   opening_stock: "0",
 };
 
@@ -122,7 +120,6 @@ function ProductsPage() {
       min_stock: String(product.min_stock),
       max_stock: String(product.max_stock),
       warranty_months: product.warranty_months ? String(product.warranty_months) : "",
-      serial_required: product.serial_required,
       opening_stock: "0",
     });
     setFormError(null);
@@ -154,14 +151,12 @@ function ProductsPage() {
 
   function onOpeningStockChange(value: string) {
     setForm({ ...form, opening_stock: value });
-    if (form.serial_required) {
-      const n = Math.max(0, Number(value) || 0);
-      setOpeningSerials((prev) => {
-        const next = [...prev];
-        while (next.length < n) next.push("");
-        return next.slice(0, Math.max(n, 1));
-      });
-    }
+    const n = Math.max(0, Number(value) || 0);
+    setOpeningSerials((prev) => {
+      const next = [...prev];
+      while (next.length < n) next.push("");
+      return next.slice(0, Math.max(n, 1));
+    });
   }
 
   async function handleSubmit(event: FormEvent) {
@@ -186,16 +181,28 @@ function ProductsPage() {
         min_stock: toNumber(form.min_stock),
         max_stock: toNumber(form.max_stock),
         ...(form.warranty_months && { warranty_months: toNumber(form.warranty_months) }),
-        serial_required: form.serial_required,
       };
       if (editingId === "new") {
         const openingQty = toNumber(form.opening_stock);
-        const product = await createProductMutation.mutateAsync({ input: payload, actorUserId });
+        // مفيش تشك بوكس "يحتاج سيريال" — كل خانة سيريال اختيارية براحة صاحب المحل. لو كتب
+        // سيريال ولو لواحدة بس من القطع، الجهاز ده بقى متتبَّع بالسيريال (serial_required)
+        // والخانات الفاضية بتتملى برقم مرجعي داخلي تلقائي عشان العدد يتظبط؛ لو سابهم كلهم
+        // فاضيين، الجهاز يتتبع بالكمية بس زي ما هو متعارف عليه. هذا القرار بيتحدد مرة واحدة
+        // هنا ومبيتغيرش بعد كده (تعديل لاحق مش بيمسه) عشان ميكسرش حساب المخزون التاريخي.
+        const trimmedSerials = openingSerials.map((s) => s.trim());
+        const hasAnySerial = trimmedSerials.some(Boolean);
+        const finalSerials = hasAnySerial
+          ? trimmedSerials.map((s, i) => s || `تلقائي-${Date.now()}-${i + 1}`)
+          : [];
+        const product = await createProductMutation.mutateAsync({
+          input: { ...payload, serial_required: hasAnySerial },
+          actorUserId,
+        });
         if (openingQty > 0) {
           await receiveStockMutation.mutateAsync({
             product,
             quantity: openingQty,
-            serialNumbers: form.serial_required ? openingSerials : undefined,
+            serialNumbers: hasAnySerial ? finalSerials : undefined,
             actorUserId,
             reference: "رصيد افتتاحي",
           });
@@ -445,14 +452,19 @@ function ProductsPage() {
                   والإشعارات.
                 </span>
               </Field>
-              <label className="flex items-center gap-2 self-end pb-2 text-xs font-medium text-foreground">
-                <input
-                  type="checkbox"
-                  checked={form.serial_required}
-                  onChange={(e) => setForm({ ...form, serial_required: e.target.checked })}
-                />
-                يحتاج سيريال (جهاز فردي)
-              </label>
+              {editingId !== "new" && (
+                <div className="flex items-end pb-2">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    نوع التتبع:{" "}
+                    <span className="font-bold text-foreground">
+                      {products.find((p) => p.id === editingId)?.serial_required
+                        ? "بالسيريال"
+                        : "بالكمية"}
+                    </span>{" "}
+                    (يتحدد مرة واحدة وقت إنشاء الجهاز، مش قابل للتغيير بعد كده)
+                  </span>
+                </div>
+              )}
             </div>
 
             {editingId === "new" && (
@@ -472,28 +484,32 @@ function ProductsPage() {
                     "استلام كمية" داخل صفحة الجهاز نفسه.
                   </span>
                 </Field>
-                {form.serial_required && toNumber(form.opening_stock) > 0 && (
+                {toNumber(form.opening_stock) > 0 && (
                   <div className="mt-3 space-y-2">
                     <span className="text-xs font-medium text-foreground">
-                      أرقام السيريال ({openingSerials.length})
+                      رقم السيريال لكل قطعة (اختياري — اكتبه لو عندك، أو سيبه فاضي)
                     </span>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       {openingSerials.map((value, i) => (
                         <input
                           key={i}
-                          required
                           value={value}
                           onChange={(e) => {
                             const next = [...openingSerials];
                             next[i] = e.target.value;
                             setOpeningSerials(next);
                           }}
-                          placeholder={`سيريال #${i + 1}`}
+                          placeholder={`سيريال #${i + 1} (اختياري)`}
                           className="form-input"
                           dir="ltr"
                         />
                       ))}
                     </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      لو كتبت سيريال لقطعة واحدة على الأقل، الجهاز ده هيتتبع بالسيريال — أي خانة
+                      سابها فاضية هتاخد رقم مرجعي تلقائي. لو سبتهم كلهم فاضيين، الجهاز هيتتبع
+                      بالكمية بس زي المعتاد.
+                    </p>
                   </div>
                 )}
               </div>

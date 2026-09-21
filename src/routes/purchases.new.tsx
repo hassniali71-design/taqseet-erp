@@ -43,7 +43,6 @@ function NewPurchasePage() {
   const [newProductInstallment, setNewProductInstallment] = useState("");
   const [newProductBrand, setNewProductBrand] = useState("");
   const [newProductWarrantyMonths, setNewProductWarrantyMonths] = useState("");
-  const [newProductSerialRequired, setNewProductSerialRequired] = useState(false);
   const [newProductError, setNewProductError] = useState<string | null>(null);
 
   const { data: allSuppliers = [] } = useSuppliers(session?.tenant_id);
@@ -140,7 +139,7 @@ function NewPurchasePage() {
           installment_price: installment,
           min_stock: 0,
           max_stock: 0,
-          serial_required: newProductSerialRequired,
+          serial_required: false,
           ...(newProductBrand.trim() && { brand: newProductBrand.trim() }),
           ...(newProductWarrantyMonths && {
             warranty_months: Number(newProductWarrantyMonths) || 0,
@@ -156,7 +155,6 @@ function NewPurchasePage() {
       setNewProductInstallment("");
       setNewProductBrand("");
       setNewProductWarrantyMonths("");
-      setNewProductSerialRequired(false);
     } catch (e) {
       setNewProductError(e instanceof Error ? e.message : "حدث خطأ");
     }
@@ -347,14 +345,10 @@ function NewPurchasePage() {
                   />
                 </label>
               </div>
-              <label className="flex items-center gap-2 text-xs font-medium text-foreground">
-                <input
-                  type="checkbox"
-                  checked={newProductSerialRequired}
-                  onChange={(e) => setNewProductSerialRequired(e.target.checked)}
-                />
-                يحتاج سيريال (جهاز فردي)
-              </label>
+              <p className="text-[11px] text-muted-foreground">
+                الجهاز الجديد ده هيتسجل بالكمية بس (بدون سيريال) — لو حابب تتبعه بالسيريال، سجّله من
+                صفحة "الأجهزة" بدل كده وحط رقم سيريال لأي قطعة عايز تتبعها.
+              </p>
               {newProductError && <p className="text-sm text-destructive">{newProductError}</p>}
               <div className="flex gap-2">
                 <button
