@@ -19,18 +19,14 @@ import { toast } from "sonner";
 import { Logo } from "@/components/Logo";
 import { Panel } from "@/components/ui/StatCard";
 import { useSession } from "@/hooks/use-session";
-import {
-  getUsers,
-  provisionTenant,
-  signOut,
-  subscribeData,
-  type ProvisionTenantResult,
-} from "@/lib/data-store";
+import { getUsers, signOut, subscribeData } from "@/lib/data-store";
 import {
   extendTenantSubscriptionServer,
   fetchManagedTenants,
+  provisionTenantServer,
   recordCrossTenantAudit,
   setTenantStatusServer,
+  type ProvisionTenantResult,
 } from "@/lib/platform-server";
 import type { Tenant, TenantStatus } from "@/types";
 
@@ -116,6 +112,24 @@ function PlatformControlRoom() {
     }) => recordCrossTenantAudit({ data: vars }),
   });
 
+  const provisionTenantMutation = useMutation({
+    mutationFn: (vars: {
+      name: string;
+      owner_name: string;
+      phone: string;
+      owner_email: string;
+      actorUserId: string | null;
+    }) => provisionTenantServer({ data: vars }),
+    onSuccess: (result) => {
+      setJustCreated(result);
+      setForm({ name: "", owner_name: "", phone: "", owner_email: "" });
+      setShowCreate(false);
+      void queryClient.invalidateQueries({ queryKey: ["managed-tenants"] });
+      toast.success(`تم إنشاء عميل جديد بحساب دخول حقيقي: ${result.tenant.name}`);
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "تعذّر إنشاء العميل"),
+  });
+
   if (!session || !currentUser?.is_platform_owner) return null;
 
   const totalCustomers = tenants.length;
@@ -127,11 +141,7 @@ function PlatformControlRoom() {
 
   function handleCreate(event: FormEvent) {
     event.preventDefault();
-    const result = provisionTenant(form, session?.user_id ?? null);
-    setJustCreated(result);
-    setForm({ name: "", owner_name: "", phone: "", owner_email: "" });
-    setShowCreate(false);
-    toast.success(`تم إنشاء عميل جديد: ${result.tenant.name}`);
+    provisionTenantMutation.mutate({ ...form, actorUserId: session?.user_id ?? null });
   }
 
   function copyCredentials(result: ProvisionTenantResult) {
@@ -316,9 +326,10 @@ function PlatformControlRoom() {
         {showCreate && (
           <div className="mt-6 rounded-2xl border-2 border-sidebar-border bg-sidebar-accent/20 p-5">
             <h2 className="text-sm font-extrabold text-sidebar-foreground">إنشاء عميل جديد</h2>
-            <p className="mt-1 text-xs font-bold text-warning">
-              ⚠️ لسه بيعمل حساب Mock بس (تخزين محلي في متصفحك) — مش هيظهر في جدول "العملاء" تحت
-              (اللي بقى بيقرأ من Supabase حقيقي)، ومش هيقدر يسجّل دخول حقيقي. الخطوة دي لسه مؤجَّلة.
+            <p className="mt-1 text-xs font-bold text-sidebar-foreground/70">
+              بينشئ حساب دخول حقيقي للمالك على Supabase فورًا (بريد + كلمة سر مولّدة) — يقدر يسجّل
+              دخول بيهم على طول من نفس رابط تسجيل الدخول العادي، وبياناته معزولة تمامًا عن باقي
+              العملاء.
             </p>
             <form onSubmit={handleCreate} className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field
@@ -347,9 +358,12 @@ function PlatformControlRoom() {
               <div className="sm:col-span-2">
                 <button
                   type="submit"
-                  className="rounded-md bg-primary px-4 py-2 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90"
+                  disabled={provisionTenantMutation.isPending}
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  إنشاء العميل وتوليد بيانات الدخول
+                  {provisionTenantMutation.isPending
+                    ? "جارٍ الإنشاء..."
+                    : "إنشاء العميل وتوليد بيانات الدخول"}
                 </button>
               </div>
             </form>
@@ -501,10 +515,10 @@ function PlatformControlRoom() {
         </div>
 
         <div className="mt-6 rounded-2xl border-2 border-sidebar-border bg-sidebar-accent/20 p-5 text-sm font-bold text-sidebar-foreground/80">
-          ملاحظة صريحة: جدول العملاء فوق، والتفعيل/التعليق/التجديد، وسجل دخول الدعم الفني — كلهم
-          بقوا حقيقيين فعليًا على Supabase (RLS + service role حسب الحالة). أما بيانات كل محل
-          التشغيلية (عملاؤه، منتجاته، مبيعاته، تقسيطه، خزينته) فلسه Mock في متصفح كل مستخدم — مرحلة
-          تحويل لاحقة منفصلة. "عميل جديد" فوق لسه بيعمل حساب Mock بس، مش حساب حقيقي.
+          ملاحظة صريحة: كل حاجة في الصفحة دي حقيقية على Supabase — جدول العملاء، إنشاء عميل جديد
+          (حساب دخول Auth حقيقي فورًا لمالكه)، التفعيل/التعليق/التجديد، وسجل دخول الدعم الفني، كلها
+          تتحرك على قاعدة البيانات الحقيقية (RLS + service role حسب الحالة)، وكل عميل بياناته معزولة
+          تمامًا عن باقي العملاء.
         </div>
       </main>
     </div>
