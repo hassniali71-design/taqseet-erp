@@ -2950,6 +2950,88 @@ export function useCreatePartner(tenantId: string | undefined) {
   });
 }
 
+/** تعديل بيانات الشريك الشخصية بس (اسمه/هاتفه/نسبة ربحه الافتراضية/ملاحظاته/حالة نشاطه) —
+ * مفيش أي تعديل مباشر على رصيده أو تمويله هنا؛ ده بيفضل بس من خلال useAddPartnerFunding/
+ * useWithdrawPartnerFunds كأوبشن خارجي منفصل تمامًا، زي useUpdateCustomer بالظبط. */
+export function useUpdatePartner(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      patch,
+      actorUserId,
+    }: {
+      id: string;
+      patch: Partial<Omit<Partner, "id" | "tenant_id" | "code" | "created_at">>;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data: before, error: beforeError } = await supabase
+        .from("partners")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (beforeError || !before) throw new Error(beforeError?.message ?? "الشريك غير موجود");
+      const { data, error } = await supabase
+        .from("partners")
+        .update(patch)
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "partner.update",
+        entity: "partners",
+        entity_id: id,
+        old_value: before,
+        new_value: data,
+      });
+      return data as Partner;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["partners", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+/** حذف حقيقي دائم — بوابة باسورد الأونر في الواجهة. `partner_transactions.partner_id` هو
+ * `on delete restrict` (migration 0014)، فبوستجرس نفسه بيرفض الحذف طالما فيه أي حركة
+ * (تمويل/سحب/تسوية صفقة) مسجّلة على الشريك ده — بيتلقط هنا كرسالة عربية واضحة تقوله يستخدم
+ * زرار الإيقاف بدل الحذف، نفس أسلوب useDeleteCustomer بالظبط. */
+export function useDeletePartner(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, actorUserId }: { id: string; actorUserId: string | null }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data: before } = await supabase.from("partners").select("*").eq("id", id).single();
+      const { error } = await supabase.from("partners").delete().eq("id", id);
+      if (error) {
+        if (error.code === "23503") {
+          throw new Error(
+            "لا يمكن حذف هذا الشريك نهائيًا لأن له حركة مالية مسجّلة (تمويل/سحب/تسوية صفقة) — استخدم زر إيقاف بدلاً من الحذف.",
+          );
+        }
+        throw new Error(error.message);
+      }
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "partner.delete",
+        entity: "partners",
+        entity_id: id,
+        old_value: before,
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["partners", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
 /** إضافة تمويل لشريك في أي وقت (Top-up) — تسجّل صف `funding` في دفتره، بيزوّد رصيده مباشرة.
  * مفيش سقف/تحقق تاني غير المبلغ لازم يكون أكبر من صفر (نفس بساطة useRecordSupplierPayment). */
 export function useAddPartnerFunding(tenantId: string | undefined) {

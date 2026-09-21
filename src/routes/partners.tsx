@@ -10,11 +10,15 @@ import {
   dateInputToTimestamp,
   useAddPartnerFunding,
   useCreatePartner,
+  useDeletePartner,
   usePartners,
   usePartnerTransactions,
+  useUpdatePartner,
   useWithdrawPartnerFunds,
 } from "@/lib/supabase-queries";
+import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
+import type { Partner } from "@/types";
 
 export const Route = createFileRoute("/partners")({
   component: PartnersPage,
@@ -39,39 +43,90 @@ const EMPTY_FORM: FormState = {
 function PartnersPage() {
   const session = useRequireSession();
   const [, forceRerender] = useState(0);
-  const [creating, setCreating] = useState(false);
+  const [editingId, setEditingId] = useState<string | "new" | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [query, setQuery] = useState("");
   const [actionForId, setActionForId] = useState<string | null>(null);
   const [actionMode, setActionMode] = useState<"funding" | "withdrawal">("funding");
   const [actionAmount, setActionAmount] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const { requestConfirm, dialog: passwordDialog } = useOwnerPasswordConfirm();
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
   const { data: partners = [] } = usePartners(session?.tenant_id);
   const { data: transactions = [] } = usePartnerTransactions(session?.tenant_id);
   const createPartnerMutation = useCreatePartner(session?.tenant_id);
+  const updatePartnerMutation = useUpdatePartner(session?.tenant_id);
+  const deletePartnerMutation = useDeletePartner(session?.tenant_id);
   const addFundingMutation = useAddPartnerFunding(session?.tenant_id);
   const withdrawMutation = useWithdrawPartnerFunds(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
 
+  function startCreate() {
+    setForm(EMPTY_FORM);
+    setEditingId("new");
+  }
+
+  function startEdit(partner: Partner) {
+    setForm({
+      name: partner.name,
+      phone: partner.phone ?? "",
+      profit_share_pct: String(partner.profit_share_pct),
+      notes: partner.notes ?? "",
+      join_date: "",
+    });
+    setEditingId(partner.id);
+  }
+
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    createPartnerMutation.mutate({
-      input: {
-        name: form.name.trim(),
-        profit_share_pct: Number(form.profit_share_pct) || 0,
-        ...(form.phone.trim() && { phone: form.phone.trim() }),
-        ...(form.notes.trim() && { notes: form.notes.trim() }),
-      },
-      actorUserId,
-      ...(form.join_date && { createdAt: dateInputToTimestamp(form.join_date) }),
-    });
-    setCreating(false);
+    const payload = {
+      name: form.name.trim(),
+      profit_share_pct: Number(form.profit_share_pct) || 0,
+      ...(form.phone.trim() && { phone: form.phone.trim() }),
+      ...(form.notes.trim() && { notes: form.notes.trim() }),
+    };
+    if (editingId === "new") {
+      createPartnerMutation.mutate({
+        input: payload,
+        actorUserId,
+        ...(form.join_date && { createdAt: dateInputToTimestamp(form.join_date) }),
+      });
+    } else if (editingId) {
+      updatePartnerMutation.mutate({ id: editingId, patch: payload, actorUserId });
+    }
+    setEditingId(null);
     setForm(EMPTY_FORM);
+  }
+
+  function toggleActive(partner: Partner) {
+    updatePartnerMutation.mutate({
+      id: partner.id,
+      patch: { active: !partner.active },
+      actorUserId,
+    });
+  }
+
+  async function handleDelete(partner: Partner) {
+    setDeleteError(null);
+    if (
+      !window.confirm(
+        `حذف "${partner.name}" نهائيًا؟ لو عنده أي تمويل أو سحب أو صفقة مسجّلة، الحذف هيترفض ولازم تستخدم زرار الإيقاف بدلاً منه.`,
+      )
+    ) {
+      return;
+    }
+    const confirmed = await requestConfirm();
+    if (!confirmed) return;
+    try {
+      await deletePartnerMutation.mutateAsync({ id: partner.id, actorUserId });
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : "حدث خطأ أثناء الحذف");
+    }
   }
 
   function handleConfirmAction(partnerId: string) {
@@ -122,9 +177,9 @@ function PartnersPage() {
       <main className="flex-1 mx-auto max-w-5xl px-4 py-8">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-foreground">الشركاء</h1>
-          {!creating && (
+          {editingId === null && (
             <button
-              onClick={() => setCreating(true)}
+              onClick={startCreate}
               className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
             >
               + إضافة شريك
@@ -168,12 +223,14 @@ function PartnersPage() {
           </section>
         )}
 
-        {creating && (
+        {editingId !== null && (
           <form
             onSubmit={handleSubmit}
             className="mt-4 space-y-3 rounded-xl border border-border bg-card p-5 shadow-sm"
           >
-            <h2 className="text-sm font-bold text-foreground">شريك جديد</h2>
+            <h2 className="text-sm font-bold text-foreground">
+              {editingId === "new" ? "شريك جديد" : "تعديل بيانات الشريك"}
+            </h2>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="الاسم *">
                 <input
@@ -202,15 +259,17 @@ function PartnersPage() {
                   dir="ltr"
                 />
               </Field>
-              <Field label="تاريخ الانضمام (سيبه فاضي لو دلوقتي)">
-                <input
-                  type="date"
-                  value={form.join_date}
-                  onChange={(e) => setForm({ ...form, join_date: e.target.value })}
-                  className="form-input"
-                  dir="ltr"
-                />
-              </Field>
+              {editingId === "new" && (
+                <Field label="تاريخ الانضمام (سيبه فاضي لو دلوقتي)">
+                  <input
+                    type="date"
+                    value={form.join_date}
+                    onChange={(e) => setForm({ ...form, join_date: e.target.value })}
+                    className="form-input"
+                    dir="ltr"
+                  />
+                </Field>
+              )}
             </div>
             <Field label="ملاحظات">
               <textarea
@@ -230,7 +289,7 @@ function PartnersPage() {
               <button
                 type="button"
                 onClick={() => {
-                  setCreating(false);
+                  setEditingId(null);
                   setForm(EMPTY_FORM);
                 }}
                 className="rounded-md border border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
@@ -269,18 +328,47 @@ function PartnersPage() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <Link
-                      to="/partners/$id"
-                      params={{ id: partner.id }}
-                      className="font-bold text-foreground hover:underline"
-                    >
-                      {partner.name}
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      <Link
+                        to="/partners/$id"
+                        params={{ id: partner.id }}
+                        className="font-bold text-foreground hover:underline"
+                      >
+                        {partner.name}
+                      </Link>
+                      <span
+                        className={
+                          partner.active
+                            ? "rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-medium text-success"
+                            : "rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                        }
+                      >
+                        {partner.active ? "نشط" : "موقوف"}
+                      </span>
+                    </div>
                     <p className="mt-0.5 text-xs text-muted-foreground" dir="ltr">
                       {partner.code} · نسبة الربح {partner.profit_share_pct}% · {dealCount} صفقة
                     </p>
                   </div>
-                  <div className="flex shrink-0 gap-2">
+                  <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                    <button
+                      onClick={() => startEdit(partner)}
+                      className="whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
+                    >
+                      تعديل
+                    </button>
+                    <button
+                      onClick={() => toggleActive(partner)}
+                      className="whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
+                    >
+                      {partner.active ? "إيقاف" : "تفعيل"}
+                    </button>
+                    <button
+                      onClick={() => void handleDelete(partner)}
+                      className="whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-xs font-medium text-destructive hover:bg-accent"
+                    >
+                      حذف
+                    </button>
                     <button
                       onClick={() => {
                         setActionForId(actionForId === partner.id ? null : partner.id);
@@ -373,6 +461,8 @@ function PartnersPage() {
             </p>
           )}
         </div>
+        {deleteError && <p className="mt-2 text-sm text-destructive">{deleteError}</p>}
+        {passwordDialog}
       </main>
     </div>
   );
