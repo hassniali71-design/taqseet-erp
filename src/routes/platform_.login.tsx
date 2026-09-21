@@ -62,9 +62,17 @@ function PlatformLoginPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="password" className="text-sm font-bold text-sidebar-foreground">
-                كلمة السر
-              </label>
+              <div className="flex items-center justify-between">
+                <label htmlFor="password" className="text-sm font-bold text-sidebar-foreground">
+                  كلمة السر
+                </label>
+                <Link
+                  to="/forgot-password"
+                  className="text-xs font-bold text-primary hover:underline"
+                >
+                  نسيت كلمة السر؟
+                </Link>
+              </div>
               <input
                 id="password"
                 type="password"

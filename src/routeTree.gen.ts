@@ -17,12 +17,14 @@ import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as DeliveriesRouteImport } from './routes/deliveries'
 import { Route as ExpensesRouteImport } from './routes/expenses'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as PartnersRouteImport } from './routes/partners'
 import { Route as PlatformRouteImport } from './routes/platform'
 import { Route as ProductsRouteImport } from './routes/products'
 import { Route as ReportsRouteImport } from './routes/reports'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as StockCountRouteImport } from './routes/stock-count'
 import { Route as SuppliersRouteImport } from './routes/suppliers'
@@ -83,6 +85,11 @@ const ExpensesRoute = ExpensesRouteImport.update({
   path: '/expenses',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -111,6 +118,11 @@ const ProductsRoute = ProductsRouteImport.update({
 const ReportsRoute = ReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -218,12 +230,14 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/deliveries': typeof DeliveriesRoute
   '/expenses': typeof ExpensesRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/partners': typeof PartnersRoute
   '/platform': typeof PlatformRoute
   '/products': typeof ProductsRoute
   '/reports': typeof ReportsRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/stock-count': typeof StockCountRoute
   '/suppliers': typeof SuppliersRoute
@@ -253,12 +267,14 @@ export interface FileRoutesByTo {
   '/dashboard': typeof DashboardRoute
   '/deliveries': typeof DeliveriesRoute
   '/expenses': typeof ExpensesRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/partners': typeof PartnersRoute
   '/platform': typeof PlatformRoute
   '/products': typeof ProductsRoute
   '/reports': typeof ReportsRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/stock-count': typeof StockCountRoute
   '/suppliers': typeof SuppliersRoute
@@ -289,12 +305,14 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/deliveries': typeof DeliveriesRoute
   '/expenses': typeof ExpensesRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/partners': typeof PartnersRoute
   '/platform': typeof PlatformRoute
   '/products': typeof ProductsRoute
   '/reports': typeof ReportsRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/stock-count': typeof StockCountRoute
   '/suppliers': typeof SuppliersRoute
@@ -326,12 +344,14 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/deliveries'
     | '/expenses'
+    | '/forgot-password'
     | '/login'
     | '/notifications'
     | '/partners'
     | '/platform'
     | '/products'
     | '/reports'
+    | '/reset-password'
     | '/settings'
     | '/stock-count'
     | '/suppliers'
@@ -361,12 +381,14 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/deliveries'
     | '/expenses'
+    | '/forgot-password'
     | '/login'
     | '/notifications'
     | '/partners'
     | '/platform'
     | '/products'
     | '/reports'
+    | '/reset-password'
     | '/settings'
     | '/stock-count'
     | '/suppliers'
@@ -396,12 +418,14 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/deliveries'
     | '/expenses'
+    | '/forgot-password'
     | '/login'
     | '/notifications'
     | '/partners'
     | '/platform'
     | '/products'
     | '/reports'
+    | '/reset-password'
     | '/settings'
     | '/stock-count'
     | '/suppliers'
@@ -432,12 +456,14 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   DeliveriesRoute: typeof DeliveriesRoute
   ExpensesRoute: typeof ExpensesRoute
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRoute
   NotificationsRoute: typeof NotificationsRoute
   PartnersRoute: typeof PartnersRoute
   PlatformRoute: typeof PlatformRoute
   ProductsRoute: typeof ProductsRoute
   ReportsRoute: typeof ReportsRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
   SettingsRoute: typeof SettingsRoute
   StockCountRoute: typeof StockCountRoute
   SuppliersRoute: typeof SuppliersRoute
@@ -517,6 +543,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ExpensesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/login': {
       id: '/login'
       path: '/login'
@@ -557,6 +590,13 @@ declare module '@tanstack/react-router' {
       path: '/reports'
       fullPath: '/reports'
       preLoaderRoute: typeof ReportsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -704,12 +744,14 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   DeliveriesRoute: DeliveriesRoute,
   ExpensesRoute: ExpensesRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,
   NotificationsRoute: NotificationsRoute,
   PartnersRoute: PartnersRoute,
   PlatformRoute: PlatformRoute,
   ProductsRoute: ProductsRoute,
   ReportsRoute: ReportsRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
   SettingsRoute: SettingsRoute,
   StockCountRoute: StockCountRoute,
   SuppliersRoute: SuppliersRoute,
