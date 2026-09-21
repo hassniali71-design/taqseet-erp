@@ -60,6 +60,7 @@ function NewInstallmentSalePage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedPartnerIds, setSelectedPartnerIds] = useState<string[]>([]);
   const [partnerSplits, setPartnerSplits] = useState<Record<string, string>>({});
+  const [partnerProfitShares, setPartnerProfitShares] = useState<Record<string, string>>({});
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -219,11 +220,13 @@ function NewInstallmentSalePage() {
               selectedPartnerIds.map((partnerId) => {
                 const partner = activePartners.find((p) => p.id === partnerId);
                 const splitPct = Number(partnerSplits[partnerId]) || 0;
+                const profitSharePct =
+                  Number(partnerProfitShares[partnerId] ?? partner?.profit_share_pct) || 0;
                 const preview = computePartnerDealPreview(
                   cashSubtotal,
                   cartCost,
                   splitPct,
-                  partner?.profit_share_pct ?? 0,
+                  profitSharePct,
                 );
                 return {
                   partnerId,
@@ -232,7 +235,7 @@ function NewInstallmentSalePage() {
                   profitAmount: preview.profitAmount,
                   dealValue: cashSubtotal,
                   splitPct,
-                  profitSharePct: partner?.profit_share_pct ?? 0,
+                  profitSharePct,
                 };
               }),
             );
@@ -555,6 +558,8 @@ function NewInstallmentSalePage() {
             onSelectedIdsChange={setSelectedPartnerIds}
             splits={partnerSplits}
             onSplitsChange={setPartnerSplits}
+            profitShares={partnerProfitShares}
+            onProfitSharesChange={setPartnerProfitShares}
             cashSubtotal={cashSubtotal}
             cost={cartCost}
             {...(singleProductId ? { productId: singleProductId } : {})}

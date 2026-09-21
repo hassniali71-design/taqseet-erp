@@ -13,7 +13,12 @@ import type { Partner, Purchase } from "@/types";
  * البائع يقدر يدخل نسبة تقسيمه من الصفقة % (زي ما كان) أو مبلغ ربح فلات مباشرة — الاتنين
  * بيتحوّلوا لنفس splitPct الخارجي (مفيش تغيير في الـcontract الخارجي ولا في sales.new*.tsx)،
  * وبيتعرض تحويل حي للوحدة التانية جنب الإدخال، فيه لو دخل فلوس يشوف بتمثل كام %، ولو دخل
- * نسبة يشوف بتمثل كام جنيه. */
+ * نسبة يشوف بتمثل كام جنيه.
+ *
+ * نسبة ربح الشريك (profit_share_pct) نفسها بقت مفتوحة وقابلة للتعديل وقت إتمام الصفقة —
+ * partner.profit_share_pct المخزّنة على ملفه الدائم تُستخدم كقيمة افتراضية بس، مش قفل. لو
+ * البائع عدّلها هنا، القيمة المعدَّلة هي اللي بتتسجّل كـSnapshot تاريخي لهذه الصفقة تحديدًا
+ * (profit_share_pct_snapshot)، وملف الشريك الدائم مبيتغيرش. */
 export function PartnerDealPicker({
   partners,
   purchases,
@@ -21,6 +26,8 @@ export function PartnerDealPicker({
   onSelectedIdsChange,
   splits,
   onSplitsChange,
+  profitShares,
+  onProfitSharesChange,
   cashSubtotal,
   cost,
   productId,
@@ -31,6 +38,10 @@ export function PartnerDealPicker({
   onSelectedIdsChange: (ids: string[]) => void;
   splits: Record<string, string>;
   onSplitsChange: (splits: Record<string, string>) => void;
+  /** نسبة ربح كل شريك المعدَّلة لهذه الصفقة بس — مفتاحها partnerId، وتفضل تقرأ من
+   * partner.profit_share_pct لو الشريك لسه محدّدش قيمة مخصصة هنا. */
+  profitShares: Record<string, string>;
+  onProfitSharesChange: (profitShares: Record<string, string>) => void;
   cashSubtotal: number;
   cost: number;
   /** لو الصفقة فيها صنف واحد بس — بيُستخدم لعرض معلومة "آخر مرة اتشرى فيها ده" Best-effort. */
@@ -58,6 +69,10 @@ export function PartnerDealPicker({
 
   function setPartnerSplitPct(partnerId: string, pct: string) {
     onSplitsChange({ ...splits, [partnerId]: pct });
+  }
+
+  function setPartnerProfitSharePct(partnerId: string, pct: string) {
+    onProfitSharesChange({ ...profitShares, [partnerId]: pct });
   }
 
   const lastPurchaseForProduct = productId
@@ -93,12 +108,8 @@ export function PartnerDealPicker({
             if (!partner) return null;
             const mode = inputModes[partnerId] ?? "pct";
             const splitPct = Number(splits[partnerId]) || 0;
-            const preview = computePartnerDealPreview(
-              cashSubtotal,
-              cost,
-              splitPct,
-              partner.profit_share_pct,
-            );
+            const profitSharePct = Number(profitShares[partnerId] ?? partner.profit_share_pct) || 0;
+            const preview = computePartnerDealPreview(cashSubtotal, cost, splitPct, profitSharePct);
             return (
               <div key={partnerId} className="rounded-lg border border-border p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -154,7 +165,7 @@ export function PartnerDealPicker({
                             const amount = Number(raw) || 0;
                             setPartnerSplitPct(
                               partnerId,
-                              String(amountToSplitPct(amount, partner.profit_share_pct)),
+                              String(amountToSplitPct(amount, profitSharePct)),
                             );
                           }}
                           className="form-input w-24"
@@ -171,9 +182,9 @@ export function PartnerDealPicker({
                 </p>
 
                 {/* تفصيل الحسبة سطر سطر — عشان البائع يشوف بالظبط منين طلع الرقم النهائي
-                    (سعر البيع، تكلفة الشراء، الهامش، نصيبه من الاتنين، ونسبة ربحه من هامشه)،
-                    مش جملة واحدة مجمّعة. */}
-                <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 rounded-md bg-muted/50 p-2 text-xs">
+                    (سعر البيع، تكلفة الشراء، الهامش، نصيبه من الاتنين، ونسبة ربحه من هامشه).
+                    نسبة ربحه مفتوحة تتعدّل هنا لهذه الصفقة بس — مش قفل على ملفه الدائم. */}
+                <div className="mt-2 grid grid-cols-2 items-center gap-x-3 gap-y-1 rounded-md bg-muted/50 p-2 text-xs">
                   <span className="text-muted-foreground">سعر البيع (الصفقة كلها)</span>
                   <span className="text-left font-medium text-foreground" dir="ltr">
                     {cashSubtotal.toLocaleString("ar-EG")} ج.م
@@ -195,14 +206,27 @@ export function PartnerDealPicker({
                     {preview.costRecovered.toLocaleString("ar-EG")} ج.م
                   </span>
                   <span className="text-muted-foreground">نسبة ربحه من نصيبه في الهامش</span>
-                  <span className="text-left font-medium text-foreground" dir="ltr">
-                    {partner.profit_share_pct.toLocaleString("ar-EG")}%
+                  <span className="text-left" dir="ltr">
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={profitShares[partnerId] ?? String(partner.profit_share_pct)}
+                      onChange={(e) => setPartnerProfitSharePct(partnerId, e.target.value)}
+                      className="form-input w-20 py-1 text-left"
+                      dir="ltr"
+                    />
+                    <span className="mr-1">%</span>
                   </span>
                   <span className="font-bold text-foreground">ربحه النهائي (هيكسب)</span>
                   <span className="text-left font-bold text-success" dir="ltr">
                     {preview.profitAmount.toLocaleString("ar-EG")} ج.م
                   </span>
                 </div>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  نسبته الدائمة المسجّلة {partner.profit_share_pct}% — النسبة اللي فوق دي مخصوصة
+                  بهذه الصفقة بس، متعدّلش ملفه الدائم.
+                </p>
               </div>
             );
           })}
