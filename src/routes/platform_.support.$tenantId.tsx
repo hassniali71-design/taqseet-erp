@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Building2,
+  HardDrive,
   Package,
   ReceiptText,
   Users,
@@ -18,6 +19,7 @@ import { getUsers, subscribeData } from "@/lib/data-store";
 import {
   fetchManagedTenants,
   fetchTenantAuditLog,
+  fetchTenantStorageUsage,
   fetchTenantSummary,
 } from "@/lib/platform-server";
 
@@ -68,6 +70,11 @@ function SupportAccessPage() {
     queryFn: () => fetchTenantSummary({ data: { tenantId } }),
     enabled: Boolean(currentUser?.is_platform_owner) && Boolean(tenantId),
   });
+  const { data: storageRows = [] } = useQuery({
+    queryKey: ["tenant-storage-usage", tenantId],
+    queryFn: () => fetchTenantStorageUsage({ data: { tenantId } }),
+    enabled: Boolean(currentUser?.is_platform_owner) && Boolean(tenantId),
+  });
 
   if (!session || !currentUser?.is_platform_owner) return null;
 
@@ -97,6 +104,7 @@ function SupportAccessPage() {
   const activeContractsCount = summary?.activeContractsCount ?? 0;
   const overdueInstallmentsCount = summary?.overdueInstallmentsCount ?? 0;
   const treasuryBalance = summary?.treasuryBalance ?? 0;
+  const storageFormatted = storageRows[0]?.formatted ?? "0 بايت";
 
   return (
     <div className="min-h-screen bg-sidebar">
@@ -153,6 +161,13 @@ function SupportAccessPage() {
             label="رصيد الخزينة"
             value={treasuryBalance.toLocaleString("ar-EG")}
             icon={Wallet}
+            tone="primary"
+            valueDir="ltr"
+          />
+          <StatCard
+            label="حجم بيانات هذا العميل"
+            value={storageFormatted}
+            icon={HardDrive}
             tone="primary"
             valueDir="ltr"
           />

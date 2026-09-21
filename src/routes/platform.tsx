@@ -23,6 +23,7 @@ import { getUsers, signOut, subscribeData } from "@/lib/data-store";
 import {
   extendTenantSubscriptionServer,
   fetchManagedTenants,
+  fetchTenantStorageUsage,
   provisionTenantServer,
   recordCrossTenantAudit,
   setTenantStatusServer,
@@ -82,6 +83,13 @@ function PlatformControlRoom() {
     queryFn: () => fetchManagedTenants(),
     enabled: Boolean(currentUser?.is_platform_owner),
   });
+
+  const { data: storageUsage = [] } = useQuery({
+    queryKey: ["tenant-storage-usage"],
+    queryFn: () => fetchTenantStorageUsage({ data: {} }),
+    enabled: Boolean(currentUser?.is_platform_owner),
+  });
+  const storageByTenant = new Map(storageUsage.map((u) => [u.tenantId, u.formatted]));
 
   const setTenantStatusMutation = useMutation({
     mutationFn: (vars: {
@@ -385,6 +393,7 @@ function PlatformControlRoom() {
                     <th className="pb-2 font-extrabold">الهاتف</th>
                     <th className="pb-2 font-extrabold">الحالة</th>
                     <th className="pb-2 font-extrabold">الاشتراك ينتهي</th>
+                    <th className="pb-2 font-extrabold">حجم البيانات</th>
                     <th className="pb-2 font-extrabold">إجراءات</th>
                   </tr>
                 </thead>
@@ -415,6 +424,9 @@ function PlatformControlRoom() {
                       </td>
                       <td className="py-3 font-bold text-sidebar-foreground/80" dir="ltr">
                         {new Date(tenant.subscription_end).toLocaleDateString("ar-EG")}
+                      </td>
+                      <td className="py-3 font-bold text-sidebar-foreground/80">
+                        {storageByTenant.get(tenant.id) ?? "—"}
                       </td>
                       <td className="py-3">
                         <div className="flex flex-wrap gap-2">
@@ -491,7 +503,7 @@ function PlatformControlRoom() {
                   {tenantsLoading && (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={7}
                         className="py-6 text-center font-bold text-sidebar-foreground/60"
                       >
                         جارٍ التحميل...
@@ -501,7 +513,7 @@ function PlatformControlRoom() {
                   {!tenantsLoading && tenants.length === 0 && (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={7}
                         className="py-6 text-center font-bold text-sidebar-foreground/60"
                       >
                         لا يوجد عملاء بعد — ابدأ بإنشاء أول عميل.

@@ -418,3 +418,41 @@ export const fetchTenantSummary = createServerFn({ method: "GET" })
       treasuryBalance,
     };
   });
+
+export interface TenantStorageUsage {
+  tenantId: string;
+  bytes: number;
+  formatted: string;
+}
+
+/** MB→GB display, always at least kilobyte precision so a near-empty new tenant doesn't just
+ * read "0" the moment it's created. */
+function formatStorageBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} بايت`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} كيلوبايت`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(2)} ميجابايت`;
+  return `${(mb / 1024).toFixed(2)} جيجابايت`;
+}
+
+/** Real per-tenant storage usage — calls migration 0017's `platform_tenant_storage_bytes` SQL
+ * function, which sums `pg_column_size` across every row of every table with a `tenant_id`
+ * column (discovered dynamically, not a hardcoded list here). Omitting `tenantId` returns every
+ * tenant in one pass — used by the control room's tenant list; passing one filters to a single
+ * tenant — used by the support/monitoring detail page. That SQL function's execute privilege is
+ * revoked from the anon/authenticated Postgres roles (migration 0017), so this can only ever
+ * work through the service-role client here, never from the browser. */
+export const fetchTenantStorageUsage = createServerFn({ method: "GET" })
+  .validator((input: { tenantId?: string }) => input)
+  .handler(async ({ data }): Promise<TenantStorageUsage[]> => {
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data: rows, error } = await supabaseAdmin.rpc("platform_tenant_storage_bytes", {
+      p_tenant_id: data.tenantId ?? null,
+    });
+    if (error) throw new Error(error.message);
+    return ((rows ?? []) as Array<{ tenant_id: string; bytes: number }>).map((row) => {
+      const bytes = Number(row.bytes ?? 0);
+      return { tenantId: row.tenant_id, bytes, formatted: formatStorageBytes(bytes) };
+    });
+  });
