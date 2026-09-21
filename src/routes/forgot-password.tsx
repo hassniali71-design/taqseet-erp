@@ -24,7 +24,14 @@ function ForgotPasswordPage() {
     });
     if (resetError) {
       setStatus("idle");
-      setError("تعذّر إرسال رابط إعادة التعيين — تأكد من صحة البريد الإلكتروني وحاول مرة أخرى.");
+      // Supabase enforces its own per-email request rate limit (independent of the SMTP
+      // provider's own throughput limit) — a 429 here means "wait a bit," not "something's
+      // broken," so it deserves a different message than a generic failure.
+      setError(
+        resetError.status === 429
+          ? "طلبت رابط إعادة تعيين قبل شوية — استنى دقيقة وحاول تاني."
+          : "تعذّر إرسال رابط إعادة التعيين — تأكد من صحة البريد الإلكتروني وحاول مرة أخرى.",
+      );
       return;
     }
     setStatus("sent");
