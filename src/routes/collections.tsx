@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
@@ -10,6 +11,7 @@ import {
   useInstallmentContracts,
   useInstallments,
 } from "@/lib/supabase-queries";
+import { sendTenantReminderSweepServer } from "@/lib/twilio-server";
 import { useRequireSession } from "@/hooks/use-session";
 import type { Installment, InstallmentStatus } from "@/types";
 
@@ -62,9 +64,25 @@ function CollectionsWorkbenchPage() {
   const { data: allContracts = [] } = useInstallmentContracts(session?.tenant_id);
   const { data: allInstallments = [] } = useInstallments(session?.tenant_id);
   const collectPaymentMutation = useCollectPayment(session?.tenant_id);
+  const sweepMutation = useMutation({
+    mutationFn: (tenantId: string) => sendTenantReminderSweepServer({ data: { tenantId } }),
+    onSuccess: (r) => {
+      setError(null);
+      setSuccessMessage(
+        r.sent > 0
+          ? `تم إرسال ${r.sent} تذكير (${r.skipped} مُرسَل مسبقًا اليوم، ${r.failed} فشل)`
+          : `مفيش تذكيرات جديدة تُرسَل دلوقتي (${r.skipped} مُرسَل مسبقًا اليوم)`,
+      );
+      setTimeout(() => setSuccessMessage(null), 5000);
+    },
+    onError: (e) => setError(e instanceof Error ? e.message : "تعذّر إرسال التذكيرات"),
+  });
 
   if (!session) return null;
   const actorUserId = session.user_id;
+  const notificationsEnabled = Boolean(
+    settingsData?.sms_notifications_enabled || settingsData?.whatsapp_notifications_enabled,
+  );
 
   const settings = settingsData ?? { grace_period_days: 3 };
   const contracts = allContracts.filter(
@@ -155,16 +173,30 @@ function CollectionsWorkbenchPage() {
           يمكن تعديله أو حذفه (§55).
         </p>
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          <FilterButton active={filter === "all"} onClick={() => setFilter("all")}>
-            الكل ({rows.length})
-          </FilterButton>
-          <FilterButton active={filter === "due"} onClick={() => setFilter("due")}>
-            مستحق اليوم ({dueCount})
-          </FilterButton>
-          <FilterButton active={filter === "overdue"} onClick={() => setFilter("overdue")}>
-            متأخر ({overdueCount})
-          </FilterButton>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap gap-2">
+            <FilterButton active={filter === "all"} onClick={() => setFilter("all")}>
+              الكل ({rows.length})
+            </FilterButton>
+            <FilterButton active={filter === "due"} onClick={() => setFilter("due")}>
+              مستحق اليوم ({dueCount})
+            </FilterButton>
+            <FilterButton active={filter === "overdue"} onClick={() => setFilter("overdue")}>
+              متأخر ({overdueCount})
+            </FilterButton>
+          </div>
+          <button
+            onClick={() => sweepMutation.mutate(session.tenant_id)}
+            disabled={!notificationsEnabled || sweepMutation.isPending}
+            title={
+              notificationsEnabled
+                ? "يبعت تذكير SMS/واتساب لكل قسط مستحق قريب أو متأخر، ما عدا اللي اتبعتله تذكير النهاردة بالفعل"
+                : "فعّل SMS أو واتساب من الإعدادات الأول"
+            }
+            className="rounded-md border border-input px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {sweepMutation.isPending ? "جارٍ الإرسال..." : "إرسال تذكيرات اليوم"}
+          </button>
         </div>
 
         {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
