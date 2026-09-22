@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { subscribeData } from "@/lib/data-store";
 import { useJournalEntries } from "@/lib/supabase-queries";
+import { matchesSearch } from "@/lib/text-filter";
 import { useRequireSession } from "@/hooks/use-session";
 import type { AccountCode } from "@/types";
 
@@ -24,6 +25,7 @@ const CHART_OF_ACCOUNTS: Array<{ code: AccountCode; name: string; kind: string }
 function AccountingPage() {
   const session = useRequireSession();
   const [, forceRerender] = useState(0);
+  const [search, setSearch] = useState("");
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -71,47 +73,55 @@ function AccountingPage() {
 
         <section className="mt-8">
           <h2 className="text-lg font-bold text-foreground">القيود التلقائية</h2>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="بحث برقم القيد أو الوصف..."
+            className="form-input mt-3"
+          />
           <div className="mt-3 max-h-[40rem] space-y-3 overflow-y-auto">
-            {entries.map((entry) => (
-              <div
-                key={entry.id}
-                className="overflow-hidden rounded-xl border border-border bg-card"
-              >
-                <div className="flex items-center justify-between border-b border-border bg-muted/40 px-4 py-2">
-                  <span className="text-sm font-bold text-foreground" dir="ltr">
-                    {entry.entry_number}
-                  </span>
-                  <span className="text-xs text-muted-foreground">{entry.description}</span>
-                  <span className="text-xs text-muted-foreground" dir="ltr">
-                    {new Date(entry.created_at).toLocaleString("ar-EG")}
-                  </span>
-                </div>
-                <table className="w-full text-right text-sm">
-                  <thead className="text-xs text-muted-foreground">
-                    <tr>
-                      <th className="px-4 py-2 font-medium">الحساب</th>
-                      <th className="px-4 py-2 font-medium">مدين</th>
-                      <th className="px-4 py-2 font-medium">دائن</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {entry.lines.map((line, i) => (
-                      <tr key={i} className="border-t border-border">
-                        <td className="px-4 py-2 text-foreground">
-                          {line.account_code} — {line.account_name}
-                        </td>
-                        <td className="px-4 py-2 text-muted-foreground" dir="ltr">
-                          {line.debit > 0 ? line.debit.toLocaleString("ar-EG") : "—"}
-                        </td>
-                        <td className="px-4 py-2 text-muted-foreground" dir="ltr">
-                          {line.credit > 0 ? line.credit.toLocaleString("ar-EG") : "—"}
-                        </td>
+            {entries
+              .filter((entry) => matchesSearch(search, entry.entry_number, entry.description))
+              .map((entry) => (
+                <div
+                  key={entry.id}
+                  className="overflow-hidden rounded-xl border border-border bg-card"
+                >
+                  <div className="flex items-center justify-between border-b border-border bg-muted/40 px-4 py-2">
+                    <span className="text-sm font-bold text-foreground" dir="ltr">
+                      {entry.entry_number}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{entry.description}</span>
+                    <span className="text-xs text-muted-foreground" dir="ltr">
+                      {new Date(entry.created_at).toLocaleString("ar-EG")}
+                    </span>
+                  </div>
+                  <table className="w-full text-right text-sm">
+                    <thead className="text-xs text-muted-foreground">
+                      <tr>
+                        <th className="px-4 py-2 font-medium">الحساب</th>
+                        <th className="px-4 py-2 font-medium">مدين</th>
+                        <th className="px-4 py-2 font-medium">دائن</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
+                    </thead>
+                    <tbody>
+                      {entry.lines.map((line, i) => (
+                        <tr key={i} className="border-t border-border">
+                          <td className="px-4 py-2 text-foreground">
+                            {line.account_code} — {line.account_name}
+                          </td>
+                          <td className="px-4 py-2 text-muted-foreground" dir="ltr">
+                            {line.debit > 0 ? line.debit.toLocaleString("ar-EG") : "—"}
+                          </td>
+                          <td className="px-4 py-2 text-muted-foreground" dir="ltr">
+                            {line.credit > 0 ? line.credit.toLocaleString("ar-EG") : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
             {entries.length === 0 && (
               <p className="rounded-xl border border-border bg-card px-4 py-6 text-center text-muted-foreground">
                 لا يوجد قيود بعد.

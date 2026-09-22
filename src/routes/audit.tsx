@@ -8,6 +8,7 @@ import {
   useDeleteAuditLog,
   useUsers,
 } from "@/lib/supabase-queries";
+import { matchesSearch } from "@/lib/text-filter";
 import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
 
@@ -69,6 +70,7 @@ function AuditPage() {
   const deleteAllMutation = useDeleteAllAuditLogs(session?.tenant_id);
   const { requestConfirm, dialog: passwordDialog } = useOwnerPasswordConfirm();
   const [actionError, setActionError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
 
   if (!session) return null;
 
@@ -131,7 +133,13 @@ function AuditPage() {
         )}
         {isLoading && <p className="mt-4 text-sm text-muted-foreground">جارٍ التحميل...</p>}
 
-        <div className="mt-6 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="بحث بالعملية أو الكيان أو المستخدم أو السبب..."
+          className="form-input mt-6"
+        />
+        <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-right text-sm">
             <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
               <tr>
@@ -144,33 +152,44 @@ function AuditPage() {
               </tr>
             </thead>
             <tbody>
-              {logs.map((log) => (
-                <tr key={log.id} className="border-b border-border last:border-0">
-                  <td
-                    className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground"
-                    dir="ltr"
-                  >
-                    {new Date(log.created_at).toLocaleString("ar-EG")}
-                  </td>
-                  <td className="px-4 py-3 font-medium text-foreground">
-                    {ACTION_LABELS[log.action] ?? log.action}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {log.entity}
-                    {log.entity_id ? ` / ${log.entity_id}` : ""}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">{userName(log.user_id)}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{log.reason ?? "—"}</td>
-                  <td className="px-4 py-3 text-left">
-                    <button
-                      onClick={() => void handleDeleteOne(log.id)}
-                      className="text-xs font-medium text-destructive hover:underline"
+              {logs
+                .filter((log) =>
+                  matchesSearch(
+                    search,
+                    ACTION_LABELS[log.action] ?? log.action,
+                    log.entity,
+                    log.entity_id,
+                    userName(log.user_id),
+                    log.reason,
+                  ),
+                )
+                .map((log) => (
+                  <tr key={log.id} className="border-b border-border last:border-0">
+                    <td
+                      className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground"
+                      dir="ltr"
                     >
-                      حذف
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                      {new Date(log.created_at).toLocaleString("ar-EG")}
+                    </td>
+                    <td className="px-4 py-3 font-medium text-foreground">
+                      {ACTION_LABELS[log.action] ?? log.action}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {log.entity}
+                      {log.entity_id ? ` / ${log.entity_id}` : ""}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">{userName(log.user_id)}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{log.reason ?? "—"}</td>
+                    <td className="px-4 py-3 text-left">
+                      <button
+                        onClick={() => void handleDeleteOne(log.id)}
+                        className="text-xs font-medium text-destructive hover:underline"
+                      >
+                        حذف
+                      </button>
+                    </td>
+                  </tr>
+                ))}
               {logs.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">

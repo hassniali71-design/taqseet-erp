@@ -5,6 +5,7 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { LabeledValue } from "@/components/ui/LabeledValue";
 import { subscribeData } from "@/lib/data-store";
 import { exportPartnerStatementCsv } from "@/lib/partner-export";
+import { matchesSearch } from "@/lib/text-filter";
 import {
   computeAccountBalance,
   computePartnerAllocatedCost,
@@ -75,6 +76,8 @@ function PartnerDetailPage() {
   const [showSecondPayoutAccount, setShowSecondPayoutAccount] = useState(false);
   const [payoutAccountId2, setPayoutAccountId2] = useState("");
   const [payoutAmount2, setPayoutAmount2] = useState("");
+  const [fundingSearch, setFundingSearch] = useState("");
+  const [profitSearch, setProfitSearch] = useState("");
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -672,7 +675,12 @@ function PartnerDetailPage() {
           <p className="mt-1 text-xs text-muted-foreground">
             حركة رأس المال — إضافة/سحب تمويل وأي تسوية يدوية. لا تشمل الأرباح (انظر القسم التالي).
           </p>
-          {renderTransactionsTable(fundingHistory, "لا يوجد حركة تمويل لهذا الشريك بعد.")}
+          {renderTransactionsTable(
+            fundingHistory,
+            "لا يوجد حركة تمويل لهذا الشريك بعد.",
+            fundingSearch,
+            setFundingSearch,
+          )}
         </section>
 
         <section className="mt-8">
@@ -683,53 +691,76 @@ function PartnerDetailPage() {
             كل صف "تسوية صفقة" هو ربح مكتسب من بيع حقيقي؛ "صرف أرباح" هو خصم فعلي من خزينة حقيقية
             (انظر زر "صرف أرباح" أعلاه) — منفصل تمامًا عن التمويل.
           </p>
-          {renderTransactionsTable(profitHistory, "لا يوجد أرباح مسجّلة لهذا الشريك بعد.")}
+          {renderTransactionsTable(
+            profitHistory,
+            "لا يوجد أرباح مسجّلة لهذا الشريك بعد.",
+            profitSearch,
+            setProfitSearch,
+          )}
         </section>
       </main>
     </div>
   );
 
-  function renderTransactionsTable(rows: typeof transactions, emptyLabel: string) {
+  function renderTransactionsTable(
+    rows: typeof transactions,
+    emptyLabel: string,
+    search: string,
+    onSearchChange: (value: string) => void,
+  ) {
+    const filteredRows = rows.filter((t) =>
+      matchesSearch(search, TYPE_LABEL[t.type] ?? t.type, t.reference, t.reason),
+    );
     return (
-      <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
-        <table className="w-full text-right text-sm">
-          <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
-            <tr>
-              <th className="px-4 py-3 font-medium">النوع</th>
-              <th className="px-4 py-3 font-medium">المبلغ</th>
-              <th className="px-4 py-3 font-medium">السبب/المرجع</th>
-              <th className="px-4 py-3 font-medium">التاريخ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((t) => (
-              <tr key={t.id} className="border-b border-border last:border-0">
-                <td className="px-4 py-3 text-muted-foreground">{TYPE_LABEL[t.type] ?? t.type}</td>
-                <td
-                  className={`px-4 py-3 font-medium ${t.amount >= 0 ? "text-foreground" : "text-destructive"}`}
-                  dir="ltr"
-                >
-                  {t.amount >= 0 ? "" : "-"}
-                  {Math.abs(t.amount).toLocaleString("ar-EG")} ج.م
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">
-                  {t.reference ?? t.reason ?? "—"}
-                </td>
-                <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
-                  {new Date(t.created_at).toLocaleString("ar-EG")}
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
+      <>
+        <input
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="بحث بالنوع أو السبب/المرجع..."
+          className="form-input mt-3"
+        />
+        <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
+          <table className="w-full text-right text-sm">
+            <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">
-                  {emptyLabel}
-                </td>
+                <th className="px-4 py-3 font-medium">النوع</th>
+                <th className="px-4 py-3 font-medium">المبلغ</th>
+                <th className="px-4 py-3 font-medium">السبب/المرجع</th>
+                <th className="px-4 py-3 font-medium">التاريخ</th>
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {filteredRows.map((t) => (
+                <tr key={t.id} className="border-b border-border last:border-0">
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {TYPE_LABEL[t.type] ?? t.type}
+                  </td>
+                  <td
+                    className={`px-4 py-3 font-medium ${t.amount >= 0 ? "text-foreground" : "text-destructive"}`}
+                    dir="ltr"
+                  >
+                    {t.amount >= 0 ? "" : "-"}
+                    {Math.abs(t.amount).toLocaleString("ar-EG")} ج.م
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {t.reference ?? t.reason ?? "—"}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
+                    {new Date(t.created_at).toLocaleString("ar-EG")}
+                  </td>
+                </tr>
+              ))}
+              {filteredRows.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">
+                    {rows.length === 0 ? emptyLabel : "مفيش نتايج مطابقة للبحث."}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </>
     );
   }
 }

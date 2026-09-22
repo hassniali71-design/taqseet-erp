@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { LabeledValue } from "@/components/ui/LabeledValue";
 import { subscribeData } from "@/lib/data-store";
+import { matchesSearch } from "@/lib/text-filter";
 import {
   computeAccountBalance,
   useCloseShift,
@@ -74,6 +75,7 @@ function TreasuryPage() {
   const [newAccountName, setNewAccountName] = useState("");
   const [newAccountKind, setNewAccountKind] = useState<TreasuryAccount["kind"]>("cashier");
   const [newAccountOpeningBalance, setNewAccountOpeningBalance] = useState("");
+  const [movementSearch, setMovementSearch] = useState("");
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -695,6 +697,12 @@ function TreasuryPage() {
 
         <section className="mt-8">
           <h2 className="text-lg font-bold text-foreground">سجل حركة الخزينة</h2>
+          <input
+            value={movementSearch}
+            onChange={(e) => setMovementSearch(e.target.value)}
+            placeholder="بحث بالنوع أو المرجع..."
+            className="form-input mt-3"
+          />
           <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
             <table className="w-full text-right text-sm">
               <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
@@ -706,26 +714,35 @@ function TreasuryPage() {
                 </tr>
               </thead>
               <tbody>
-                {movements.map((m) => (
-                  <tr key={m.id} className="border-b border-border last:border-0">
-                    <td className="px-4 py-3 font-medium text-foreground">
-                      {MOVEMENT_TYPE_LABELS[m.type]}
-                    </td>
-                    <td
-                      className={`px-4 py-3 font-medium ${m.amount >= 0 ? "text-success" : "text-destructive"}`}
-                      dir="ltr"
-                    >
-                      {m.amount >= 0 ? "+" : ""}
-                      {m.amount.toLocaleString("ar-EG")}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground" dir="ltr">
-                      {m.reference ?? m.reason ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
-                      {new Date(m.created_at).toLocaleString("ar-EG")}
-                    </td>
-                  </tr>
-                ))}
+                {movements
+                  .filter((m) =>
+                    matchesSearch(
+                      movementSearch,
+                      MOVEMENT_TYPE_LABELS[m.type],
+                      m.reference,
+                      m.reason,
+                    ),
+                  )
+                  .map((m) => (
+                    <tr key={m.id} className="border-b border-border last:border-0">
+                      <td className="px-4 py-3 font-medium text-foreground">
+                        {MOVEMENT_TYPE_LABELS[m.type]}
+                      </td>
+                      <td
+                        className={`px-4 py-3 font-medium ${m.amount >= 0 ? "text-success" : "text-destructive"}`}
+                        dir="ltr"
+                      >
+                        {m.amount >= 0 ? "+" : ""}
+                        {m.amount.toLocaleString("ar-EG")}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground" dir="ltr">
+                        {m.reference ?? m.reason ?? "—"}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
+                        {new Date(m.created_at).toLocaleString("ar-EG")}
+                      </td>
+                    </tr>
+                  ))}
                 {movements.length === 0 && (
                   <tr>
                     <td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">

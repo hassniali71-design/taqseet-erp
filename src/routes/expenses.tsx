@@ -11,6 +11,7 @@ import {
   useTreasuryAccounts,
   useUsers,
 } from "@/lib/supabase-queries";
+import { matchesSearch } from "@/lib/text-filter";
 import { useRequireSession } from "@/hooks/use-session";
 
 export const Route = createFileRoute("/expenses")({
@@ -26,6 +27,7 @@ function ExpensesPage() {
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
 
   const { data: settingsData } = useCurrentTenantSettings(session?.tenant_id);
   const { data: allAccounts = [] } = useTreasuryAccounts(session?.tenant_id);
@@ -211,7 +213,13 @@ function ExpensesPage() {
           {error && <p className="text-sm text-destructive">{error}</p>}
         </form>
 
-        <div className="mt-6 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="بحث بالنوع أو السبب..."
+          className="form-input mt-6"
+        />
+        <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-right text-sm">
             <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
               <tr>
@@ -225,62 +233,64 @@ function ExpensesPage() {
               </tr>
             </thead>
             <tbody>
-              {expenses.map((expense) => {
-                const approver = expense.approved_by
-                  ? users.find((u) => u.id === expense.approved_by)
-                  : undefined;
-                return (
-                  <tr key={expense.id} className="border-b border-border last:border-0">
-                    <td className="px-4 py-3 font-medium text-foreground">{expense.category}</td>
-                    <td className="px-4 py-3 text-muted-foreground" dir="ltr">
-                      {expense.amount.toLocaleString("ar-EG")} ج.م
-                    </td>
-                    <td className="px-4 py-3">
-                      {expense.charge_to === "partners" ? (
-                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                          شركاء
-                        </span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">
-                          {accounts.find((a) => a.id === expense.account_id)?.name ?? "خزينة"}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">{expense.reason}</td>
-                    <td className="px-4 py-3">
-                      {expense.needs_approval ? (
-                        <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
-                          يحتاج اعتماد
-                        </span>
-                      ) : expense.approved_at ? (
-                        <span
-                          className="rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success"
-                          title={approver ? `اعتمده ${approver.full_name}` : undefined}
-                        >
-                          معتمد{approver ? ` — ${approver.full_name}` : ""}
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
-                          عادي
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
-                      {new Date(expense.created_at).toLocaleString("ar-EG")}
-                    </td>
-                    <td className="px-4 py-3">
-                      {expense.needs_approval && (
-                        <button
-                          onClick={() => handleApprove(expense.id)}
-                          className="rounded-md border border-primary/40 px-2.5 py-1 text-xs font-bold text-primary hover:bg-primary/10"
-                        >
-                          اعتماد
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+              {expenses
+                .filter((expense) => matchesSearch(search, expense.category, expense.reason))
+                .map((expense) => {
+                  const approver = expense.approved_by
+                    ? users.find((u) => u.id === expense.approved_by)
+                    : undefined;
+                  return (
+                    <tr key={expense.id} className="border-b border-border last:border-0">
+                      <td className="px-4 py-3 font-medium text-foreground">{expense.category}</td>
+                      <td className="px-4 py-3 text-muted-foreground" dir="ltr">
+                        {expense.amount.toLocaleString("ar-EG")} ج.م
+                      </td>
+                      <td className="px-4 py-3">
+                        {expense.charge_to === "partners" ? (
+                          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                            شركاء
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            {accounts.find((a) => a.id === expense.account_id)?.name ?? "خزينة"}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{expense.reason}</td>
+                      <td className="px-4 py-3">
+                        {expense.needs_approval ? (
+                          <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
+                            يحتاج اعتماد
+                          </span>
+                        ) : expense.approved_at ? (
+                          <span
+                            className="rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success"
+                            title={approver ? `اعتمده ${approver.full_name}` : undefined}
+                          >
+                            معتمد{approver ? ` — ${approver.full_name}` : ""}
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
+                            عادي
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
+                        {new Date(expense.created_at).toLocaleString("ar-EG")}
+                      </td>
+                      <td className="px-4 py-3">
+                        {expense.needs_approval && (
+                          <button
+                            onClick={() => handleApprove(expense.id)}
+                            className="rounded-md border border-primary/40 px-2.5 py-1 text-xs font-bold text-primary hover:bg-primary/10"
+                          >
+                            اعتماد
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               {expenses.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">
