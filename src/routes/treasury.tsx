@@ -251,6 +251,20 @@ function TreasuryPage() {
   // للكارت الإعلامي "الإجمالي الكلي" تحت (قرار المستخدم: الدفترين يفضلوا منفصلين فعليًا).
   const totalPartnersBalance = allPartnerTransactions.reduce((sum, t) => sum + t.amount, 0);
   const combinedTotal = Math.round((currentTreasuryBalance + totalPartnersBalance) * 100) / 100;
+  // اللي اتصرف فعليًا من فلوس الشركاء (مش من الخزينة) — تكلفة الأجهزة اللي شركاء موّلوها وقت
+  // البيع (cost_recovered لصفوف sale_settlement) + نصيبهم من مصروفات محمَّلة عليهم
+  // (expense_share). معلومة بس، قراءة من دفتر الشركاء الموجود — صفر تأثير على أي حركة خزينة
+  // أو رصيد حقيقي، عشان الدفتران يفضلوا منفصلين فعليًا (قرار المستخدم).
+  const totalSpentViaPartners =
+    Math.round(
+      (allPartnerTransactions
+        .filter((t) => t.type === "sale_settlement")
+        .reduce((sum, t) => sum + t.cost_recovered, 0) +
+        allPartnerTransactions
+          .filter((t) => t.type === "expense_share")
+          .reduce((sum, t) => sum + Math.abs(t.amount), 0)) *
+        100,
+    ) / 100;
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -399,7 +413,7 @@ function TreasuryPage() {
               منفصلين تمامًا فعليًا، مش رصيد واحد تقدر تصرف منه مباشرة.
             </p>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-6">
             <div className="rounded-xl border-2 border-primary/40 bg-primary/5 p-4">
               <p className="text-xs text-muted-foreground">رصيد الخزينة الآن</p>
               <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
@@ -420,9 +434,20 @@ function TreasuryPage() {
               </p>
             </div>
             <div className="rounded-xl border border-border bg-card p-4">
-              <p className="text-xs text-muted-foreground">صرفنا كام (موردين + مصروفات)</p>
+              <p className="text-xs text-muted-foreground">
+                صرفنا كام من الخزينة (موردين + مصروفات)
+              </p>
               <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
                 {totalSpent.toLocaleString("ar-EG")} ج.م
+              </p>
+            </div>
+            <div className="rounded-xl border border-secondary/40 bg-secondary/5 p-4">
+              <p className="text-xs text-muted-foreground">منصرف عن طريق الشركاء (مش من الخزينة)</p>
+              <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
+                {totalSpentViaPartners.toLocaleString("ar-EG")} ج.م
+              </p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                تكلفة أجهزة ومصروفات موّلها شركاء — اتخصمت من دفترهم، مش من رصيد الخزينة فوق.
               </p>
             </div>
             <div className="rounded-xl border border-border bg-card p-4">
