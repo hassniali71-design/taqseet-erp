@@ -3164,6 +3164,105 @@ export function computePartnerTotalFunded(
   );
 }
 
+/** إجمالي الأرباح المستحقة للشريك لسه ما اتصرفتش له — إجمالي الأرباح المكتسبة (مجموع
+ * profit_amount عبر كل صفوفه، بغض النظر عن النوع) ناقص إجمالي ما صُرف له فعليًا كأرباح
+ * (مجموع القيمة المطلقة لصفوف profit_payout). لا يلمس `amount`/رصيده الإجمالي (اللي بيفضل
+ * يشمل رأس المال المتاح كمان) — ده تحديدًا سقف مبلغ "صرف الأرباح" الجديد. */
+export function computePartnerAvailableProfit(
+  partnerId: string,
+  transactions: PartnerTransaction[],
+): number {
+  const own = transactions.filter((t) => t.partner_id === partnerId);
+  const earned = own.reduce((sum, t) => sum + t.profit_amount, 0);
+  const paidOut = own
+    .filter((t) => t.type === "profit_payout")
+    .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+  return Math.round((earned - paidOut) * 100) / 100;
+}
+
+/** صرف أرباح حقيقي لشريك — مختلف جوهريًا عن useWithdrawPartnerFunds: ده بيخصم فعليًا من خزينة
+ * (أو خزينتين لو المبلغ أكبر من رصيد واحدة) عبر `partner_profit_payout` treasury_movement
+ * حقيقي، بينما withdrawal لا يمس أي خزينة إطلاقًا. السقف هنا الأرباح المتاحة فقط (لا رأس
+ * المال)، عكس withdrawal اللي سقفه الرصيد الكلي. */
+export function usePayPartnerProfit(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      partnerId,
+      allocations,
+      actorUserId,
+      reason,
+    }: {
+      partnerId: string;
+      /** خزينة واحدة أو اتنين — كل واحدة بمبلغها المستقل، والمجموع هو إجمالي الصرف. */
+      allocations: Array<{ accountId: string; amount: number }>;
+      actorUserId: string | null;
+      reason?: string;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const validAllocations = allocations.filter((a) => a.amount > 0);
+      if (validAllocations.length === 0) throw new Error("أدخل مبلغ صرف صحيح");
+      const totalAmount =
+        Math.round(validAllocations.reduce((sum, a) => sum + a.amount, 0) * 100) / 100;
+
+      const { data: transactions, error: transactionsError } = await supabase
+        .from("partner_transactions")
+        .select("type, amount, profit_amount")
+        .eq("tenant_id", tenantId)
+        .eq("partner_id", partnerId);
+      if (transactionsError) throw new Error(transactionsError.message);
+      const availableProfit = computePartnerAvailableProfit(
+        partnerId,
+        (transactions ?? []) as PartnerTransaction[],
+      );
+      if (totalAmount > availableProfit) {
+        throw new Error(`المبلغ أكبر من الأرباح المتاحة للصرف (${availableProfit} ج.م)`);
+      }
+
+      for (const allocation of validAllocations) {
+        await performPostTreasuryMovement(
+          tenantId,
+          allocation.accountId,
+          -allocation.amount,
+          "partner_profit_payout",
+          actorUserId,
+          "صرف أرباح لشريك",
+          reason,
+        );
+      }
+
+      const { data, error } = await supabase
+        .from("partner_transactions")
+        .insert({
+          tenant_id: tenantId,
+          partner_id: partnerId,
+          type: "profit_payout",
+          amount: -totalAmount,
+          user_id: actorUserId,
+          ...(reason ? { reason } : {}),
+        })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "partner_transaction.profit_payout",
+        entity: "partner_transactions",
+        entity_id: data.id as string,
+        new_value: data,
+      });
+      return data as PartnerTransaction;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["partner_transactions", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["treasury_accounts", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["treasury_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
 /** سحب مبلغ من رصيد الشريك المتاح (تمويل لسه متاح + أرباح مستحقة) — تسجيل صف `withdrawal`
  * بمبلغ سالب، زي useRecordSupplierPayment بالظبط (تحقق من الرصيد قبل السماح بالسحب). */
 export function useWithdrawPartnerFunds(tenantId: string | undefined) {

@@ -5,7 +5,9 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { subscribeData } from "@/lib/data-store";
 import { exportPartnerStatementCsv } from "@/lib/partner-export";
 import {
+  computeAccountBalance,
   computePartnerAllocatedCost,
+  computePartnerAvailableProfit,
   computePartnerBalance,
   computePartnerTotalFunded,
   useAddPartnerFunding,
@@ -13,8 +15,11 @@ import {
   useInstallments,
   usePartners,
   usePartnerTransactions,
+  usePayPartnerProfit,
   useProducts,
   useSales,
+  useTreasuryAccounts,
+  useTreasuryMovements,
   useWithdrawPartnerFunds,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
@@ -29,6 +34,8 @@ const TYPE_LABEL: Record<string, string> = {
   withdrawal: "سحب",
   sale_settlement: "تسوية صفقة",
   adjustment: "تسوية يدوية",
+  profit_payout: "صرف أرباح",
+  expense_share: "نصيب من مصروف",
 };
 
 const INSTALLMENT_STATUS_LABEL: Record<InstallmentStatus, string> = {
@@ -55,11 +62,18 @@ function PartnerDetailPage() {
   const session = useRequireSession();
   const { id } = Route.useParams();
   const [, forceRerender] = useState(0);
-  const [actionMode, setActionMode] = useState<"funding" | "withdrawal">("funding");
+  const [actionMode, setActionMode] = useState<"funding" | "withdrawal" | "profit_payout">(
+    "funding",
+  );
   const [actionAmount, setActionAmount] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState(false);
   const [expandedDealId, setExpandedDealId] = useState<string | null>(null);
+  const [payoutAccountId1, setPayoutAccountId1] = useState("");
+  const [payoutAmount1, setPayoutAmount1] = useState("");
+  const [showSecondPayoutAccount, setShowSecondPayoutAccount] = useState(false);
+  const [payoutAccountId2, setPayoutAccountId2] = useState("");
+  const [payoutAmount2, setPayoutAmount2] = useState("");
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -69,8 +83,11 @@ function PartnerDetailPage() {
   const { data: sales = [] } = useSales(session?.tenant_id);
   const { data: contracts = [] } = useInstallmentContracts(session?.tenant_id);
   const { data: allInstallments = [] } = useInstallments(session?.tenant_id);
+  const { data: allAccounts = [] } = useTreasuryAccounts(session?.tenant_id);
+  const { data: allMovements = [] } = useTreasuryMovements(session?.tenant_id);
   const addFundingMutation = useAddPartnerFunding(session?.tenant_id);
   const withdrawMutation = useWithdrawPartnerFunds(session?.tenant_id);
+  const payProfitMutation = usePayPartnerProfit(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
@@ -104,6 +121,14 @@ function PartnerDetailPage() {
   const totalAllocated = computePartnerAllocatedCost(id, allTransactions);
   const totalProfit = transactions.reduce((sum, t) => sum + t.profit_amount, 0);
   const availableFunding = Math.round((totalFunded - totalAllocated) * 100) / 100;
+  const availableProfit = computePartnerAvailableProfit(id, allTransactions);
+  const activeAccounts = allAccounts.filter((a) => a.active);
+  const fundingHistory = transactions.filter((t) =>
+    ["funding", "withdrawal", "adjustment"].includes(t.type),
+  );
+  const profitHistory = transactions.filter((t) =>
+    ["sale_settlement", "profit_payout", "expense_share"].includes(t.type),
+  );
   const deals = transactions
     .filter((t) => t.type === "sale_settlement")
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -167,6 +192,39 @@ function PartnerDetailPage() {
     } else {
       withdrawMutation.mutate({ partnerId: id, amount, actorUserId }, onSettled);
     }
+  }
+
+  function handleConfirmPayout() {
+    setActionError(null);
+    const amount1 = Number(payoutAmount1);
+    if (!payoutAccountId1 || !payoutAmount1 || amount1 <= 0) {
+      setActionError("اختر خزينة وأدخل مبلغ صحيح");
+      return;
+    }
+    const allocations = [{ accountId: payoutAccountId1, amount: amount1 }];
+    if (showSecondPayoutAccount) {
+      const amount2 = Number(payoutAmount2);
+      if (!payoutAccountId2 || !payoutAmount2 || amount2 <= 0) {
+        setActionError("أدخل بيانات الخزينة الثانية صحيحة");
+        return;
+      }
+      allocations.push({ accountId: payoutAccountId2, amount: amount2 });
+    }
+    payProfitMutation.mutate(
+      { partnerId: id, allocations, actorUserId },
+      {
+        onSuccess: () => {
+          setPayoutAccountId1("");
+          setPayoutAmount1("");
+          setPayoutAccountId2("");
+          setPayoutAmount2("");
+          setShowSecondPayoutAccount(false);
+          setActionSuccess(true);
+          setTimeout(() => setActionSuccess(false), 2000);
+        },
+        onError: (e) => setActionError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
   }
 
   function handleExport() {
@@ -294,51 +352,164 @@ function PartnerDetailPage() {
         </div>
 
         <section className="no-print mt-8 rounded-xl border border-border bg-card p-5 shadow-sm">
-          <h2 className="text-sm font-bold text-foreground">تمويل / سحب</h2>
-          <div className="mt-3 flex flex-wrap items-end gap-3">
-            <div className="flex overflow-hidden rounded-md border border-input text-sm">
-              <button
-                type="button"
-                onClick={() => setActionMode("funding")}
-                className={`px-3 py-2 font-medium ${
-                  actionMode === "funding"
-                    ? "bg-primary text-primary-foreground"
-                    : "text-foreground hover:bg-accent"
-                }`}
-              >
-                إضافة تمويل
-              </button>
-              <button
-                type="button"
-                onClick={() => setActionMode("withdrawal")}
-                className={`px-3 py-2 font-medium ${
-                  actionMode === "withdrawal"
-                    ? "bg-primary text-primary-foreground"
-                    : "text-foreground hover:bg-accent"
-                }`}
-              >
-                سحب من رصيده
-              </button>
-            </div>
-            <label className="block space-y-1">
-              <span className="text-xs font-medium text-foreground">المبلغ</span>
-              <input
-                type="number"
-                min="0"
-                value={actionAmount}
-                onChange={(e) => setActionAmount(e.target.value)}
-                className="form-input"
-                dir="ltr"
-              />
-            </label>
+          <h2 className="text-sm font-bold text-foreground">تمويل / سحب / صرف أرباح</h2>
+          <div className="mt-3 flex overflow-hidden rounded-md border border-input text-sm">
             <button
-              onClick={handleConfirmAction}
-              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              type="button"
+              onClick={() => setActionMode("funding")}
+              className={`px-3 py-2 font-medium ${
+                actionMode === "funding"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-foreground hover:bg-accent"
+              }`}
             >
-              تأكيد
+              إضافة تمويل
             </button>
-            {actionSuccess && <span className="text-sm text-success">تم ✓</span>}
+            <button
+              type="button"
+              onClick={() => setActionMode("withdrawal")}
+              className={`px-3 py-2 font-medium ${
+                actionMode === "withdrawal"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-foreground hover:bg-accent"
+              }`}
+            >
+              سحب من رصيده
+            </button>
+            <button
+              type="button"
+              onClick={() => setActionMode("profit_payout")}
+              className={`px-3 py-2 font-medium ${
+                actionMode === "profit_payout"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-foreground hover:bg-accent"
+              }`}
+            >
+              صرف أرباح
+            </button>
           </div>
+
+          {actionMode !== "profit_payout" ? (
+            <div className="mt-3 flex flex-wrap items-end gap-3">
+              <label className="block space-y-1">
+                <span className="text-xs font-medium text-foreground">المبلغ</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={actionAmount}
+                  onChange={(e) => setActionAmount(e.target.value)}
+                  className="form-input"
+                  dir="ltr"
+                />
+              </label>
+              <button
+                onClick={handleConfirmAction}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                تأكيد
+              </button>
+              {actionSuccess && <span className="text-sm text-success">تم ✓</span>}
+            </div>
+          ) : (
+            <div className="mt-3 space-y-3">
+              <p className="text-xs text-muted-foreground">
+                الأرباح المتاحة للصرف لهذا الشريك:{" "}
+                <span className="font-bold text-success" dir="ltr">
+                  {availableProfit.toLocaleString("ar-EG")} ج.م
+                </span>{" "}
+                — مختلف عن السحب: هنا بيتخصم فعليًا من خزينة حقيقية.
+              </p>
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">الخزينة الأولى</span>
+                  <select
+                    value={payoutAccountId1}
+                    onChange={(e) => setPayoutAccountId1(e.target.value)}
+                    className="form-input"
+                  >
+                    <option value="">اختر خزينة</option>
+                    {activeAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} (رصيدها{" "}
+                        {computeAccountBalance(a.id, allMovements).toLocaleString("ar-EG")})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">المبلغ منها</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={payoutAmount1}
+                    onChange={(e) => setPayoutAmount1(e.target.value)}
+                    className="form-input"
+                    dir="ltr"
+                  />
+                </label>
+                {!showSecondPayoutAccount && (
+                  <button
+                    type="button"
+                    onClick={() => setShowSecondPayoutAccount(true)}
+                    className="rounded-md border border-input px-3 py-2 text-xs font-medium text-foreground hover:bg-accent"
+                  >
+                    + خزينة تانية (لو رصيد الأولى مش كافي)
+                  </button>
+                )}
+              </div>
+              {showSecondPayoutAccount && (
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="block space-y-1">
+                    <span className="text-xs font-medium text-foreground">الخزينة الثانية</span>
+                    <select
+                      value={payoutAccountId2}
+                      onChange={(e) => setPayoutAccountId2(e.target.value)}
+                      className="form-input"
+                    >
+                      <option value="">اختر خزينة</option>
+                      {activeAccounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name} (رصيدها{" "}
+                          {computeAccountBalance(a.id, allMovements).toLocaleString("ar-EG")})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-xs font-medium text-foreground">المبلغ منها</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={payoutAmount2}
+                      onChange={(e) => setPayoutAmount2(e.target.value)}
+                      className="form-input"
+                      dir="ltr"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSecondPayoutAccount(false);
+                      setPayoutAccountId2("");
+                      setPayoutAmount2("");
+                    }}
+                    className="rounded-md border border-input px-3 py-2 text-xs font-medium text-foreground hover:bg-accent"
+                  >
+                    إلغاء التقسيم
+                  </button>
+                </div>
+              )}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleConfirmPayout}
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  تأكيد الصرف
+                </button>
+                {actionSuccess && <span className="text-sm text-success">تم ✓</span>}
+              </div>
+            </div>
+          )}
           {actionError && <p className="mt-2 text-sm text-destructive">{actionError}</p>}
         </section>
 
@@ -501,50 +672,70 @@ function PartnerDetailPage() {
         </section>
 
         <section className="mt-8">
-          <h2 className="text-lg font-bold text-foreground">سجل الحركة الكامل</h2>
-          <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
-            <table className="w-full text-right text-sm">
-              <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-3 font-medium">النوع</th>
-                  <th className="px-4 py-3 font-medium">المبلغ</th>
-                  <th className="px-4 py-3 font-medium">السبب/المرجع</th>
-                  <th className="px-4 py-3 font-medium">التاريخ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {transactions.map((t) => (
-                  <tr key={t.id} className="border-b border-border last:border-0">
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {TYPE_LABEL[t.type] ?? t.type}
-                    </td>
-                    <td
-                      className={`px-4 py-3 font-medium ${t.amount >= 0 ? "text-foreground" : "text-destructive"}`}
-                      dir="ltr"
-                    >
-                      {t.amount >= 0 ? "" : "-"}
-                      {Math.abs(t.amount).toLocaleString("ar-EG")} ج.م
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {t.reference ?? t.reason ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
-                      {new Date(t.created_at).toLocaleString("ar-EG")}
-                    </td>
-                  </tr>
-                ))}
-                {transactions.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">
-                      لا يوجد حركة لهذا الشريك بعد.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <h2 className="text-lg font-bold text-foreground">
+            التمويل والسحب ({fundingHistory.length})
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            حركة رأس المال — إضافة/سحب تمويل وأي تسوية يدوية. لا تشمل الأرباح (انظر القسم التالي).
+          </p>
+          {renderTransactionsTable(fundingHistory, "لا يوجد حركة تمويل لهذا الشريك بعد.")}
+        </section>
+
+        <section className="mt-8">
+          <h2 className="text-lg font-bold text-foreground">
+            الأرباح — مكتسبة ومدفوعة ({profitHistory.length})
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            كل صف "تسوية صفقة" هو ربح مكتسب من بيع حقيقي؛ "صرف أرباح" هو خصم فعلي من خزينة حقيقية
+            (انظر زر "صرف أرباح" أعلاه) — منفصل تمامًا عن التمويل.
+          </p>
+          {renderTransactionsTable(profitHistory, "لا يوجد أرباح مسجّلة لهذا الشريك بعد.")}
         </section>
       </main>
     </div>
   );
+
+  function renderTransactionsTable(rows: typeof transactions, emptyLabel: string) {
+    return (
+      <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
+        <table className="w-full text-right text-sm">
+          <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
+            <tr>
+              <th className="px-4 py-3 font-medium">النوع</th>
+              <th className="px-4 py-3 font-medium">المبلغ</th>
+              <th className="px-4 py-3 font-medium">السبب/المرجع</th>
+              <th className="px-4 py-3 font-medium">التاريخ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((t) => (
+              <tr key={t.id} className="border-b border-border last:border-0">
+                <td className="px-4 py-3 text-muted-foreground">{TYPE_LABEL[t.type] ?? t.type}</td>
+                <td
+                  className={`px-4 py-3 font-medium ${t.amount >= 0 ? "text-foreground" : "text-destructive"}`}
+                  dir="ltr"
+                >
+                  {t.amount >= 0 ? "" : "-"}
+                  {Math.abs(t.amount).toLocaleString("ar-EG")} ج.م
+                </td>
+                <td className="px-4 py-3 text-muted-foreground">
+                  {t.reference ?? t.reason ?? "—"}
+                </td>
+                <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
+                  {new Date(t.created_at).toLocaleString("ar-EG")}
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">
+                  {emptyLabel}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
 }
