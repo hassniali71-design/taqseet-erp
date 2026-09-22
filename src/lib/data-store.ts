@@ -3700,9 +3700,9 @@ export function getNotifications(): AppNotification[] {
  * `useSession`/`useRequireSession` need zero changes — signIn() just now populates it from a
  * real, password-verified Supabase Auth session instead of a plaintext Mock comparison.
  *
- * Known limitation, not yet closed: this cached session isn't re-validated against a live
- * Supabase Auth session on every page load, so a revoked/expired Supabase session wouldn't be
- * caught until the next explicit sign-in. Acceptable for this step, flagged for a follow-up.
+ * `validateSession()` below closes the limitation that used to be documented here (cached
+ * session never re-checked against a live Supabase Auth session) — `useSession()` calls it on
+ * mount and on window focus.
  * -------------------------------------------------------------------------------------- */
 
 export interface Session {
@@ -3728,6 +3728,24 @@ export function getSession(): Session | null {
 
 export type SignInResult = { ok: true; session: Session } | { ok: false; error: string };
 
+/** Shared by `signIn()` and `validateSession()` — the one place that turns a real Supabase Auth
+ * user id into this app's business `Session` shape, via the `users` row linked by
+ * `auth_user_id`. Returns `null` for "no matching account" and "account deactivated" alike;
+ * callers don't need to tell those apart, both mean "not a valid session". */
+async function resolveSessionForAuthUser(authUserId: string): Promise<Session | null> {
+  const { data: userRow, error } = await supabase
+    .from("users")
+    .select("id, tenant_id, active, is_platform_owner")
+    .eq("auth_user_id", authUserId)
+    .maybeSingle();
+  if (error || !userRow || !userRow.active) return null;
+  return {
+    user_id: userRow.id as string,
+    tenant_id: userRow.tenant_id as string,
+    is_platform_owner: (userRow.is_platform_owner as boolean | null) ?? false,
+  };
+}
+
 /** Real Supabase Auth: `supabase.auth.signInWithPassword` does the actual password check
  * (hashed server-side by Supabase, never compared as plaintext here). The business
  * `tenant_id`/`is_platform_owner` then come from this account's linked row in the `users`
@@ -3742,25 +3760,30 @@ export async function signIn(email: string, password: string): Promise<SignInRes
   if (authError || !authData.user) {
     return { ok: false, error: "البريد الإلكتروني أو كلمة السر غير صحيحة" };
   }
-  const { data: userRow, error: userError } = await supabase
-    .from("users")
-    .select("id, tenant_id, active, is_platform_owner")
-    .eq("auth_user_id", authData.user.id)
-    .maybeSingle();
-  if (userError || !userRow || !userRow.active) {
+  const session = await resolveSessionForAuthUser(authData.user.id);
+  if (!session) {
     await supabase.auth.signOut();
     return { ok: false, error: "الحساب غير مفعّل أو غير مرتبط بمستخدم في النظام" };
   }
-  const session: Session = {
-    user_id: userRow.id as string,
-    tenant_id: userRow.tenant_id as string,
-    is_platform_owner: (userRow.is_platform_owner as boolean | null) ?? false,
-  };
   if (typeof window !== "undefined") {
     window.localStorage.setItem(KEYS.session, JSON.stringify(session));
   }
   emit();
   return { ok: true, session };
+}
+
+/** يتأكد إن جلسة Supabase الحقيقية عند المتصفح لسه موجودة وبتطابق نفس الـ`user_id`/`tenant_id`
+ * المخزَّنين محليًا وقت آخر دخول — يقفل بالظبط الفجوة اللي كانت موثَّقة فوق: المستخدم كان
+ * يفضل شايف نفسه "داخل" (localStorage) حتى لو جلسة Supabase الحقيقية باظت أو اختلفت، فتفضل
+ * القراءة شغالة (أو فاضية بصمت) لحد ما أي عملية كتابة ترفض من الـRLS برسالة Postgres مبهمة.
+ * `getUser()` (مش `getSession()` بتاعة supabase-js) عمدًا — بيتحقق من التوكن مع السيرفر فعليًا،
+ * مش بس بيقرأ نسخة محلية قد تكون قديمة. `useSession()` (use-session.ts) هي المستخدمة الوحيدة. */
+export async function validateSession(cached: Session): Promise<boolean> {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user) return false;
+  const resolved = await resolveSessionForAuthUser(data.user.id);
+  if (!resolved) return false;
+  return resolved.user_id === cached.user_id && resolved.tenant_id === cached.tenant_id;
 }
 
 export function signOut(): void {
