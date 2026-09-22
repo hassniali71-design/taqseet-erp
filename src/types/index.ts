@@ -499,7 +499,8 @@ export interface PartnerTransaction {
   id: string;
   tenant_id: string;
   partner_id: string;
-  type: "funding" | "withdrawal" | "sale_settlement" | "adjustment";
+  type:
+    "funding" | "withdrawal" | "sale_settlement" | "adjustment" | "profit_payout" | "expense_share";
   amount: number;
   cost_recovered: number;
   profit_amount: number;
@@ -508,6 +509,8 @@ export interface PartnerTransaction {
   related_sale_id?: string;
   related_contract_id?: string;
   related_product_id?: string;
+  /** `expense_share` فقط — الرابط للمصروف الموزَّع (migration 0019). */
+  related_expense_id?: string;
   user_id: string | null;
   created_at: string;
   /** Snapshot تاريخي لتفاصيل الصفقة وقت التسوية (sale_settlement فقط) — null لأي نوع تاني
@@ -547,7 +550,8 @@ export interface TreasuryMovement {
     | "expense"
     | "return"
     | "exchange"
-    | "transfer";
+    | "transfer"
+    | "partner_profit_payout";
   /** Signed — positive increases the account's balance, negative decreases it. */
   amount: number;
   before: number;
@@ -584,11 +588,17 @@ export interface Shift {
 export interface Expense {
   id: string;
   tenant_id: string;
-  account_id: string;
+  /** خزينة المصدر — إلزامي فقط لو `charge_to = "treasury"` (القيد الافتراضي والتاريخي). فاضي
+   * لو `charge_to = "partners"`، حيث تكلفة المصروف بتتسجل بالكامل في partner_transactions
+   * (نوع `expense_share`) بدل أي حركة خزينة (migration 0019). */
+  account_id: string | null;
   category: string;
   amount: number;
   reason: string;
   needs_approval: boolean;
+  /** مين بيتحمّل المصروف — خزينة (الافتراضي التاريخي) أو الشركاء (موزَّع بالتساوي على من
+   * يُختار منهم، بدون أي أثر على رصيد أي خزينة). */
+  charge_to: "treasury" | "partners";
   user_id: string | null;
   created_at: string;
   /** Real (if minimal) resolution for `needs_approval` — the money already left the account

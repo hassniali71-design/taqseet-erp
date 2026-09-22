@@ -2856,6 +2856,7 @@ export function recordExpense(
     id: genId("expense"),
     tenant_id: getCurrentTenantId(),
     account_id: accountId,
+    charge_to: "treasury",
     category: category.trim(),
     amount,
     reason: reason.trim(),

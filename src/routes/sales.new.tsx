@@ -221,12 +221,19 @@ function NewSalePage() {
       setNewProductError("أدخل كمية صحيحة");
       return;
     }
+    const cost = Number(newProductCost);
+    if (!newProductCost || cost <= 0) {
+      setNewProductError(
+        "أدخل تكلفة شراء صحيحة (لازم تكون أكبر من صفر) — عليها بيتحسب نصيب الشركاء من الربح",
+      );
+      return;
+    }
     try {
       const product = await createProductMutation.mutateAsync({
         input: {
           name: newProductName.trim(),
           unit: "قطعة",
-          cost_price: Number(newProductCost) || 0,
+          cost_price: cost,
           cash_price: price,
           installment_price: price,
           min_stock: 0,
@@ -508,12 +515,12 @@ function NewSalePage() {
                   />
                 </label>
                 <label className="block space-y-1">
-                  <span className="text-xs font-medium text-foreground">
-                    تكلفته (بكام جابه — اختياري)
-                  </span>
+                  <span className="text-xs font-medium text-foreground">تكلفته (بكام جابه) *</span>
                   <input
                     type="number"
-                    min="0"
+                    min="0.01"
+                    step="0.01"
+                    required
                     value={newProductCost}
                     onChange={(e) => setNewProductCost(e.target.value)}
                     className="form-input"

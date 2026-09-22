@@ -32,6 +32,7 @@ const MOVEMENT_TYPE_LABELS: Record<TreasuryMovement["type"], string> = {
   return: "مرتجع",
   exchange: "استبدال",
   transfer: "تحويل بين خزائن (تسليم وردية)",
+  partner_profit_payout: "صرف أرباح لشريك",
 };
 
 function isToday(isoDate: string): boolean {
@@ -62,6 +63,7 @@ function TreasuryPage() {
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [newAccountName, setNewAccountName] = useState("");
   const [newAccountKind, setNewAccountKind] = useState<TreasuryAccount["kind"]>("cashier");
+  const [newAccountOpeningBalance, setNewAccountOpeningBalance] = useState("");
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -94,10 +96,16 @@ function TreasuryPage() {
     event.preventDefault();
     if (!newAccountName.trim()) return;
     createAccountMutation.mutate(
-      { name: newAccountName.trim(), kind: newAccountKind, actorUserId },
+      {
+        name: newAccountName.trim(),
+        kind: newAccountKind,
+        actorUserId,
+        openingBalance: Number(newAccountOpeningBalance) || 0,
+      },
       {
         onSuccess: () => {
           setNewAccountName("");
+          setNewAccountOpeningBalance("");
           setShowAccountForm(false);
         },
       },
@@ -245,6 +253,18 @@ function TreasuryPage() {
                   </option>
                 ))}
               </select>
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium text-foreground">رصيد افتتاحي (اختياري)</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={newAccountOpeningBalance}
+                onChange={(e) => setNewAccountOpeningBalance(e.target.value)}
+                className="form-input"
+                placeholder="0"
+              />
             </label>
             <button
               type="submit"

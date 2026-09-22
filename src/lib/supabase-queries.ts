@@ -3256,10 +3256,15 @@ export function useCreateTreasuryAccount(tenantId: string | undefined) {
       name,
       kind,
       actorUserId,
+      openingBalance,
     }: {
       name: string;
       kind: TreasuryAccount["kind"];
       actorUserId: string | null;
+      /** رصيد افتتاحي اختياري — بيتسجّل كحركة `opening` (النوع محجوز أصلاً في القيد من أول
+       * migration 0007، لكن ما كانش مُستخدَم فعليًا في أي مكان قبل كده) فور إنشاء الخزينة،
+       * فيبقى جزء طبيعي من رصيدها المحسوب حيًا (computeAccountBalance) من أول لحظة. */
+      openingBalance?: number;
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
       const { data, error } = await supabase
@@ -3276,10 +3281,25 @@ export function useCreateTreasuryAccount(tenantId: string | undefined) {
         entity_id: data.id as string,
         new_value: data,
       });
+      if (openingBalance && openingBalance > 0) {
+        try {
+          await performPostTreasuryMovement(
+            tenantId,
+            data.id as string,
+            openingBalance,
+            "opening",
+            actorUserId,
+            "رصيد افتتاحي",
+          );
+        } catch (e) {
+          console.warn("فشل تسجيل الرصيد الافتتاحي للخزينة:", e instanceof Error ? e.message : e);
+        }
+      }
       return data as TreasuryAccount;
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["treasury_accounts", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["treasury_movements", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
   });
