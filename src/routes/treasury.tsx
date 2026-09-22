@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { LabeledValue } from "@/components/ui/LabeledValue";
 import { subscribeData } from "@/lib/data-store";
 import {
   computeAccountBalance,
@@ -414,61 +415,57 @@ function TreasuryPage() {
             </p>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-6">
-            <div className="rounded-xl border-2 border-primary/40 bg-primary/5 p-4">
-              <p className="text-xs text-muted-foreground">رصيد الخزينة الآن</p>
-              <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
-                {currentTreasuryBalance.toLocaleString("ar-EG")} ج.م
-              </p>
-            </div>
-            <Link to="/partners" className="block rounded-xl border border-border bg-card p-4">
-              <p className="text-xs text-muted-foreground">إجمالي تمويل الشركاء</p>
-              <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
-                {totalPartnerFunding.toLocaleString("ar-EG")} ج.م
-              </p>
-              <p className="mt-1 text-[11px] font-medium text-primary">فتح صفحة الشركاء ←</p>
+            <LabeledValue
+              label="رصيد الخزينة الآن"
+              value={`${currentTreasuryBalance.toLocaleString("ar-EG")} ج.م`}
+              valueDir="ltr"
+              tone="primary"
+            />
+            <Link to="/partners" className="block">
+              <LabeledValue
+                label="إجمالي تمويل الشركاء"
+                value={`${totalPartnerFunding.toLocaleString("ar-EG")} ج.م`}
+                valueDir="ltr"
+              />
+              <p className="mt-1 text-[11px] font-bold text-primary">فتح صفحة الشركاء ←</p>
             </Link>
-            <div className="rounded-xl border border-border bg-card p-4">
-              <p className="text-xs text-muted-foreground">بعنا بكام (كاش + تقسيط)</p>
-              <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
-                {totalSold.toLocaleString("ar-EG")} ج.م
-              </p>
-            </div>
-            <div className="rounded-xl border border-border bg-card p-4">
-              <p className="text-xs text-muted-foreground">
-                صرفنا كام من الخزينة (موردين + مصروفات)
-              </p>
-              <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
-                {totalSpent.toLocaleString("ar-EG")} ج.م
-              </p>
-            </div>
-            <div className="rounded-xl border border-secondary/40 bg-secondary/5 p-4">
-              <p className="text-xs text-muted-foreground">منصرف عن طريق الشركاء (مش من الخزينة)</p>
-              <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
-                {totalSpentViaPartners.toLocaleString("ar-EG")} ج.م
-              </p>
+            <LabeledValue
+              label="بعنا بكام (كاش + تقسيط)"
+              value={`${totalSold.toLocaleString("ar-EG")} ج.م`}
+              valueDir="ltr"
+            />
+            <LabeledValue
+              label="صرفنا كام من الخزينة (موردين + مصروفات)"
+              value={`${totalSpent.toLocaleString("ar-EG")} ج.م`}
+              valueDir="ltr"
+            />
+            <div>
+              <LabeledValue
+                label="منصرف عن طريق الشركاء (مش من الخزينة)"
+                value={`${totalSpentViaPartners.toLocaleString("ar-EG")} ج.م`}
+                valueDir="ltr"
+              />
               <p className="mt-1 text-[11px] text-muted-foreground">
                 تكلفة أجهزة ومصروفات موّلها شركاء — اتخصمت من دفترهم، مش من رصيد الخزينة فوق.
               </p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-4">
-              <p className="text-xs text-muted-foreground">كسبنا كام (صافي الربح)</p>
-              <p className="mt-1 text-xl font-bold text-success" dir="ltr">
-                {totalEarned.toLocaleString("ar-EG")} ج.م
-              </p>
-            </div>
+            <LabeledValue
+              label="كسبنا كام (صافي الربح)"
+              value={`${totalEarned.toLocaleString("ar-EG")} ج.م`}
+              valueDir="ltr"
+              tone="success"
+            />
           </div>
         </section>
 
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
           {accounts.map((account) => (
-            <div key={account.id} className="rounded-xl border border-border bg-card p-4">
-              <p className="text-xs text-muted-foreground">
-                {account.name} ({ACCOUNT_KIND_LABELS[account.kind]})
-              </p>
-              <p className="mt-1 text-2xl font-bold text-foreground" dir="ltr">
-                {computeAccountBalance(account.id, allMovements).toLocaleString("ar-EG")} ج.م
-              </p>
-            </div>
+            <LabeledValue
+              key={account.id}
+              label={`${account.name} (${ACCOUNT_KIND_LABELS[account.kind]})`}
+              value={`${computeAccountBalance(account.id, allMovements).toLocaleString("ar-EG")} ج.م`}
+              valueDir="ltr"
+            />
           ))}
         </div>
 
@@ -747,14 +744,11 @@ function TreasuryPage() {
 
 function Stat({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
   return (
-    <div className="rounded-lg border border-border p-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p
-        className={`mt-1 text-sm font-bold ${highlight ? "text-primary" : "text-foreground"}`}
-        dir="ltr"
-      >
-        {value.toLocaleString("ar-EG")} ج.م
-      </p>
-    </div>
+    <LabeledValue
+      label={label}
+      value={`${value.toLocaleString("ar-EG")} ج.م`}
+      valueDir="ltr"
+      tone={highlight ? "primary" : "default"}
+    />
   );
 }

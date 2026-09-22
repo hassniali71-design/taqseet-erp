@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { LabeledValue } from "@/components/ui/LabeledValue";
 import { CONTRACT_STATUS_LABEL } from "@/lib/contract-status";
 import {
   getDaysOverdue,
@@ -381,33 +382,27 @@ function ContractDetailPage() {
           </form>
         )}
 
-        <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div className="rounded-xl border border-border bg-card p-4">
-            <p className="text-xs text-muted-foreground">قيمة البضاعة</p>
-            <p className="mt-1 text-lg font-bold text-foreground" dir="ltr">
-              {contract.cash_subtotal.toLocaleString("ar-EG")} ج.م
-            </p>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <p className="text-xs text-muted-foreground">المقدّم</p>
-            <p className="mt-1 text-lg font-bold text-foreground" dir="ltr">
-              {contract.down_payment.toLocaleString("ar-EG")} ج.م
-            </p>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <p className="text-xs text-muted-foreground">
-              الخطة ({contract.plan_duration_months} شهر @ {contract.plan_rate_pct}%)
-            </p>
-            <p className="mt-1 text-lg font-bold text-foreground" dir="ltr">
-              {contract.total_amount.toLocaleString("ar-EG")} ج.م
-            </p>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <p className="text-xs text-muted-foreground">المتبقي</p>
-            <p className="mt-1 text-lg font-bold text-foreground" dir="ltr">
-              {remaining.toLocaleString("ar-EG")} ج.م
-            </p>
-          </div>
+        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <LabeledValue
+            label="قيمة البضاعة"
+            value={`${contract.cash_subtotal.toLocaleString("ar-EG")} ج.م`}
+            valueDir="ltr"
+          />
+          <LabeledValue
+            label="المقدّم"
+            value={`${contract.down_payment.toLocaleString("ar-EG")} ج.م`}
+            valueDir="ltr"
+          />
+          <LabeledValue
+            label={`الخطة (${contract.plan_duration_months} شهر @ ${contract.plan_rate_pct}%)`}
+            value={`${contract.total_amount.toLocaleString("ar-EG")} ج.م`}
+            valueDir="ltr"
+          />
+          <LabeledValue
+            label="المتبقي"
+            value={`${remaining.toLocaleString("ar-EG")} ج.م`}
+            valueDir="ltr"
+          />
         </div>
 
         <section className="mt-8">
