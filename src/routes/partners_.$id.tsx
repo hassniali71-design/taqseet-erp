@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { LabeledValue } from "@/components/ui/LabeledValue";
 import { subscribeData } from "@/lib/data-store";
 import { exportPartnerStatementCsv } from "@/lib/partner-export";
 import {
@@ -300,55 +301,45 @@ function PartnerDetailPage() {
 
         {partner.notes && <p className="mt-3 text-sm text-muted-foreground">{partner.notes}</p>}
 
-        <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div className="rounded-xl border border-border bg-card p-4">
-            <p className="text-xs text-muted-foreground">دفع كام (إجمالي التمويل)</p>
-            <p className="mt-1 text-2xl font-bold text-foreground" dir="ltr">
-              {totalFunded.toLocaleString("ar-EG")} ج.م
-            </p>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <p className="text-xs text-muted-foreground">اتخصم منه (مخصص لصفقات)</p>
-            <p className="mt-1 text-2xl font-bold text-foreground" dir="ltr">
-              {totalAllocated.toLocaleString("ar-EG")} ج.م
-            </p>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <p className="text-xs text-muted-foreground">متاح غير مخصص بعد</p>
-            <p className="mt-1 text-2xl font-bold text-foreground" dir="ltr">
-              {availableFunding.toLocaleString("ar-EG")} ج.م
-            </p>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <p className="text-xs text-muted-foreground">هيكسب (إجمالي الأرباح)</p>
-            <p className="mt-1 text-2xl font-bold text-success" dir="ltr">
-              {totalProfit.toLocaleString("ar-EG")} ج.م
-            </p>
-          </div>
-          <div className="rounded-xl border-2 border-primary/40 bg-primary/5 p-4">
-            <p className="text-xs text-muted-foreground">رصيده الحالي (بعد الربح)</p>
-            <p className="mt-1 text-2xl font-bold text-primary" dir="ltr">
-              {balance.toLocaleString("ar-EG")} ج.م
-            </p>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <p className="text-xs text-muted-foreground">عدد الصفقات</p>
-            <p className="mt-1 text-2xl font-bold text-foreground" dir="ltr">
-              {deals.length}
-            </p>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <p className="text-xs text-muted-foreground">متوسط الربح لكل صفقة</p>
-            <p className="mt-1 text-2xl font-bold text-foreground" dir="ltr">
-              {avgProfitPerDeal.toLocaleString("ar-EG")} ج.م
-            </p>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <p className="text-xs text-muted-foreground">آخر صفقة</p>
-            <p className="mt-1 text-lg font-bold text-foreground" dir="ltr">
-              {lastDealDate ? new Date(lastDealDate).toLocaleDateString("ar-EG") : "—"}
-            </p>
-          </div>
+        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <LabeledValue
+            label="دفع كام (إجمالي التمويل)"
+            value={`${totalFunded.toLocaleString("ar-EG")} ج.م`}
+            valueDir="ltr"
+          />
+          <LabeledValue
+            label="اتخصم منه (مخصص لصفقات)"
+            value={`${totalAllocated.toLocaleString("ar-EG")} ج.م`}
+            valueDir="ltr"
+          />
+          <LabeledValue
+            label="متاح غير مخصص بعد"
+            value={`${availableFunding.toLocaleString("ar-EG")} ج.م`}
+            valueDir="ltr"
+          />
+          <LabeledValue
+            label="هيكسب (إجمالي الأرباح)"
+            value={`${totalProfit.toLocaleString("ar-EG")} ج.م`}
+            valueDir="ltr"
+            tone="success"
+          />
+          <LabeledValue
+            label="رصيده الحالي (بعد الربح)"
+            value={`${balance.toLocaleString("ar-EG")} ج.م`}
+            valueDir="ltr"
+            tone="primary"
+          />
+          <LabeledValue label="عدد الصفقات" value={String(deals.length)} valueDir="ltr" />
+          <LabeledValue
+            label="متوسط الربح لكل صفقة"
+            value={`${avgProfitPerDeal.toLocaleString("ar-EG")} ج.م`}
+            valueDir="ltr"
+          />
+          <LabeledValue
+            label="آخر صفقة"
+            value={lastDealDate ? new Date(lastDealDate).toLocaleDateString("ar-EG") : "—"}
+            valueDir="ltr"
+          />
         </div>
 
         <section className="no-print mt-8 rounded-xl border border-border bg-card p-5 shadow-sm">
@@ -574,50 +565,53 @@ function PartnerDetailPage() {
                     )}
                   </div>
 
-                  <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg bg-muted/40 p-3 text-xs sm:grid-cols-4">
-                    <div>
-                      <p className="text-muted-foreground">قيمة الصفقة</p>
-                      <p className="mt-0.5 font-bold text-foreground" dir="ltr">
-                        {dealValue !== undefined ? `${dealValue.toLocaleString("ar-EG")} ج.م` : "—"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">تكلفة الصفقة كاملة (من المخزون)</p>
-                      <p className="mt-0.5 font-bold text-foreground" dir="ltr">
-                        {totalDealCost !== undefined
+                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    <LabeledValue
+                      label="قيمة الصفقة"
+                      value={
+                        dealValue !== undefined ? `${dealValue.toLocaleString("ar-EG")} ج.م` : "—"
+                      }
+                      valueDir="ltr"
+                    />
+                    <LabeledValue
+                      label="تكلفة الصفقة كاملة (من المخزون)"
+                      value={
+                        totalDealCost !== undefined
                           ? `${totalDealCost.toLocaleString("ar-EG")} ج.م`
-                          : "—"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">نصيبه من الصفقة</p>
-                      <p className="mt-0.5 font-bold text-foreground" dir="ltr">
-                        {t.split_pct !== undefined && t.split_pct !== null
+                          : "—"
+                      }
+                      valueDir="ltr"
+                    />
+                    <LabeledValue
+                      label="نصيبه من الصفقة"
+                      value={
+                        t.split_pct !== undefined && t.split_pct !== null
                           ? `${t.split_pct.toLocaleString("ar-EG")}%`
-                          : "—"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">نسبة ربحه من نصيبه</p>
-                      <p className="mt-0.5 font-bold text-foreground" dir="ltr">
-                        {t.profit_share_pct_snapshot !== undefined &&
+                          : "—"
+                      }
+                      valueDir="ltr"
+                    />
+                    <LabeledValue
+                      label="نسبة ربحه من نصيبه"
+                      value={
+                        t.profit_share_pct_snapshot !== undefined &&
                         t.profit_share_pct_snapshot !== null
                           ? `${t.profit_share_pct_snapshot.toLocaleString("ar-EG")}%`
-                          : "—"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">اتخصم منه (تكلفته)</p>
-                      <p className="mt-0.5 font-bold text-foreground" dir="ltr">
-                        {t.cost_recovered.toLocaleString("ar-EG")} ج.م
-                      </p>
-                    </div>
-                    <div className="col-span-2 sm:col-span-1">
-                      <p className="text-muted-foreground">ربحه من الصفقة دي</p>
-                      <p className="mt-0.5 font-bold text-success" dir="ltr">
-                        {t.profit_amount.toLocaleString("ar-EG")} ج.م
-                      </p>
-                    </div>
+                          : "—"
+                      }
+                      valueDir="ltr"
+                    />
+                    <LabeledValue
+                      label="اتخصم منه (تكلفته)"
+                      value={`${t.cost_recovered.toLocaleString("ar-EG")} ج.م`}
+                      valueDir="ltr"
+                    />
+                    <LabeledValue
+                      label="ربحه من الصفقة دي"
+                      value={`${t.profit_amount.toLocaleString("ar-EG")} ج.م`}
+                      valueDir="ltr"
+                      tone="success"
+                    />
                   </div>
 
                   {isExpanded && dealInstallments.length > 0 && (
