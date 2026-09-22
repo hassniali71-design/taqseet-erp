@@ -17,6 +17,7 @@ export const createTenantUserWithAuth = createServerFn({ method: "POST" })
       fullName: string;
       email: string;
       password: string;
+      phone?: string;
       roleId?: string;
       actorUserId: string | null;
     }) => input,
@@ -24,6 +25,7 @@ export const createTenantUserWithAuth = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const email = data.email.trim().toLowerCase();
     const fullName = data.fullName.trim();
+    const phone = data.phone?.trim();
     if (!fullName) throw new Error("الاسم مطلوب");
     if (!email) throw new Error("البريد الإلكتروني مطلوب");
     if (data.password.length < 6) throw new Error("كلمة السر لازم تكون 6 أحرف على الأقل");
@@ -48,6 +50,7 @@ export const createTenantUserWithAuth = createServerFn({ method: "POST" })
         auth_user_id: authUserId,
         full_name: fullName,
         email,
+        ...(phone && { phone }),
         active: true,
       })
       .select()

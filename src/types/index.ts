@@ -103,6 +103,10 @@ export interface User {
    * that has no matching real Auth account yet (e.g. a tenant provisioned via
    * `/platform` before that flow is itself converted to create a real Auth user). */
   auth_user_id?: string;
+  /** Optional — collected only when a phone is provided at creation time (platform.tsx / new
+   * tenant owner, or users.tsx / new employee), so the "send login credentials" button in
+   * twilio-server.ts has somewhere to send an SMS/WhatsApp message. */
+  phone?: string;
 }
 
 export interface UserRoleAssignment {

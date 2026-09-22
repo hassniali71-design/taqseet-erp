@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { toast } from "sonner";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import {
@@ -12,6 +13,7 @@ import {
   useUsers,
 } from "@/lib/supabase-queries";
 import { createTenantUserWithAuth } from "@/lib/user-provisioning-server";
+import { sendCredentialsServer } from "@/lib/twilio-server";
 import { useRequireSession } from "@/hooks/use-session";
 import type { User } from "@/types";
 
@@ -23,10 +25,19 @@ type FormState = {
   full_name: string;
   email: string;
   password: string;
+  phone: string;
   role_id: string;
 };
 
-const EMPTY_FORM: FormState = { full_name: "", email: "", password: "", role_id: "" };
+const EMPTY_FORM: FormState = { full_name: "", email: "", password: "", phone: "", role_id: "" };
+
+interface JustCreatedUser {
+  userId: string;
+  fullName: string;
+  email: string;
+  password: string;
+  phone: string;
+}
 
 function UsersPage() {
   const session = useRequireSession();
@@ -34,6 +45,7 @@ function UsersPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [error, setError] = useState<string | null>(null);
+  const [justCreatedUser, setJustCreatedUser] = useState<JustCreatedUser | null>(null);
 
   const { data: roles = [], isLoading: rolesLoading } = useRoles(session?.tenant_id);
   const { data: users = [] } = useUsers(session?.tenant_id);
@@ -70,6 +82,18 @@ function UsersPage() {
   // surfacing an infra error, and starts creating real logins automatically the moment that's
   // fixed — no further code change needed.
   const createUserRecordFallback = useCreateUserRecord(session?.tenant_id);
+  const sendCredentialsMutation = useMutation({
+    mutationFn: (vars: {
+      tenantId: string;
+      userId: string;
+      phone: string;
+      email: string;
+      password: string;
+      channel: "sms" | "whatsapp";
+    }) => sendCredentialsServer({ data: vars }),
+    onSuccess: (r) => toast.success(r.skipped ? "تم الإرسال مسبقًا اليوم" : "تم الإرسال"),
+    onError: (e) => toast.error(e instanceof Error ? e.message : "تعذّر الإرسال"),
+  });
 
   if (!session) return null;
   const actorUserId = session.user_id;
@@ -87,18 +111,28 @@ function UsersPage() {
     setError(null);
     if (!session) return;
     const resetForm = () => {
-      setForm({ full_name: "", email: "", password: "", role_id: roles[0]?.id ?? "" });
+      setForm({ full_name: "", email: "", password: "", phone: "", role_id: roles[0]?.id ?? "" });
       setShowForm(false);
     };
     try {
-      await createUserWithAuthMutation.mutateAsync({
+      const created = await createUserWithAuthMutation.mutateAsync({
         tenantId: session.tenant_id,
         fullName: form.full_name.trim(),
         email: form.email.trim(),
         password: form.password,
+        ...(form.phone.trim() && { phone: form.phone.trim() }),
         ...(form.role_id && { roleId: form.role_id }),
         actorUserId,
       });
+      if (form.phone.trim()) {
+        setJustCreatedUser({
+          userId: created.id as string,
+          fullName: form.full_name.trim(),
+          email: form.email.trim(),
+          password: form.password,
+          phone: form.phone.trim(),
+        });
+      }
       resetForm();
     } catch {
       createUserRecordFallback.mutate(
@@ -141,6 +175,56 @@ function UsersPage() {
             </button>
           )}
         </div>
+
+        {justCreatedUser && (
+          <div className="mt-4 rounded-xl border-2 border-primary/60 bg-primary/10 p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-bold text-foreground">
+                إرسال بيانات الدخول لـ{justCreatedUser.fullName}
+              </p>
+              <button
+                onClick={() => setJustCreatedUser(null)}
+                className="text-xs font-medium text-muted-foreground hover:underline"
+              >
+                إخفاء
+              </button>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                onClick={() =>
+                  sendCredentialsMutation.mutate({
+                    tenantId: session.tenant_id,
+                    userId: justCreatedUser.userId,
+                    phone: justCreatedUser.phone,
+                    email: justCreatedUser.email,
+                    password: justCreatedUser.password,
+                    channel: "sms",
+                  })
+                }
+                disabled={sendCredentialsMutation.isPending}
+                className="rounded-md bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                إرسال عبر SMS
+              </button>
+              <button
+                onClick={() =>
+                  sendCredentialsMutation.mutate({
+                    tenantId: session.tenant_id,
+                    userId: justCreatedUser.userId,
+                    phone: justCreatedUser.phone,
+                    email: justCreatedUser.email,
+                    password: justCreatedUser.password,
+                    channel: "whatsapp",
+                  })
+                }
+                disabled={sendCredentialsMutation.isPending}
+                className="rounded-md border border-primary/50 px-3 py-1.5 text-xs font-bold text-foreground hover:bg-primary/10 disabled:opacity-50"
+              >
+                إرسال عبر واتساب
+              </button>
+            </div>
+          </div>
+        )}
 
         {showForm && (
           <form
@@ -195,6 +279,14 @@ function UsersPage() {
                     </option>
                   ))}
                 </select>
+              </Field>
+              <Field label="رقم الهاتف (اختياري — لإرسال بيانات الدخول SMS/واتساب)">
+                <input
+                  value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  className="form-input"
+                  dir="ltr"
+                />
               </Field>
             </div>
             <div className="flex gap-2">
