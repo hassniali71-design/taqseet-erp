@@ -202,6 +202,12 @@ function TreasuryPage() {
     (sum, a) => sum + computeAccountBalance(a.id, allMovements),
     0,
   );
+  // أرصدة الشركاء الفعلية (مش بس التمويل) — مجموع كل amount في دفترهم عبر كل الأنواع
+  // (تمويل/سحب/تسوية صفقة/صرف أرباح/نصيب مصروف)، بالظبط زي computePartnerBalance لكل شريك
+  // على حدة، مجمّعة هنا لكل الشركاء مع بعض. معلومة بس — لا تُستخدم في أي منطق مالي، فقط
+  // للكارت الإعلامي "الإجمالي الكلي" تحت (قرار المستخدم: الدفترين يفضلوا منفصلين فعليًا).
+  const totalPartnersBalance = allPartnerTransactions.reduce((sum, t) => sum + t.amount, 0);
+  const combinedTotal = Math.round((currentTreasuryBalance + totalPartnersBalance) * 100) / 100;
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -291,6 +297,14 @@ function TreasuryPage() {
 
         <section className="mt-6 rounded-xl border border-border bg-card p-4">
           <h2 className="text-sm font-bold text-foreground">إزاي الخزينة شغالة؟</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            المصدر الرئيسي للتمويل والشراء هو{" "}
+            <Link to="/partners" className="font-bold text-primary hover:underline">
+              الشركاء
+            </Link>
+            — مش الخزينة. الخزينة دفتر منفصل تمامًا لحركة الكاش الفعلية (مبيعات، تحصيل، مصروفات،
+            دفعات موردين، تحويلات).
+          </p>
           <div className="mt-2 grid grid-cols-1 gap-3 text-sm text-muted-foreground sm:grid-cols-2">
             <div>
               <p className="font-bold text-success">بتاخد فلوس (بتزيد) لما:</p>
@@ -305,22 +319,43 @@ function TreasuryPage() {
               <p className="font-bold text-destructive">بتطلع منها فلوس (بتقل) لما:</p>
               <ul className="mt-1 list-inside list-disc space-y-0.5">
                 <li>تدفع لمورد (شراء بضاعة أو دفعة من الحساب)</li>
-                <li>تسجّل مصروف</li>
+                <li>تسجّل مصروف مُحمَّل على خزينة (مش على شركاء)</li>
+                <li>تصرف أرباح لشريك (من صفحته)</li>
                 <li>تحوّل جزء من الكاشير لخزينة تانية وقت إقفال الوردية</li>
               </ul>
             </div>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            تمويل الشركاء نفسه (لما شريك "يضخ فلوس") بيتسجل في دفتره الخاص بصفحة{" "}
+            تمويل الشركاء وشراء البضاعة منهم، وأرباحهم من كل صفقة، بتتسجل بالكامل في دفترهم الخاص
+            بصفحة{" "}
             <Link to="/partners" className="text-primary hover:underline">
               الشركاء
             </Link>{" "}
-            — مش حركة خزينة مباشرة، عشان كده الكارت بتاعه هنا معلومة بس بتودّيك لصفحته.
+            — لا الشراء ولا التمويل بيلمس حركة الخزينة هنا إطلاقًا (إلا "صرف الأرباح" تحديدًا، اللي
+            بيتسجل كخصم حقيقي من خزينة تختارها). ممكن كمان تحمّل مصروف على الشركاء بدل الخزينة من
+            صفحة{" "}
+            <Link to="/expenses" className="text-primary hover:underline">
+              المصروفات
+            </Link>
+            . كارت "الإجمالي الكلي" فوق بيجمع الدفترين للمعرفة بس — يفضلوا منفصلين فعليًا.
           </p>
         </section>
 
         <section className="mt-6">
           <h2 className="text-sm font-bold text-foreground">نظرة عامة (كل الأوقات)</h2>
+          <div className="mt-3 rounded-xl border-2 border-dashed border-muted-foreground/40 bg-muted/30 p-4">
+            <p className="text-xs font-bold text-muted-foreground">
+              الإجمالي الكلي (شركاء + خزينة) — للمعرفة بس
+            </p>
+            <p className="mt-1 text-2xl font-bold text-foreground" dir="ltr">
+              {combinedTotal.toLocaleString("ar-EG")} ج.م
+            </p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              ده رقم إعلامي فقط بيجمع رصيد الشركاء ({totalPartnersBalance.toLocaleString("ar-EG")}{" "}
+              ج.م) مع رصيد الخزينة ({currentTreasuryBalance.toLocaleString("ar-EG")} ج.م) — الدفترين
+              منفصلين تمامًا فعليًا، مش رصيد واحد تقدر تصرف منه مباشرة.
+            </p>
+          </div>
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
             <div className="rounded-xl border-2 border-primary/40 bg-primary/5 p-4">
               <p className="text-xs text-muted-foreground">رصيد الخزينة الآن</p>
