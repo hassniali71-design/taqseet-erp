@@ -44,11 +44,15 @@ export interface TenantSettings {
    * Approval Engine (§105) that blocks them outright is deferred, same as every other override
    * in this project. */
   expense_approval_threshold: number;
-  /** §92/§93 — Notification Center is internal-only (derived, read from `/notifications`); this
-   * flag exists purely as an architecture placeholder for a real WhatsApp/SMS provider and stays
-   * off — no message is ever actually sent while it's false, nor is any sending code wired up
-   * yet even when true. */
+  /** Real Twilio WhatsApp sending (src/lib/twilio-server.ts) — when on, the daily reminder
+   * sweep and the manual "send today's reminders" button (collections.tsx) send via WhatsApp
+   * instead of SMS (WhatsApp takes priority over SMS when both are enabled). WhatsApp Sandbox
+   * only reaches numbers that joined it; real customers need a Meta-approved WhatsApp Business
+   * sender first — see .env.example's TWILIO_WHATSAPP_FROM comment. */
   whatsapp_notifications_enabled: boolean;
+  /** Real Twilio SMS sending (src/lib/twilio-server.ts) — same reminder events as
+   * whatsapp_notifications_enabled above, sent via plain SMS instead. */
+  sms_notifications_enabled: boolean;
 }
 
 /** §9 — the 8 baseline roles named in the spec; tenants may add more (`is_system: false`). */

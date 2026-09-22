@@ -43,6 +43,7 @@ function toFormState(settings: TenantSettings): FormState {
     return_period_days: String(settings.return_period_days),
     expense_approval_threshold: String(settings.expense_approval_threshold),
     whatsapp_notifications_enabled: String(settings.whatsapp_notifications_enabled),
+    sms_notifications_enabled: String(settings.sms_notifications_enabled),
   };
 }
 
@@ -108,6 +109,7 @@ function SettingsPage() {
         return_period_days: Number(form.return_period_days) || 0,
         expense_approval_threshold: Number(form.expense_approval_threshold) || 0,
         whatsapp_notifications_enabled: form.whatsapp_notifications_enabled === "true",
+        sms_notifications_enabled: form.sms_notifications_enabled === "true",
       },
       {
         onSuccess: () => {
@@ -292,6 +294,42 @@ function SettingsPage() {
                 تفعيل غرامة تأخير (غير مفعّلة افتراضيًا — §50)
               </label>
             </div>
+          </section>
+
+          <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+            <h2 className="text-sm font-bold text-foreground">إشعارات SMS/واتساب</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              لو مفعّلين، بيتبعت تذكير قسط مستحق قريب وتنبيه قسط متأخر تلقائيًا (يوميًا + زرار إرسال
+              يدوي من صفحة التحصيل)، وبيتبعت بيانات دخول أي موظف/عميل جديد لو حطيت رقم هاتفه. واتساب
+              بياخد الأولوية لو الاتنين مفعّلين.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-6">
+              <label className="flex items-center gap-2 text-xs font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  checked={form.sms_notifications_enabled === "true"}
+                  onChange={(e) =>
+                    setForm({ ...form, sms_notifications_enabled: String(e.target.checked) })
+                  }
+                />
+                تفعيل الإرسال عبر SMS
+              </label>
+              <label className="flex items-center gap-2 text-xs font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  checked={form.whatsapp_notifications_enabled === "true"}
+                  onChange={(e) =>
+                    setForm({ ...form, whatsapp_notifications_enabled: String(e.target.checked) })
+                  }
+                />
+                تفعيل الإرسال عبر واتساب
+              </label>
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              ⚠️ حساب Twilio التجريبي بيبعت SMS بس لأرقام موثّقة يدويًا في لوحة Twilio، وواتساب
+              Sandbox بيوصل بس لأرقام انضمت له بنفسها — للوصول لأي عميل حقيقي محتاج ترقية حساب
+              Twilio (SMS) أو توثيق WhatsApp Business مع Meta (واتساب).
+            </p>
           </section>
 
           <section className="rounded-xl border border-border bg-card p-5 shadow-sm">

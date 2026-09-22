@@ -210,6 +210,7 @@ function seedTenantSettings(): TenantSettings[] {
       return_period_days: 0,
       expense_approval_threshold: 0,
       whatsapp_notifications_enabled: false,
+      sms_notifications_enabled: false,
     },
     {
       tenant_id: DEMO_TENANT_ID,
@@ -224,6 +225,7 @@ function seedTenantSettings(): TenantSettings[] {
       return_period_days: 14,
       expense_approval_threshold: 2000,
       whatsapp_notifications_enabled: false,
+      sms_notifications_enabled: false,
     },
   ];
 }
@@ -1196,6 +1198,7 @@ export function provisionTenant(
     return_period_days: 14,
     expense_approval_threshold: 2000,
     whatsapp_notifications_enabled: false,
+    sms_notifications_enabled: false,
   };
   writeCollection(KEYS.tenantSettings, [...getTenantSettings(), settingsRow]);
 
