@@ -581,6 +581,10 @@ export interface Shift {
   closing_reason?: string;
   closed_by?: string | null;
   closed_at?: string;
+  /** migration 0020 — مين راجع فرق الإقفال ده وأمتى، عشان الكارت التنبيهي في /treasury
+   * يختفي بعد المراجعة بدل ما يفضل ظاهر للأبد. undefined لو لسه محتاجة مراجعة. */
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
 }
 
 /** §73 Expenses — §11 governance: no hard delete, no edit either (a mistaken expense is a new

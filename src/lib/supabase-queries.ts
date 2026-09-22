@@ -3783,6 +3783,44 @@ export function useCloseShift(tenantId: string | undefined) {
   });
 }
 
+/** تعليم وردية مقفلة (بفرق ≠ صفر) كـ"تمت مراجعتها" — كل اللي بيعمله إنه يحفظ reviewed_at/
+ * reviewed_by (migration 0020) بدل ما يفضل الكارت التنبيهي في /treasury ظاهر للأبد. لا يمس
+ * closing_diff/closing_reason الأصليين، ولا أي حركة خزينة — مجرد علامة "اتشافت وخلصت". */
+export function useMarkShiftReviewed(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      shiftId,
+      actorUserId,
+    }: {
+      shiftId: string;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data, error } = await supabase
+        .from("shifts")
+        .update({ reviewed_at: new Date().toISOString(), reviewed_by: actorUserId })
+        .eq("id", shiftId)
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "shift.review",
+        entity: "shifts",
+        entity_id: shiftId,
+        new_value: data,
+      });
+      return data as Shift;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["shifts", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
 export function useExpenses(tenantId: string | undefined) {
   return useTenantList<Expense>("expenses", tenantId, { orderBy: "created_at", ascending: false });
 }

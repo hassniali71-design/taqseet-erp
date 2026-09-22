@@ -9,6 +9,7 @@ import {
   useCreateTreasuryAccount,
   useInstallmentContracts,
   useJournalEntries,
+  useMarkShiftReviewed,
   useOpenShift,
   usePartnerTransactions,
   useSales,
@@ -52,12 +53,20 @@ const ACCOUNT_KIND_LABELS: Record<TreasuryAccount["kind"], string> = {
   wallet: "محفظة إلكترونية",
 };
 
+const DISCREPANCY_REASON_PRESETS = [
+  "مصروف غير مسجَّل",
+  "بضاعة مفقودة",
+  "نقص تحصيل",
+  "سبب آخر",
+] as const;
+
 function TreasuryPage() {
   const session = useRequireSession();
   const [, forceRerender] = useState(0);
   const [openingBalance, setOpeningBalance] = useState("0");
   const [countedAmount, setCountedAmount] = useState("");
-  const [closeReason, setCloseReason] = useState("");
+  const [closeReasonPreset, setCloseReasonPreset] = useState<string>(DISCREPANCY_REASON_PRESETS[0]);
+  const [closeReasonOther, setCloseReasonOther] = useState("");
   const [destinationAccountId, setDestinationAccountId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [showAccountForm, setShowAccountForm] = useState(false);
@@ -77,6 +86,7 @@ function TreasuryPage() {
   const createAccountMutation = useCreateTreasuryAccount(session?.tenant_id);
   const openShiftMutation = useOpenShift(session?.tenant_id);
   const closeShiftMutation = useCloseShift(session?.tenant_id);
+  const markReviewedMutation = useMarkShiftReviewed(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
@@ -151,18 +161,21 @@ function TreasuryPage() {
     const allocations = destinationAccountId
       ? [{ accountId: destinationAccountId, amount: counted }]
       : [];
+    const combinedReason =
+      closeReasonPreset === "سبب آخر" ? closeReasonOther.trim() : closeReasonPreset;
     closeShiftMutation.mutate(
       {
         shiftId: openShiftRow.id,
         countedAmount: counted,
-        reason: closeReason,
+        reason: combinedReason,
         actorUserId,
         allocations,
       },
       {
         onSuccess: () => {
           setCountedAmount("");
-          setCloseReason("");
+          setCloseReasonPreset(DISCREPANCY_REASON_PRESETS[0]);
+          setCloseReasonOther("");
           setDestinationAccountId("");
         },
         onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
@@ -170,7 +183,37 @@ function TreasuryPage() {
     );
   }
 
+  function handleMarkReviewed(shiftId: string) {
+    markReviewedMutation.mutate({ shiftId, actorUserId });
+  }
+
   const otherAccounts = accounts.filter((a) => a.id !== cashierAccount?.id);
+
+  // تفصيل "المتوقع" قبل ما تدخل المبلغ المعدود — بدل رقم واحد مجرد، هتشوف الرصيد الافتتاحي
+  // + كل حركة اتسجلت على الكاشير من وقت الفتح، مقسّمة حسب نوعها.
+  const movementsSinceOpen =
+    openShiftRow && cashierAccount
+      ? allMovements.filter(
+          (m) => m.account_id === cashierAccount.id && m.created_at >= openShiftRow.opened_at,
+        )
+      : [];
+  const movementsByType = new Map<string, number>();
+  for (const m of movementsSinceOpen) {
+    movementsByType.set(m.type, (movementsByType.get(m.type) ?? 0) + m.amount);
+  }
+  const expectedNow =
+    openShiftRow && cashierAccount
+      ? Math.round(
+          ((openShiftRow.opening_balance ?? 0) +
+            movementsSinceOpen.reduce((sum, m) => sum + m.amount, 0)) *
+            100,
+        ) / 100
+      : 0;
+
+  // ورديات مقفلة بفرق ≠ صفر ولسه محتاجة مراجعة — كارت تنبيه دائم يفضل ظاهر لحد ما حد يراجعها.
+  const shiftsNeedingReview = closedShifts.filter(
+    (s) => (s.closing_diff ?? 0) !== 0 && !s.reviewed_at,
+  );
 
   // نظرة عامة سهلة وسلسة — بدل ما صاحب المحل يفهم الخزينة من جدول حركات مفصّل، 4 أرقام
   // واضحة بلغته هو: الشركاء ضخوا كام، بعنا بكام، صرفنا كام، وكسبنا كام. الربح هنا نفسه
@@ -446,6 +489,32 @@ function TreasuryPage() {
                   مفتوحة منذ {new Date(openShiftRow.opened_at).toLocaleString("ar-EG")} — رصيد
                   افتتاحي {openShiftRow.opening_balance.toLocaleString("ar-EG")} ج.م
                 </p>
+
+                <div className="mt-3 rounded-lg border border-border bg-muted/30 p-3">
+                  <p className="text-xs font-bold text-foreground">
+                    المتوقع دلوقتي: {expectedNow.toLocaleString("ar-EG")} ج.م
+                  </p>
+                  {movementsSinceOpen.length > 0 ? (
+                    <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-muted-foreground sm:grid-cols-4">
+                      {[...movementsByType.entries()].map(([type, sum]) => (
+                        <li key={type} className="flex justify-between gap-2" dir="ltr">
+                          <span>
+                            {MOVEMENT_TYPE_LABELS[type as TreasuryMovement["type"]] ?? type}
+                          </span>
+                          <span className={sum >= 0 ? "text-success" : "text-destructive"}>
+                            {sum >= 0 ? "+" : ""}
+                            {sum.toLocaleString("ar-EG")}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      مفيش أي حركة اتسجلت على الكاشير من وقت الفتح لحد دلوقتي.
+                    </p>
+                  )}
+                </div>
+
                 <div className="mt-3 flex flex-wrap items-end gap-3">
                   <label className="block space-y-1">
                     <span className="text-xs font-medium text-foreground">
@@ -460,16 +529,30 @@ function TreasuryPage() {
                       dir="ltr"
                     />
                   </label>
-                  <label className="block flex-1 space-y-1">
-                    <span className="text-xs font-medium text-foreground">
-                      سبب الفرق (لو فيه فرق)
-                    </span>
-                    <input
-                      value={closeReason}
-                      onChange={(e) => setCloseReason(e.target.value)}
+                  <label className="block space-y-1">
+                    <span className="text-xs font-medium text-foreground">سبب الفرق (لو فيه)</span>
+                    <select
+                      value={closeReasonPreset}
+                      onChange={(e) => setCloseReasonPreset(e.target.value)}
                       className="form-input"
-                    />
+                    >
+                      {DISCREPANCY_REASON_PRESETS.map((preset) => (
+                        <option key={preset} value={preset}>
+                          {preset}
+                        </option>
+                      ))}
+                    </select>
                   </label>
+                  {closeReasonPreset === "سبب آخر" && (
+                    <label className="block flex-1 space-y-1">
+                      <span className="text-xs font-medium text-foreground">تفاصيل السبب</span>
+                      <input
+                        value={closeReasonOther}
+                        onChange={(e) => setCloseReasonOther(e.target.value)}
+                        className="form-input"
+                      />
+                    </label>
+                  )}
                 </div>
 
                 {otherAccounts.length > 0 && (
@@ -506,6 +589,36 @@ function TreasuryPage() {
                 </button>
               </div>
             )}
+          </section>
+        )}
+
+        {shiftsNeedingReview.length > 0 && (
+          <section className="mt-8 space-y-3">
+            <h2 className="text-lg font-bold text-destructive">
+              ورديات فيها فرق محتاجة مراجعة ({shiftsNeedingReview.length})
+            </h2>
+            {shiftsNeedingReview.map((shift) => (
+              <div
+                key={shift.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border-2 border-destructive/40 bg-destructive/5 p-4"
+              >
+                <div>
+                  <p className="text-sm font-bold text-foreground" dir="ltr">
+                    فرق {shift.closing_diff?.toLocaleString("ar-EG")} ج.م — وردية اتقفلت بتاريخ{" "}
+                    {shift.closed_at && new Date(shift.closed_at).toLocaleString("ar-EG")}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    السبب المسجَّل: {shift.closing_reason ?? "—"}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleMarkReviewed(shift.id)}
+                  className="whitespace-nowrap rounded-md border border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
+                >
+                  راجعتها ✓
+                </button>
+              </div>
+            ))}
           </section>
         )}
 
