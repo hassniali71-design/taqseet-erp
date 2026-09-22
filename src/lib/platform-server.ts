@@ -45,6 +45,7 @@ export interface ProvisionTenantInput {
 
 export interface ProvisionTenantResult {
   tenant: Tenant;
+  ownerUserId: string;
   ownerEmail: string;
   ownerPassword: string;
 }
@@ -216,7 +217,12 @@ export const provisionTenantServer = createServerFn({ method: "POST" })
       new_value: { tenant, owner_email: ownerEmail },
     });
 
-    return { tenant: tenant as Tenant, ownerEmail, ownerPassword };
+    return {
+      tenant: tenant as Tenant,
+      ownerUserId: userRow["id"] as string,
+      ownerEmail,
+      ownerPassword,
+    };
   });
 
 export const fetchManagedTenants = createServerFn({ method: "GET" }).handler(async () => {

@@ -29,6 +29,7 @@ import {
   setTenantStatusServer,
   type ProvisionTenantResult,
 } from "@/lib/platform-server";
+import { sendCredentialsServer } from "@/lib/twilio-server";
 import type { Tenant, TenantStatus } from "@/types";
 
 export const Route = createFileRoute("/platform")({
@@ -136,6 +137,19 @@ function PlatformControlRoom() {
       toast.success(`تم إنشاء عميل جديد بحساب دخول حقيقي: ${result.tenant.name}`);
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "تعذّر إنشاء العميل"),
+  });
+
+  const sendCredentialsMutation = useMutation({
+    mutationFn: (vars: {
+      tenantId: string;
+      userId: string;
+      phone: string;
+      email: string;
+      password: string;
+      channel: "sms" | "whatsapp";
+    }) => sendCredentialsServer({ data: vars }),
+    onSuccess: (r) => toast.success(r.skipped ? "تم الإرسال مسبقًا اليوم" : "تم الإرسال"),
+    onError: (e) => toast.error(e instanceof Error ? e.message : "تعذّر الإرسال"),
   });
 
   if (!session || !currentUser?.is_platform_owner) return null;
@@ -285,6 +299,42 @@ function PlatformControlRoom() {
                 {justCreated.ownerPassword}
               </div>
             </div>
+            {justCreated.tenant.phone && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  onClick={() =>
+                    sendCredentialsMutation.mutate({
+                      tenantId: justCreated.tenant.id,
+                      userId: justCreated.ownerUserId,
+                      phone: justCreated.tenant.phone,
+                      email: justCreated.ownerEmail,
+                      password: justCreated.ownerPassword,
+                      channel: "sms",
+                    })
+                  }
+                  disabled={sendCredentialsMutation.isPending}
+                  className="rounded-md bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                >
+                  إرسال عبر SMS
+                </button>
+                <button
+                  onClick={() =>
+                    sendCredentialsMutation.mutate({
+                      tenantId: justCreated.tenant.id,
+                      userId: justCreated.ownerUserId,
+                      phone: justCreated.tenant.phone,
+                      email: justCreated.ownerEmail,
+                      password: justCreated.ownerPassword,
+                      channel: "whatsapp",
+                    })
+                  }
+                  disabled={sendCredentialsMutation.isPending}
+                  className="rounded-md border border-primary/50 px-3 py-1.5 text-xs font-bold text-sidebar-foreground hover:bg-primary/10 disabled:opacity-50"
+                >
+                  إرسال عبر واتساب
+                </button>
+              </div>
+            )}
             <button
               onClick={() => setJustCreated(null)}
               className="mt-3 text-xs font-bold text-sidebar-foreground/60 hover:underline"
