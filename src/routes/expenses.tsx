@@ -6,6 +6,7 @@ import {
   useApproveExpense,
   useCurrentTenantSettings,
   useExpenses,
+  usePartners,
   useRecordExpense,
   useTreasuryAccounts,
   useUsers,
@@ -18,7 +19,9 @@ export const Route = createFileRoute("/expenses")({
 
 function ExpensesPage() {
   const session = useRequireSession();
+  const [chargeTo, setChargeTo] = useState<"treasury" | "partners">("treasury");
   const [accountId, setAccountId] = useState("");
+  const [selectedPartnerIds, setSelectedPartnerIds] = useState<string[]>([]);
   const [category, setCategory] = useState("");
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
@@ -27,6 +30,7 @@ function ExpensesPage() {
   const { data: settingsData } = useCurrentTenantSettings(session?.tenant_id);
   const { data: allAccounts = [] } = useTreasuryAccounts(session?.tenant_id);
   const { data: allExpenses = [] } = useExpenses(session?.tenant_id);
+  const { data: allPartners = [] } = usePartners(session?.tenant_id);
   const { data: users = [] } = useUsers(session?.tenant_id);
   const recordExpenseMutation = useRecordExpense(session?.tenant_id);
   const approveExpenseMutation = useApproveExpense(session?.tenant_id);
@@ -36,6 +40,7 @@ function ExpensesPage() {
 
   const settings = settingsData ?? { expense_approval_threshold: 2000 };
   const accounts = allAccounts.filter((a) => a.active);
+  const partners = allPartners.filter((p) => p.active);
   const expenses = [...allExpenses].sort((a, b) => b.created_at.localeCompare(a.created_at));
 
   function handleApprove(expenseId: string) {
@@ -44,16 +49,27 @@ function ExpensesPage() {
     approveExpenseMutation.mutate({ expenseId, note, actorUserId });
   }
 
+  function togglePartner(id: string) {
+    setSelectedPartnerIds((prev) =>
+      prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id],
+    );
+  }
+
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
-    if (!accountId) {
+    if (chargeTo === "treasury" && !accountId) {
       setError("اختر الخزينة اللي هيتم الصرف منها");
+      return;
+    }
+    if (chargeTo === "partners" && selectedPartnerIds.length === 0) {
+      setError("اختر شريك واحد على الأقل يتحمّل المصروف");
       return;
     }
     recordExpenseMutation.mutate(
       {
-        accountId,
+        chargeTo,
+        ...(chargeTo === "treasury" ? { accountId } : { partnerIds: selectedPartnerIds }),
         category,
         amount: Number(amount) || 0,
         reason,
@@ -65,6 +81,7 @@ function ExpensesPage() {
           setCategory("");
           setAmount("");
           setReason("");
+          setSelectedPartnerIds([]);
         },
         onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
       },
@@ -88,27 +105,71 @@ function ExpensesPage() {
           className="mt-6 space-y-3 rounded-xl border border-border bg-card p-5 shadow-sm"
         >
           <h2 className="text-sm font-bold text-foreground">تسجيل مصروف</h2>
+
+          <div className="space-y-1">
+            <span className="text-xs font-medium text-foreground">المصروف ده على مين؟</span>
+            <div className="flex flex-wrap gap-4">
+              <label className="flex items-center gap-2 text-sm text-foreground">
+                <input
+                  type="radio"
+                  checked={chargeTo === "treasury"}
+                  onChange={() => setChargeTo("treasury")}
+                />
+                خزينة
+              </label>
+              <label className="flex items-center gap-2 text-sm text-foreground">
+                <input
+                  type="radio"
+                  checked={chargeTo === "partners"}
+                  onChange={() => setChargeTo("partners")}
+                />
+                شركاء (يتخصم من رصيدهم، الخزينة ما تتأثرش)
+              </label>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
-            <label className="block space-y-1">
-              <span className="text-xs font-medium text-foreground">الخزينة *</span>
-              <select
-                value={accountId}
-                onChange={(e) => setAccountId(e.target.value)}
-                className="form-input"
-              >
-                <option value="">اختر خزينة</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-              {accounts.length === 0 && (
-                <span className="block text-[11px] text-warning">
-                  مفيش خزينة نشطة بعد — أضف خزينة من صفحة "الخزينة" الأول.
-                </span>
-              )}
-            </label>
+            {chargeTo === "treasury" ? (
+              <label className="block space-y-1">
+                <span className="text-xs font-medium text-foreground">الخزينة *</span>
+                <select
+                  value={accountId}
+                  onChange={(e) => setAccountId(e.target.value)}
+                  className="form-input"
+                >
+                  <option value="">اختر خزينة</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+                {accounts.length === 0 && (
+                  <span className="block text-[11px] text-warning">
+                    مفيش خزينة نشطة بعد — أضف خزينة من صفحة "الخزينة" الأول.
+                  </span>
+                )}
+              </label>
+            ) : (
+              <div className="block space-y-1 sm:col-span-1">
+                <span className="text-xs font-medium text-foreground">الشركاء *</span>
+                <div className="max-h-28 space-y-1 overflow-y-auto rounded-md border border-input p-2">
+                  {partners.map((p) => (
+                    <label key={p.id} className="flex items-center gap-2 text-xs text-foreground">
+                      <input
+                        type="checkbox"
+                        checked={selectedPartnerIds.includes(p.id)}
+                        onChange={() => togglePartner(p.id)}
+                      />
+                      {p.name}
+                    </label>
+                  ))}
+                  {partners.length === 0 && (
+                    <span className="block text-[11px] text-warning">مفيش شركاء نشطين بعد.</span>
+                  )}
+                </div>
+              </div>
+            )}
             <label className="block space-y-1">
               <span className="text-xs font-medium text-foreground">النوع *</span>
               <input
@@ -156,6 +217,7 @@ function ExpensesPage() {
               <tr>
                 <th className="px-4 py-3 font-medium">النوع</th>
                 <th className="px-4 py-3 font-medium">المبلغ</th>
+                <th className="px-4 py-3 font-medium">مين اتحمّله</th>
                 <th className="px-4 py-3 font-medium">السبب</th>
                 <th className="px-4 py-3 font-medium">الحالة</th>
                 <th className="px-4 py-3 font-medium">التاريخ</th>
@@ -172,6 +234,17 @@ function ExpensesPage() {
                     <td className="px-4 py-3 font-medium text-foreground">{expense.category}</td>
                     <td className="px-4 py-3 text-muted-foreground" dir="ltr">
                       {expense.amount.toLocaleString("ar-EG")} ج.م
+                    </td>
+                    <td className="px-4 py-3">
+                      {expense.charge_to === "partners" ? (
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                          شركاء
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          {accounts.find((a) => a.id === expense.account_id)?.name ?? "خزينة"}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{expense.reason}</td>
                     <td className="px-4 py-3">
@@ -210,7 +283,7 @@ function ExpensesPage() {
               })}
               {expenses.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">
                     لا يوجد مصروفات بعد.
                   </td>
                 </tr>

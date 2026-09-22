@@ -3698,24 +3698,38 @@ export function useRecordExpense(tenantId: string | undefined) {
       reason,
       actorUserId,
       expenseApprovalThreshold,
+      chargeTo = "treasury",
+      partnerIds = [],
     }: {
-      accountId: string;
+      /** إلزامي لو `chargeTo === "treasury"` (السلوك التاريخي)، بيتجاهل لو "partners". */
+      accountId?: string;
       category: string;
       amount: number;
       reason: string;
       actorUserId: string | null;
       expenseApprovalThreshold: number;
+      /** "treasury" (الافتراضي) = نفس السلوك القديم بالظبط: خصم فعلي من خزينة + قيد محاسبي.
+       * "partners" = المصروف بيتوزّع بالتساوي على الشركاء المُختارين كصفوف `expense_share` في
+       * دفترهم — الخزينة لا تتأثر إطلاقًا، ولا يُنشأ أي قيد محاسبي جديد (نفس مبدأ
+       * settlePartnersForDeal — طبقة موازية منفصلة). */
+      chargeTo?: "treasury" | "partners";
+      partnerIds?: string[];
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
       if (amount <= 0) throw new Error("المبلغ يجب أن يكون أكبر من صفر");
       if (!category.trim()) throw new Error("نوع المصروف مطلوب");
       if (!reason.trim()) throw new Error("سبب المصروف مطلوب");
+      if (chargeTo === "treasury" && !accountId) throw new Error("اختر الخزينة");
+      if (chargeTo === "partners" && partnerIds.length === 0) {
+        throw new Error("اختر شريك واحد على الأقل يتحمّل المصروف");
+      }
 
       const { data: expense, error } = await supabase
         .from("expenses")
         .insert({
           tenant_id: tenantId,
-          account_id: accountId,
+          account_id: chargeTo === "treasury" ? accountId : null,
+          charge_to: chargeTo,
           category: category.trim(),
           amount,
           reason: reason.trim(),
@@ -3735,10 +3749,32 @@ export function useRecordExpense(tenantId: string | undefined) {
         reason: expense.reason as string,
       });
 
+      if (chargeTo === "partners") {
+        try {
+          const share = Math.round((amount / partnerIds.length) * 100) / 100;
+          const { error: shareError } = await supabase.from("partner_transactions").insert(
+            partnerIds.map((partnerId) => ({
+              tenant_id: tenantId,
+              partner_id: partnerId,
+              type: "expense_share",
+              amount: -share,
+              reference: category.trim(),
+              reason: reason.trim(),
+              related_expense_id: expense.id as string,
+              user_id: actorUserId,
+            })),
+          );
+          if (shareError) throw new Error(shareError.message);
+        } catch (e) {
+          console.warn("فشل توزيع المصروف على الشركاء:", e instanceof Error ? e.message : e);
+        }
+        return expense as Expense;
+      }
+
       try {
         await performPostTreasuryMovement(
           tenantId,
-          accountId,
+          accountId as string,
           -amount,
           "expense",
           actorUserId,
@@ -3766,6 +3802,7 @@ export function useRecordExpense(tenantId: string | undefined) {
       void queryClient.invalidateQueries({ queryKey: ["treasury_accounts", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["treasury_movements", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["journal_entries", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["partner_transactions", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
   });
