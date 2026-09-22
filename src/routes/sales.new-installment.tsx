@@ -398,7 +398,7 @@ function NewInstallmentSalePage() {
       <main className="flex-1 mx-auto max-w-5xl px-4 py-8">
         <h1 className="text-2xl font-bold text-foreground">بيع بالتقسيط جديد</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          §35/§37 — لازم عميل مسجّل، والأسعار هنا سعر التقسيط وليس السعر النقدي.
+          لازم عميل مسجّل، والأسعار هنا سعر التقسيط وليس السعر النقدي.
         </p>
 
         <div className="mt-4">

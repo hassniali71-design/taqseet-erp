@@ -260,8 +260,8 @@ function TreasuryPage() {
           <div>
             <h1 className="text-2xl font-bold text-foreground">الخزينة</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              §68 — الرصيد هنا محسوب دائمًا من مجموع الحركات، مش رقم مخزّن لوحده. §70 وردية الكاشير
-              لازم سبب موثّق لأي فرق عند الإقفال.
+              الرصيد هنا محسوب دائمًا من مجموع الحركات، مش رقم مخزّن لوحده. وردية الكاشير لازم سبب
+              موثّق لأي فرق عند الإقفال.
             </p>
           </div>
           {!showAccountForm && (
@@ -407,7 +407,7 @@ function TreasuryPage() {
               </p>
             </div>
             <Link to="/partners" className="block rounded-xl border border-border bg-card p-4">
-              <p className="text-xs text-muted-foreground">الشركاء ضخوا فينا</p>
+              <p className="text-xs text-muted-foreground">إجمالي تمويل الشركاء</p>
               <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
                 {totalPartnerFunding.toLocaleString("ar-EG")} ج.م
               </p>
@@ -448,7 +448,7 @@ function TreasuryPage() {
         </div>
 
         <section className="mt-8 rounded-xl border border-border bg-card p-5 shadow-sm">
-          <h2 className="text-sm font-bold text-foreground">الإقفال اليومي (§71 — عرض فقط)</h2>
+          <h2 className="text-sm font-bold text-foreground">الإقفال اليومي (عرض فقط)</h2>
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
             <Stat label="مبيعات اليوم" value={todaySales} />
             <Stat label="تحصيلات اليوم" value={todayCollections} />
@@ -460,7 +460,7 @@ function TreasuryPage() {
 
         {cashierAccount && (
           <section className="mt-8 rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="text-sm font-bold text-foreground">وردية الكاشير (§70)</h2>
+            <h2 className="text-sm font-bold text-foreground">وردية الكاشير</h2>
             {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
 
             {!openShiftRow ? (

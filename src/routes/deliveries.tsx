@@ -84,7 +84,7 @@ function DeliveriesPage() {
       <main className="flex-1 mx-auto max-w-4xl px-4 py-8">
         <h1 className="text-2xl font-bold text-foreground">التوصيل</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          §84 — خدمة توصيل منفصلة تمامًا عن قيمة البيع أو التقسيط، لا تؤثر على أي منهما.
+          خدمة توصيل منفصلة تمامًا عن قيمة البيع أو التقسيط، لا تؤثر على أي منهما.
         </p>
 
         <div className="mt-6 space-y-3 rounded-xl border border-border bg-card p-5 shadow-sm">

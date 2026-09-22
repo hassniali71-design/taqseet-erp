@@ -203,8 +203,8 @@ function NotificationsPage() {
           <div>
             <h1 className="text-2xl font-bold text-foreground">الإشعارات</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              §92 — كل إشعار هنا مُشتق من البيانات وقت العرض، وحالة "مقروء" فعلية لكل إشعار. مفيش أي
-              إرسال واتساب/SMS فعلي (§93 — Feature Flag متوقف افتراضيًا في الإعدادات).
+              كل إشعار هنا مُشتق من البيانات وقت العرض، وحالة "مقروء" فعلية لكل إشعار. مفيش أي إرسال
+              واتساب/SMS فعلي (Feature Flag متوقف افتراضيًا في الإعدادات).
             </p>
           </div>
           {unreadCount > 0 && (

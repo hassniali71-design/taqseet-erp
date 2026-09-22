@@ -190,7 +190,7 @@ function NewExchangePage() {
       <main className="flex-1 mx-auto max-w-4xl px-4 py-8">
         <h1 className="text-2xl font-bold text-foreground">استبدال جديد</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          §82 — إرجاع أصناف من فاتورة نقدية أصلية + بيع أصناف جديدة، وتسوية الفرق فقط.
+          إرجاع أصناف من فاتورة نقدية أصلية + بيع أصناف جديدة، وتسوية الفرق فقط.
         </p>
 
         {!sale ? (

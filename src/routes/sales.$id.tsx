@@ -145,7 +145,7 @@ function SaleReceiptPage() {
         {showReturnForm && (
           <div className="mt-4 space-y-3 rounded-xl border border-border bg-card p-5 shadow-sm">
             <h2 className="text-sm font-bold text-foreground">
-              إرجاع صنف (§79/§81 — سيريال يدخل تحت الفحص، مش متاح فورًا)
+              إرجاع صنف (سيريال يدخل تحت الفحص، مش متاح فورًا)
             </h2>
             <div className="space-y-2">
               {sale.items.map((line, index) => {

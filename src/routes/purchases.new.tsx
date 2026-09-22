@@ -204,7 +204,7 @@ function NewPurchasePage() {
       <main className="flex-1 mx-auto max-w-5xl px-4 py-8">
         <h1 className="text-2xl font-bold text-foreground">أمر شراء جديد</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          §61-§64 — الاستلام هنا فوري: تأكيد الأمر يحدّث المخزون وينشئ السيريالات المطلوبة مباشرة.
+          الاستلام هنا فوري: تأكيد الأمر يحدّث المخزون وينشئ السيريالات المطلوبة مباشرة.
         </p>
 
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">

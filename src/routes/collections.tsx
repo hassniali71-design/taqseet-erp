@@ -169,8 +169,8 @@ function CollectionsWorkbenchPage() {
       <main className="flex-1 mx-auto max-w-5xl px-4 py-8">
         <h1 className="text-2xl font-bold text-foreground">مركز التحصيل</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          §52 — التوزيع الافتراضي على أقدم قسط مستحق أولًا (§46). إيصال التحصيل مرقّم تلقائيًا ولا
-          يمكن تعديله أو حذفه (§55).
+          التوزيع الافتراضي على أقدم قسط مستحق أولًا. إيصال التحصيل مرقّم تلقائيًا ولا يمكن تعديله
+          أو حذفه.
         </p>
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-2">

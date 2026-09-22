@@ -94,10 +94,10 @@ function ExpensesPage() {
       <main className="flex-1 mx-auto max-w-4xl px-4 py-8">
         <h1 className="text-2xl font-bold text-foreground">المصروفات</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          §73 — المصروفات فوق {settings.expense_approval_threshold.toLocaleString("ar-EG")} ج.م
-          (قابل للتعديل من الإعدادات) بتتسجّل فورًا وتُعلَّم "تحتاج اعتماد"، وتحتاج زرار "اعتماد"
-          صريح من مسؤول ليتم توثيق مراجعتها (المال بيكون خرج بالفعل — الاعتماد هنا رقابي/توثيقي، مش
-          حجب فعلي قبل الصرف؛ الحجب الكامل قبل الصرف مؤجّل).
+          المصروفات فوق {settings.expense_approval_threshold.toLocaleString("ar-EG")} ج.م (قابل
+          للتعديل من الإعدادات) بتتسجّل فورًا وتُعلَّم "تحتاج اعتماد"، وتحتاج زرار "اعتماد" صريح من
+          مسؤول ليتم توثيق مراجعتها (المال بيكون خرج بالفعل — الاعتماد هنا رقابي/توثيقي، مش حجب فعلي
+          قبل الصرف؛ الحجب الكامل قبل الصرف مؤجّل).
         </p>
 
         <form

@@ -184,7 +184,7 @@ function SettingsPage() {
         <h1 className="text-2xl font-bold text-foreground">الإعدادات</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           هذه الإعدادات تُستخدم عبر المراحل القادمة (تقسيط، مرتجعات، ائتمان). أي تعديل هنا مستقبلًا
-          لا يغيّر عقودًا أو عمليات قديمة استخدمت القيمة السابقة (§114 Snapshot).
+          لا يغيّر عقودًا أو عمليات قديمة استخدمت القيمة السابقة (Snapshot).
         </p>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-6">
@@ -291,7 +291,7 @@ function SettingsPage() {
                   checked={form.late_fee_enabled === "true"}
                   onChange={(e) => setForm({ ...form, late_fee_enabled: String(e.target.checked) })}
                 />
-                تفعيل غرامة تأخير (غير مفعّلة افتراضيًا — §50)
+                تفعيل غرامة تأخير (غير مفعّلة افتراضيًا)
               </label>
             </div>
           </section>
@@ -362,10 +362,10 @@ function SettingsPage() {
         <section className="mt-8 rounded-xl border border-border bg-card p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-bold text-foreground">خطط التقسيط (§38)</h2>
+              <h2 className="text-sm font-bold text-foreground">خطط التقسيط</h2>
               <p className="mt-1 text-xs text-muted-foreground">
                 تعديل أو إيقاف خطة هنا لا يغيّر عقودًا أنشئت بها من قبل — النسبة والمدة تُحفظان داخل
-                كل عقد وقت إنشائه (§114).
+                كل عقد وقت إنشائه.
               </p>
             </div>
             {!showPlanForm && (
@@ -475,10 +475,10 @@ function SettingsPage() {
         </section>
 
         <section className="mt-8 rounded-xl border border-border bg-card p-5 shadow-sm">
-          <h2 className="text-sm font-bold text-foreground">فئات وماركات المنتجات (§19/§118)</h2>
+          <h2 className="text-sm font-bold text-foreground">فئات وماركات المنتجات</h2>
           <p className="mt-1 text-xs text-muted-foreground">
             نفس القيم المتاحة في قائمة الفئة/الماركة عند إضافة جهاز جديد. إيقاف فئة أو ماركة هنا لا
-            يحذفها من الأجهزة الموجودة أصلاً — يمنع فقط اقتراحها لأجهزة جديدة (§20).
+            يحذفها من الأجهزة الموجودة أصلاً — يمنع فقط اقتراحها لأجهزة جديدة.
           </p>
           <div className="mt-4 grid grid-cols-1 gap-6 sm:grid-cols-2">
             <div>

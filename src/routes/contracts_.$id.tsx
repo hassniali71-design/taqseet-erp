@@ -444,7 +444,7 @@ function ContractDetailPage() {
 
         {remaining > 0 && (
           <section className="mt-8 rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="text-sm font-bold text-foreground">تسجيل دفعة (§46 أقدم قسط أولًا)</h2>
+            <h2 className="text-sm font-bold text-foreground">تسجيل دفعة (أقدم قسط أولًا)</h2>
             <div className="mt-3 flex flex-wrap items-end gap-3">
               <label className="block space-y-1">
                 <span className="text-xs font-medium text-foreground">
@@ -506,7 +506,7 @@ function ContractDetailPage() {
 
         {promises.length > 0 && (
           <section className="mt-8">
-            <h2 className="text-lg font-bold text-foreground">وعود الدفع (§51)</h2>
+            <h2 className="text-lg font-bold text-foreground">وعود الدفع</h2>
             <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
               <table className="w-full text-right text-sm">
                 <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
@@ -547,7 +547,7 @@ function ContractDetailPage() {
 
         {restructureEvents.length > 0 && (
           <section className="mt-8">
-            <h2 className="text-lg font-bold text-foreground">سجل إعادة الهيكلة (§48)</h2>
+            <h2 className="text-lg font-bold text-foreground">سجل إعادة الهيكلة</h2>
             <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
               <table className="w-full text-right text-sm">
                 <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">

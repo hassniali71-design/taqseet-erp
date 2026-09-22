@@ -109,8 +109,8 @@ function AuditPage() {
           <div>
             <h1 className="text-2xl font-bold text-foreground">سجل العمليات (Audit Log)</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              كل عملية حساسة في النظام تُسجَّل هنا تلقائيًا (§12). الحذف هنا لا يؤثر على أي عملية
-              تشغيلية — فقط سجل المراجعة نفسه.
+              كل عملية حساسة في النظام تُسجَّل هنا تلقائيًا. الحذف هنا لا يؤثر على أي عملية تشغيلية
+              — فقط سجل المراجعة نفسه.
             </p>
           </div>
           {logs.length > 0 && (
