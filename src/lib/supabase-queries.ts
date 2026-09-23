@@ -425,6 +425,29 @@ async function nextTenantCode(table: string, tenantId: string, prefix: string) {
   return `${prefix}-${String((count ?? 0) + 1).padStart(4, "0")}`;
 }
 
+/** `nextTenantCode` counts rows then inserts in two separate round trips — two concurrent
+ * creates (two tabs, a double-click before the button disables, two cashiers) can both read the
+ * same count and collide on the same generated code, hitting the table's `unique(tenant_id, code)`
+ * constraint with a raw Postgres error surfaced straight to the user. This wraps that
+ * count-then-insert in a bounded retry: on a unique-violation (23505) it just regenerates the
+ * code (now one higher, since the other row has committed) and retries the insert — used by every
+ * `useCreate*` mutation that calls `nextTenantCode` (customers, products, suppliers, partners). */
+async function insertWithGeneratedCode<T>(
+  table: string,
+  tenantId: string,
+  prefix: string,
+  buildRow: (code: string) => Record<string, unknown>,
+): Promise<T> {
+  const maxAttempts = 5;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const code = await nextTenantCode(table, tenantId, prefix);
+    const { data, error } = await supabase.from(table).insert(buildRow(code)).select().single();
+    if (!error) return data as T;
+    if (error.code !== "23505" || attempt === maxAttempts) throw new Error(error.message);
+  }
+  throw new Error("تعذّر إنشاء كود فريد بعد عدة محاولات — حاول تاني");
+}
+
 /* ---------------- Customers (§14) ---------------- */
 
 export function useCustomers(tenantId: string | undefined) {
@@ -448,19 +471,18 @@ export function useCreateCustomer(tenantId: string | undefined) {
       createdAt?: string;
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
-      const code = await nextTenantCode("customers", tenantId, "CUST");
-      const { data, error } = await supabase
-        .from("customers")
-        .insert({
+      const data = await insertWithGeneratedCode<Customer>(
+        "customers",
+        tenantId,
+        "CUST",
+        (code) => ({
           ...input,
           tenant_id: tenantId,
           code,
           status: "active",
           ...(createdAt ? { created_at: createdAt } : {}),
-        })
-        .select()
-        .single();
-      if (error) throw new Error(error.message);
+        }),
+      );
       await insertAuditLog({
         tenant_id: tenantId,
         user_id: actorUserId,
@@ -469,7 +491,7 @@ export function useCreateCustomer(tenantId: string | undefined) {
         entity_id: data.id as string,
         new_value: data,
       });
-      return data as Customer;
+      return data;
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["customers", tenantId] });
@@ -659,13 +681,12 @@ export function useCreateProduct(tenantId: string | undefined) {
       actorUserId: string | null;
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
-      const code = await nextTenantCode("products", tenantId, "PRD");
-      const { data, error } = await supabase
-        .from("products")
-        .insert({ ...input, tenant_id: tenantId, code, active: true })
-        .select()
-        .single();
-      if (error) throw new Error(error.message);
+      const data = await insertWithGeneratedCode<Product>("products", tenantId, "PRD", (code) => ({
+        ...input,
+        tenant_id: tenantId,
+        code,
+        active: true,
+      }));
       await insertAuditLog({
         tenant_id: tenantId,
         user_id: actorUserId,
@@ -674,7 +695,7 @@ export function useCreateProduct(tenantId: string | undefined) {
         entity_id: data.id as string,
         new_value: data,
       });
-      return data as Product;
+      return data;
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["products", tenantId] });
@@ -2367,6 +2388,231 @@ export function useRestructureContract(tenantId: string | undefined) {
   });
 }
 
+/** إلغاء عقد تقسيط بالكامل بالغلط — مسموح بس طالما لسه مفيش أي قسط اتحصّل عليه (لا `active` ولا
+ * حاجة اتعدلت زي restructure/settle، وصفر مدفوع في installments.paid_amount) — أنضف سيناريو "زي
+ * إنه محصلش"، بقرار المستخدم صراحة بدل التعامل مع رد فلوس حقيقي لعميل دفع أقساط فعلية. بيعكس:
+ * السيريال/المخزون (زي مرتجع حقيقي)، الأثر المالي في الخزينة/المحاسبة (صورة معكوسة بالظبط من
+ * القيد الأصلي اللي `useCreateInstallmentContract` سجّله)، وأي تسوية شركاء مرتبطة بالعقد ده —
+ * بصف `contract_cancellation` موجب/سالب عكسي، مش تعديل أو حذف للصف الأصلي (دفتر الشركاء
+ * append-only زي `settlePartnersForDeal` نفسها). زي كل الترحيلات المالية التانية في المشروع،
+ * فشل الجزء المالي/تسوية الشركاء best-effort (ميوقفش الإلغاء نفسه)؛ لكن عكس المخزون/السيريال
+ * وتغيير حالة العقد إلزاميين (لو فشلوا الإلغاء كله بيفشل، زي useCreateInstallmentContract بالظبط). */
+export function useCancelInstallmentContract(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      contractId,
+      reason,
+      actorUserId,
+    }: {
+      contractId: string;
+      reason: string;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (!reason.trim()) throw new Error("سبب الإلغاء مطلوب");
+
+      const { data: contract, error: contractError } = await supabase
+        .from("installment_contracts")
+        .select("*")
+        .eq("id", contractId)
+        .single();
+      if (contractError || !contract) throw new Error("العقد غير موجود");
+      if (contract.status !== "active") {
+        throw new Error(
+          "العقد ده مش في حالة تسمح بالإلغاء الكامل — لازم يكون نشط بدون أي تعديل أو تحصيل عليه",
+        );
+      }
+
+      const { data: contractInstallments, error: instError } = await supabase
+        .from("installments")
+        .select("id, paid_amount")
+        .eq("contract_id", contractId);
+      if (instError) throw new Error(instError.message);
+      const totalPaid = (contractInstallments ?? []).reduce(
+        (sum, i) => sum + (i.paid_amount as number),
+        0,
+      );
+      if (totalPaid > 0) {
+        throw new Error("اتحصّل على العقد ده أقساط بالفعل — الإلغاء الكامل مسموح بس قبل أي تحصيل");
+      }
+
+      const [
+        { data: allSerials, error: serialsError },
+        { data: movements, error: movementsError },
+      ] = await Promise.all([
+        supabase.from("product_serials").select("*").eq("tenant_id", tenantId),
+        supabase
+          .from("inventory_movements")
+          .select("product_id, quantity")
+          .eq("tenant_id", tenantId),
+      ]);
+      if (serialsError) throw new Error(serialsError.message);
+      if (movementsError) throw new Error(movementsError.message);
+
+      const items = contract.items as SaleItem[];
+      const stockTracker = new Map<string, number>();
+      for (const item of items) {
+        const stock = stockTracker.has(item.product_id)
+          ? (stockTracker.get(item.product_id) as number)
+          : computeProductStock(
+              item.product_id,
+              Boolean(item.serial_id),
+              (allSerials ?? []) as ProductSerial[],
+              (movements ?? []) as InventoryMovement[],
+            );
+        const before = stock;
+        const after = stock + item.quantity;
+        stockTracker.set(item.product_id, after);
+
+        if (item.serial_id) {
+          const { error: serialUpdateError } = await supabase
+            .from("product_serials")
+            .update({ status: "available" })
+            .eq("id", item.serial_id);
+          if (serialUpdateError) throw new Error(serialUpdateError.message);
+        }
+        const { error: movementError } = await supabase.from("inventory_movements").insert({
+          tenant_id: tenantId,
+          product_id: item.product_id,
+          type: "return",
+          quantity: item.quantity,
+          before,
+          after,
+          user_id: actorUserId,
+          reference: contract.contract_number as string,
+          reason: `إلغاء عقد تقسيط: ${reason.trim()}`,
+        });
+        if (movementError) throw new Error(movementError.message);
+      }
+
+      const { error: waiveError } = await supabase
+        .from("installments")
+        .update({ status: "waived" })
+        .eq("contract_id", contractId);
+      if (waiveError) throw new Error(waiveError.message);
+
+      const { error: statusError } = await supabase
+        .from("installment_contracts")
+        .update({ status: "cancelled" })
+        .eq("id", contractId);
+      if (statusError) throw new Error(statusError.message);
+
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "installment_contract.cancel",
+        entity: "installment_contracts",
+        entity_id: contractId,
+        old_value: contract,
+        reason: reason.trim(),
+      });
+
+      try {
+        const downPayment = contract.down_payment as number;
+        if (downPayment > 0) {
+          const cashierId = await findAccountIdByKind(tenantId, "cashier");
+          if (cashierId) {
+            await performPostTreasuryMovement(
+              tenantId,
+              cashierId,
+              -downPayment,
+              "return",
+              actorUserId,
+              contract.contract_number as string,
+              `إلغاء عقد ${contract.contract_number as string}`,
+            );
+          }
+        }
+        await performPostJournalEntry(
+          tenantId,
+          [
+            ...(downPayment > 0
+              ? [
+                  {
+                    account_code: "1000" as const,
+                    account_name: ACCOUNT_NAMES["1000"],
+                    debit: 0,
+                    credit: downPayment,
+                  },
+                ]
+              : []),
+            {
+              account_code: "1100",
+              account_name: ACCOUNT_NAMES["1100"],
+              debit: 0,
+              credit: contract.total_amount as number,
+            },
+            {
+              account_code: "3000",
+              account_name: ACCOUNT_NAMES["3000"],
+              debit: contract.cash_subtotal as number,
+              credit: 0,
+            },
+            {
+              account_code: "3100",
+              account_name: ACCOUNT_NAMES["3100"],
+              debit: contract.finance_amount as number,
+              credit: 0,
+            },
+          ],
+          `إلغاء عقد تقسيط ${contract.contract_number as string}`,
+          "installment_contract_cancellation",
+          contractId,
+        );
+      } catch (e) {
+        console.warn(
+          "فشل ترحيل عكس الحركة المالية للعقد الملغى:",
+          e instanceof Error ? e.message : e,
+        );
+      }
+
+      try {
+        const { data: settlements, error: settlementsError } = await supabase
+          .from("partner_transactions")
+          .select("*")
+          .eq("related_contract_id", contractId)
+          .eq("type", "sale_settlement");
+        if (settlementsError) throw new Error(settlementsError.message);
+        if (settlements && settlements.length > 0) {
+          const { error: reversalError } = await supabase.from("partner_transactions").insert(
+            settlements.map((s) => ({
+              tenant_id: tenantId,
+              partner_id: s.partner_id as string,
+              type: "contract_cancellation",
+              amount: -(s.profit_amount as number),
+              cost_recovered: -(s.cost_recovered as number),
+              profit_amount: -(s.profit_amount as number),
+              reference: contract.contract_number as string,
+              reason: `إلغاء عقد تقسيط — عكس تسوية سابقة: ${reason.trim()}`,
+              related_contract_id: contractId,
+              ...(s.related_product_id
+                ? { related_product_id: s.related_product_id as string }
+                : {}),
+              user_id: actorUserId,
+            })),
+          );
+          if (reversalError) throw new Error(reversalError.message);
+        }
+      } catch (e) {
+        console.warn("فشل عكس تسوية الشركاء للعقد الملغى:", e instanceof Error ? e.message : e);
+      }
+
+      return contract as InstallmentContract;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["installments", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["installment_contracts", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["product_serials", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["inventory_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["treasury_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["journal_entries", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["partner_transactions", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
 /* ---------------- Suppliers / Purchasing (§60-§65) ----------------
  * Not yet converted: Treasury/Journal postings — a purchase here updates real stock+cost but
  * does not yet post a payable to the (still Mock) accounting ledger, same documented gap as
@@ -2390,13 +2636,17 @@ export function useCreateSupplier(tenantId: string | undefined) {
       actorUserId: string | null;
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
-      const code = await nextTenantCode("suppliers", tenantId, "SUP");
-      const { data, error } = await supabase
-        .from("suppliers")
-        .insert({ ...input, tenant_id: tenantId, code, active: true })
-        .select()
-        .single();
-      if (error) throw new Error(error.message);
+      const data = await insertWithGeneratedCode<Supplier>(
+        "suppliers",
+        tenantId,
+        "SUP",
+        (code) => ({
+          ...input,
+          tenant_id: tenantId,
+          code,
+          active: true,
+        }),
+      );
       await insertAuditLog({
         tenant_id: tenantId,
         user_id: actorUserId,
@@ -2920,19 +3170,13 @@ export function useCreatePartner(tenantId: string | undefined) {
       createdAt?: string;
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
-      const code = await nextTenantCode("partners", tenantId, "PTR");
-      const { data, error } = await supabase
-        .from("partners")
-        .insert({
-          ...input,
-          tenant_id: tenantId,
-          code,
-          active: true,
-          ...(createdAt ? { created_at: createdAt } : {}),
-        })
-        .select()
-        .single();
-      if (error) throw new Error(error.message);
+      const data = await insertWithGeneratedCode<Partner>("partners", tenantId, "PTR", (code) => ({
+        ...input,
+        tenant_id: tenantId,
+        code,
+        active: true,
+        ...(createdAt ? { created_at: createdAt } : {}),
+      }));
       await insertAuditLog({
         tenant_id: tenantId,
         user_id: actorUserId,

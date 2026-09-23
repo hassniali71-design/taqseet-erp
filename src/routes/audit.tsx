@@ -49,6 +49,7 @@ const ACTION_LABELS: Record<string, string> = {
   "promise_to_pay.record": "تسجيل وعد بالدفع",
   "installment_contract.settle_early": "تسوية مبكرة",
   "installment_contract.restructure": "إعادة هيكلة عقد",
+  "installment_contract.cancel": "إلغاء عقد تقسيط بالكامل",
   "supplier.create": "إضافة مورد",
   "supplier.update": "تعديل مورد",
   "purchase.create": "أمر شراء",

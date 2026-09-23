@@ -11,6 +11,7 @@ import {
   subscribeData,
 } from "@/lib/data-store";
 import {
+  useCancelInstallmentContract,
   useCollectPayment,
   useCurrentTenantSettings,
   useEarlySettleContract,
@@ -22,6 +23,7 @@ import {
   useRestructureContract,
   useRestructureEvents,
 } from "@/lib/supabase-queries";
+import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
 import type { InstallmentStatus, PromiseToPay } from "@/types";
 
@@ -77,8 +79,12 @@ function ContractDetailPage() {
   const [restructureDuration, setRestructureDuration] = useState("6");
   const [restructureReason, setRestructureReason] = useState("");
   const [restructureError, setRestructureError] = useState<string | null>(null);
+  const [showCancelForm, setShowCancelForm] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const { requestConfirm, dialog: passwordDialog } = useOwnerPasswordConfirm();
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -94,6 +100,7 @@ function ContractDetailPage() {
   const recordPromiseMutation = useRecordPromise(session?.tenant_id);
   const earlySettleMutation = useEarlySettleContract(session?.tenant_id);
   const restructureMutation = useRestructureContract(session?.tenant_id);
+  const cancelContractMutation = useCancelInstallmentContract(session?.tenant_id);
 
   if (!session) return null;
   const actorUserId = session.user_id;
@@ -138,6 +145,9 @@ function ContractDetailPage() {
     .filter((r) => r.contract_id === contractId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const canAct = contract.status !== "settled" && contract.status !== "settled_early";
+  /** إلغاء كامل مسموح بس على عقد نشط لسه معملوش عليه أي حاجة (مش متسوّى/متسوّى مبكر/معاد
+   * هيكلته) ولسه مفيش أي قسط اتحصّل عليه — أنضف سيناريو "زي إنه محصلش" فعليًا. */
+  const canCancel = contract.status === "active" && totalPaid === 0;
 
   function handleCollect() {
     setPayError(null);
@@ -236,6 +246,36 @@ function ContractDetailPage() {
     );
   }
 
+  async function handleCancelContract(event: FormEvent) {
+    event.preventDefault();
+    setCancelError(null);
+    if (!cancelReason.trim()) {
+      setCancelError("سبب الإلغاء مطلوب");
+      return;
+    }
+    if (
+      !window.confirm(
+        "إلغاء العقد ده بالكامل نهائيًا — هيرجع الجهاز للمخزون، وأي مبلغ اتحرّك في الخزينة أو مع شريك هيترجع. الإجراء ده مش هينعكس. متأكد؟",
+      )
+    ) {
+      return;
+    }
+    const confirmed = await requestConfirm();
+    if (!confirmed) return;
+    cancelContractMutation.mutate(
+      { contractId, reason: cancelReason, actorUserId },
+      {
+        onSuccess: () => {
+          setCancelReason("");
+          setShowCancelForm(false);
+          setActionSuccess("تم إلغاء العقد بالكامل — رجع المخزون والفلوس زي ما كانوا");
+          setTimeout(() => setActionSuccess(null), 4000);
+        },
+        onError: (e) => setCancelError(e instanceof Error ? e.message : "حدث خطأ"),
+      },
+    );
+  }
+
   return (
     <div className="flex min-h-screen bg-background">
       <AppSidebar session={session} />
@@ -276,6 +316,14 @@ function ContractDetailPage() {
                   تسجيل وعد بالدفع
                 </button>
               </>
+            )}
+            {canCancel && (
+              <button
+                onClick={() => setShowCancelForm((v) => !v)}
+                className="rounded-md border border-destructive/40 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10"
+              >
+                إلغاء العقد بالكامل
+              </button>
             )}
           </div>
         </div>
@@ -326,6 +374,44 @@ function ContractDetailPage() {
             {restructureError && (
               <p className="w-full text-sm text-destructive">{restructureError}</p>
             )}
+          </form>
+        )}
+
+        {showCancelForm && (
+          <form
+            onSubmit={(e) => void handleCancelContract(e)}
+            className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-destructive/40 bg-destructive/5 p-5 shadow-sm"
+          >
+            <div className="w-full space-y-1">
+              <p className="text-xs font-bold text-destructive">
+                إلغاء نهائي — هيرجع الجهاز للمخزون، وأي فلوس اتحرّكت (مقدّم أو تسوية شريك) هترجع زي
+                ما كانت. متاح بس لأن مفيش أي قسط اتحصّل عليه لحد دلوقتي.
+              </p>
+            </div>
+            <label className="block flex-1 space-y-1">
+              <span className="text-xs font-medium text-foreground">سبب الإلغاء *</span>
+              <input
+                required
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                className="form-input"
+                placeholder="مثال: اتسجّل بالغلط، العميل اتراجع قبل التسليم"
+              />
+            </label>
+            <button
+              type="submit"
+              className="rounded-md bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
+            >
+              تأكيد الإلغاء
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowCancelForm(false)}
+              className="rounded-md border border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
+            >
+              رجوع
+            </button>
+            {cancelError && <p className="w-full text-sm text-destructive">{cancelError}</p>}
           </form>
         )}
 
@@ -626,6 +712,7 @@ function ContractDetailPage() {
             </table>
           </div>
         </section>
+        {passwordDialog}
       </main>
     </div>
   );

@@ -8,4 +8,5 @@ export const CONTRACT_STATUS_LABEL: Record<InstallmentContract["status"], string
   restructured: "أُعيد هيكلته",
   settled: "مسدد بالكامل",
   settled_early: "تسوية مبكرة",
+  cancelled: "ملغى",
 };

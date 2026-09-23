@@ -357,7 +357,14 @@ export interface InstallmentContract {
   finance_amount: number;
   total_amount: number;
   installment_amount: number;
-  status: "active" | "partially_paid" | "overdue" | "restructured" | "settled" | "settled_early";
+  status:
+    | "active"
+    | "partially_paid"
+    | "overdue"
+    | "restructured"
+    | "settled"
+    | "settled_early"
+    | "cancelled";
   user_id: string | null;
   created_at: string;
 }
@@ -500,7 +507,13 @@ export interface PartnerTransaction {
   tenant_id: string;
   partner_id: string;
   type:
-    "funding" | "withdrawal" | "sale_settlement" | "adjustment" | "profit_payout" | "expense_share";
+    | "funding"
+    | "withdrawal"
+    | "sale_settlement"
+    | "adjustment"
+    | "profit_payout"
+    | "expense_share"
+    | "contract_cancellation";
   amount: number;
   cost_recovered: number;
   profit_amount: number;
