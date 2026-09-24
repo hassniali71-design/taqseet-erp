@@ -1,10 +1,10 @@
 /**
- * One-off admin utility: seed the "المتحده جروب" demo tenant with realistic, backdated
+ * One-off admin utility: seed the "المتحدة جروب" demo tenant with realistic, backdated
  * transaction history (products, customers, suppliers, partners, purchases, cash sales,
  * installment contracts + payments, expenses, treasury/accounting trail) — purely for a
  * demo/explainer video, not for any real customer's data.
  *
- * SAFETY: this script looks up the target tenant by the exact literal name "المتحده جروب" and
+ * SAFETY: this script looks up the target tenant by the exact literal name "المتحدة جروب" and
  * refuses to write anything unless exactly one tenant matches. It must never be pointed at any
  * other tenant (in particular the real operating client's tenant) — every insert below is
  * scoped to the single resolved `tenant_id`.
@@ -32,7 +32,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   process.exit(1);
 }
 
-const DEMO_TENANT_NAME = "المتحده جروب";
+const DEMO_TENANT_NAME = "المتحدة جروب";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 

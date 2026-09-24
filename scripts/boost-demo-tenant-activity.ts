@@ -1,6 +1,6 @@
 /**
  * One-off admin utility: layers a LOT more realistic day-to-day activity onto the already-seeded
- * "المتحده جروب" demo tenant — heavier, fairly-consistent volume across the last 5 months, PLUS a
+ * "المتحدة جروب" demo tenant — heavier, fairly-consistent volume across the last 5 months, PLUS a
  * full "today" worth of activity (fresh sales, an installment due today, an overdue installment
  * caught up today, a promise to pay, a same-day expense, a delivery in progress, partner funding
  * + a partner withdrawal, a return, and a stock adjustment) — so opening the app today shows a
@@ -12,7 +12,7 @@
  * base data yet (this script aborts with a clear error if it finds none).
  *
  * SAFETY: same hard gate as seed-demo-tenant.ts — resolves the tenant by the exact literal name
- * "المتحده جروب" and refuses to write anything unless exactly one tenant matches. Never touch
+ * "المتحدة جروب" and refuses to write anything unless exactly one tenant matches. Never touch
  * this script's tenant name to point it at any other tenant (in particular the real operating
  * client's tenant).
  *
@@ -36,7 +36,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   process.exit(1);
 }
 
-const DEMO_TENANT_NAME = "المتحده جروب";
+const DEMO_TENANT_NAME = "المتحدة جروب";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -1485,7 +1485,7 @@ async function main() {
   await boostToday(tenantId, ref, stock, treasury, unpaidContractIds);
 
   console.log("");
-  console.log('✅ تم بنجاح — تينانت "المتحده جروب" دلوقتي فيه حركة تشغيلية كثيفة وحديثة.');
+  console.log('✅ تم بنجاح — تينانت "المتحدة جروب" دلوقتي فيه حركة تشغيلية كثيفة وحديثة.');
   console.log("افتح /dashboard و/collections و/notifications بحساب هذا التينانت للتأكد بصريًا.");
 }
 
