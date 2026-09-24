@@ -416,22 +416,25 @@ async function insertAuditLog(entry: {
   if (error) console.warn(`audit log insert failed (${entry.action}):`, error.message);
 }
 
+/** Was `COUNT(*)`-based, which permanently breaks once any row for this tenant+entity is
+ * ever hard-deleted (row count under-counts the highest code already in use, so the same
+ * used code gets regenerated forever). `next_tenant_code_counter` (migration 0022) is a
+ * real per-tenant atomic sequence in its own table — immune to gaps from deletes, and
+ * immune to the two-tabs/double-click race by construction (Postgres serializes the
+ * upsert), not just by retrying after the fact. */
 async function nextTenantCode(table: string, tenantId: string, prefix: string) {
-  const { count, error } = await supabase
-    .from(table)
-    .select("*", { count: "exact", head: true })
-    .eq("tenant_id", tenantId);
+  const { data, error } = await supabase.rpc("next_tenant_code_counter", {
+    p_tenant_id: tenantId,
+    p_entity: table,
+  });
   if (error) throw new Error(error.message);
-  return `${prefix}-${String((count ?? 0) + 1).padStart(4, "0")}`;
+  return `${prefix}-${String(data as number).padStart(4, "0")}`;
 }
 
-/** `nextTenantCode` counts rows then inserts in two separate round trips — two concurrent
- * creates (two tabs, a double-click before the button disables, two cashiers) can both read the
- * same count and collide on the same generated code, hitting the table's `unique(tenant_id, code)`
- * constraint with a raw Postgres error surfaced straight to the user. This wraps that
- * count-then-insert in a bounded retry: on a unique-violation (23505) it just regenerates the
- * code (now one higher, since the other row has committed) and retries the insert — used by every
- * `useCreate*` mutation that calls `nextTenantCode` (customers, products, suppliers, partners). */
+/** The atomic counter behind `nextTenantCode` can't collide on its own, so this retry is
+ * just defense-in-depth for anything unexpected (e.g. a manually inserted row reusing a
+ * code) — used by every `useCreate*` mutation that calls `nextTenantCode` (customers,
+ * products, suppliers, partners). */
 async function insertWithGeneratedCode<T>(
   table: string,
   tenantId: string,
@@ -443,7 +446,10 @@ async function insertWithGeneratedCode<T>(
     const code = await nextTenantCode(table, tenantId, prefix);
     const { data, error } = await supabase.from(table).insert(buildRow(code)).select().single();
     if (!error) return data as T;
-    if (error.code !== "23505" || attempt === maxAttempts) throw new Error(error.message);
+    if (error.code !== "23505") throw new Error(error.message);
+    if (attempt === maxAttempts) {
+      throw new Error("تعذّر إنشاء كود فريد بعد عدة محاولات — حاول تاني");
+    }
   }
   throw new Error("تعذّر إنشاء كود فريد بعد عدة محاولات — حاول تاني");
 }
