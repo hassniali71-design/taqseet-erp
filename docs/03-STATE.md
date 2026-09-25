@@ -1,6 +1,8 @@
 # الحالة الحقيقية دلوقتي — المرجع الوحيد "وصلنا لفين"
 
-**آخر بند: 56.** كل الوحدات متصلة بـSupabase حقيقي — مفيش Mock/localStorage في أي مسار بيانات حي.
+**آخر بند: 58** (بند 58: السبب الحقيقي لاختفاء نص كروت `LabeledValue` عند الزوم —
+`min-width:0` التلقائي لعناصر Grid/Flex بـ`overflow-hidden`، اتصلح بـ`min-w-fit`).
+كل الوحدات متصلة بـSupabase حقيقي — مفيش Mock/localStorage في أي مسار بيانات حي.
 `src/lib/data-store.ts` القديم بقى Legacy (مش مصدر بيانات فعلي) — أي كود جديد يتبع نمط
 `src/lib/supabase-queries.ts` (useTenantList / insertAuditLog / nextTenantCode أو
 insertWithGeneratedCode / mutations) — ده النمط المعتمد الوحيد.
