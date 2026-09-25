@@ -133,8 +133,8 @@ function ContractDetailPage() {
     .filter((i) => i.contract_id === contractId)
     .sort((a, b) => a.seq - b.seq);
 
-  const totalPaid = installments.reduce((sum, i) => sum + i.paid_amount, 0);
-  const remaining = Math.max(0, contract.total_amount - totalPaid);
+  const totalPaid = installments.reduce((sum, i) => sum + (i.paid_amount ?? 0), 0);
+  const remaining = Math.max(0, (contract.total_amount ?? 0) - totalPaid);
   const payments = allPayments
     .filter((p) => p.contract_id === contractId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -471,17 +471,17 @@ function ContractDetailPage() {
         <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <LabeledValue
             label="قيمة البضاعة"
-            value={`${contract.cash_subtotal.toLocaleString("ar-EG")} ج.م`}
+            value={`${(contract.cash_subtotal ?? 0).toLocaleString("ar-EG")} ج.م`}
             valueDir="ltr"
           />
           <LabeledValue
             label="المقدّم"
-            value={`${contract.down_payment.toLocaleString("ar-EG")} ج.م`}
+            value={`${(contract.down_payment ?? 0).toLocaleString("ar-EG")} ج.م`}
             valueDir="ltr"
           />
           <LabeledValue
             label={`الخطة (${contract.plan_duration_months} شهر @ ${contract.plan_rate_pct}%)`}
-            value={`${contract.total_amount.toLocaleString("ar-EG")} ج.م`}
+            value={`${(contract.total_amount ?? 0).toLocaleString("ar-EG")} ج.م`}
             valueDir="ltr"
           />
           <LabeledValue
@@ -504,7 +504,7 @@ function ContractDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {contract.items.map((item, i) => (
+                {(contract.items ?? []).map((item, i) => (
                   <tr key={i} className="border-b border-border last:border-0">
                     <td className="px-4 py-3 font-medium text-foreground">{item.product_name}</td>
                     <td className="px-4 py-3 text-muted-foreground" dir="ltr">
@@ -514,7 +514,7 @@ function ContractDetailPage() {
                       {item.quantity}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground" dir="ltr">
-                      {item.unit_price.toLocaleString("ar-EG")}
+                      {(item.unit_price ?? 0).toLocaleString("ar-EG")}
                     </td>
                   </tr>
                 ))}
@@ -572,7 +572,7 @@ function ContractDetailPage() {
                         {payment.receipt_number}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground" dir="ltr">
-                        {payment.amount.toLocaleString("ar-EG")} ج.م
+                        {(payment.amount ?? 0).toLocaleString("ar-EG")} ج.م
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
                         {new Date(payment.created_at).toLocaleString("ar-EG")}
@@ -607,7 +607,7 @@ function ContractDetailPage() {
                           {new Date(promise.promise_date).toLocaleDateString("ar-EG")}
                         </td>
                         <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
-                          {promise.expected_amount.toLocaleString("ar-EG")} ج.م
+                          {(promise.expected_amount ?? 0).toLocaleString("ar-EG")} ج.م
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">{promise.notes ?? "—"}</td>
                         <td className="px-4 py-3">
@@ -646,7 +646,7 @@ function ContractDetailPage() {
                         {new Date(event.created_at).toLocaleString("ar-EG")}
                       </td>
                       <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
-                        {event.remaining_amount.toLocaleString("ar-EG")} ج.م
+                        {(event.remaining_amount ?? 0).toLocaleString("ar-EG")} ج.م
                       </td>
                       <td className="px-4 py-3 text-muted-foreground" dir="ltr">
                         {event.new_duration_months} شهر
@@ -690,10 +690,10 @@ function ContractDetailPage() {
                         {new Date(installment.due_date).toLocaleDateString("ar-EG")}
                       </td>
                       <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
-                        {installment.amount.toLocaleString("ar-EG")}
+                        {(installment.amount ?? 0).toLocaleString("ar-EG")}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground" dir="ltr">
-                        {installment.paid_amount.toLocaleString("ar-EG")}
+                        {(installment.paid_amount ?? 0).toLocaleString("ar-EG")}
                       </td>
                       <td className="px-4 py-3">
                         <span
