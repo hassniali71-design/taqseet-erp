@@ -1,8 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { ArrowDownCircle, ArrowUpCircle, Wallet } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import { LabeledValue } from "@/components/ui/LabeledValue";
+import { StatCard } from "@/components/ui/StatCard";
+import { TreasuryGuide } from "@/components/ui/TreasuryGuide";
 import { subscribeData } from "@/lib/data-store";
 import { matchesSearch } from "@/lib/text-filter";
 import {
@@ -248,6 +251,20 @@ function TreasuryPage() {
     (sum, a) => sum + computeAccountBalance(a.id, allMovements),
     0,
   );
+  // مُشتقّة من نفس movements المجلوبة بالفعل — صفر استعلام جديد وصفر منطق مالي جديد، مجرد
+  // تجميع عرضي زي totalSpent تحت. الإشارة في amount نفسها هي مصدر الحقيقة (موجب=دخول،
+  // سالب=خروج)، فمفيش داعي لجدول اتجاه لكل نوع حركة. مقصورة على حركات الخزائن النشطة فقط
+  // (نفس نطاق currentTreasuryBalance بالظبط) — عشان "الداخل − الخارج = الرصيد الحالي" يفضل
+  // صحيح حسابيًا حتى لو فيه خزينة اتوقفت وليها تاريخ حركات قديم.
+  const activeAccountIds = new Set(accounts.map((a) => a.id));
+  const activeMovements = allMovements.filter((m) => activeAccountIds.has(m.account_id));
+  const totalInflow = activeMovements
+    .filter((m) => m.amount > 0)
+    .reduce((sum, m) => sum + m.amount, 0);
+  const totalOutflow = activeMovements
+    .filter((m) => m.amount < 0)
+    .reduce((sum, m) => sum + Math.abs(m.amount), 0);
+  const netMovement = Math.round((totalInflow - totalOutflow) * 100) / 100;
   // أرصدة الشركاء الفعلية (مش بس التمويل) — مجموع كل amount في دفترهم عبر كل الأنواع
   // (تمويل/سحب/تسوية صفقة/صرف أرباح/نصيب مصروف)، بالظبط زي computePartnerBalance لكل شريك
   // على حدة، مجمّعة هنا لكل الشركاء مع بعض. معلومة بس — لا تُستخدم في أي منطق مالي، فقط
@@ -277,8 +294,7 @@ function TreasuryPage() {
           <div>
             <h1 className="text-2xl font-bold text-foreground">الخزينة</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              الرصيد هنا محسوب دائمًا من مجموع الحركات، مش رقم مخزّن لوحده. وردية الكاشير لازم سبب
-              موثّق لأي فرق عند الإقفال.
+              الرصيد محسوب دائمًا من مجموع الحركات الفعلية، مش رقم مخزّن لوحده.
             </p>
           </div>
           {!showAccountForm && (
@@ -355,51 +371,41 @@ function TreasuryPage() {
           </p>
         )}
 
-        <section className="mt-6 rounded-xl border border-border bg-card p-4">
-          <h2 className="text-sm font-bold text-foreground">إزاي الخزينة شغالة؟</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            المصدر الرئيسي للتمويل والشراء هو{" "}
-            <Link to="/partners" className="font-bold text-primary hover:underline">
-              الشركاء
-            </Link>
-            — مش الخزينة. الخزينة دفتر منفصل تمامًا لحركة الكاش الفعلية (مبيعات، تحصيل، مصروفات،
-            دفعات موردين، تحويلات).
-          </p>
-          <div className="mt-2 grid grid-cols-1 gap-3 text-sm text-muted-foreground sm:grid-cols-2">
-            <div>
-              <p className="font-bold text-success">بتاخد فلوس (بتزيد) لما:</p>
-              <ul className="mt-1 list-inside list-disc space-y-0.5">
-                <li>تسجّل بيع نقدي</li>
-                <li>تحصّل قسط من عميل</li>
-                <li>تاخد مقدّم عند فتح عقد تقسيط</li>
-                <li>مورد يرجّعلك فلوس (مرتجع/استبدال)</li>
-              </ul>
-            </div>
-            <div>
-              <p className="font-bold text-destructive">بتطلع منها فلوس (بتقل) لما:</p>
-              <ul className="mt-1 list-inside list-disc space-y-0.5">
-                <li>تدفع لمورد (شراء بضاعة أو دفعة من الحساب)</li>
-                <li>تسجّل مصروف مُحمَّل على خزينة (مش على شركاء)</li>
-                <li>تصرف أرباح لشريك (من صفحته)</li>
-                <li>تحوّل جزء من الكاشير لخزينة تانية وقت إقفال الوردية</li>
-              </ul>
-            </div>
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            تمويل الشركاء وشراء البضاعة منهم، وأرباحهم من كل صفقة، بتتسجل بالكامل في دفترهم الخاص
-            بصفحة{" "}
-            <Link to="/partners" className="text-primary hover:underline">
-              الشركاء
-            </Link>{" "}
-            — لا الشراء ولا التمويل بيلمس حركة الخزينة هنا إطلاقًا (إلا "صرف الأرباح" تحديدًا، اللي
-            بيتسجل كخصم حقيقي من خزينة تختارها). ممكن كمان تحمّل مصروف على الشركاء بدل الخزينة من
-            صفحة{" "}
-            <Link to="/expenses" className="text-primary hover:underline">
-              المصروفات
-            </Link>
-            . كارت "الإجمالي الكلي" فوق بيجمع الدفترين للمعرفة بس — يفضلوا منفصلين فعليًا.
-          </p>
-        </section>
+        <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <StatCard
+            label="رصيد الخزينة الآن"
+            value={`${currentTreasuryBalance.toLocaleString("ar-EG")} ج.م`}
+            valueDir="ltr"
+            tone="primary"
+            icon={Wallet}
+          />
+          <StatCard
+            label="إجمالي الداخل (كل الأوقات)"
+            value={`${totalInflow.toLocaleString("ar-EG")} ج.م`}
+            valueDir="ltr"
+            tone="success"
+            icon={ArrowUpCircle}
+          />
+          <StatCard
+            label="إجمالي الخارج (كل الأوقات)"
+            value={`${totalOutflow.toLocaleString("ar-EG")} ج.م`}
+            valueDir="ltr"
+            tone="danger"
+            icon={ArrowDownCircle}
+          />
+          <StatCard
+            label="صافي الحركة"
+            value={`${netMovement.toLocaleString("ar-EG")} ج.م`}
+            valueDir="ltr"
+            tone={netMovement >= 0 ? "success" : "danger"}
+            icon={netMovement >= 0 ? ArrowUpCircle : ArrowDownCircle}
+            sub="الداخل − الخارج = الرصيد الحالي"
+          />
+        </div>
+
+        <div className="mt-6">
+          <TreasuryGuide />
+        </div>
 
         <section className="mt-6">
           <h2 className="text-sm font-bold text-foreground">نظرة عامة (كل الأوقات)</h2>
@@ -416,42 +422,33 @@ function TreasuryPage() {
               منفصلين تمامًا فعليًا، مش رصيد واحد تقدر تصرف منه مباشرة.
             </p>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-6">
-            <LabeledValue
-              label="رصيد الخزينة الآن"
-              value={`${currentTreasuryBalance.toLocaleString("ar-EG")} ج.م`}
-              valueDir="ltr"
-              tone="primary"
-            />
+          <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-3">
             <Link to="/partners" className="block">
-              <LabeledValue
+              <StatCard
                 label="إجمالي تمويل الشركاء"
                 value={`${totalPartnerFunding.toLocaleString("ar-EG")} ج.م`}
                 valueDir="ltr"
+                sub="فتح صفحة الشركاء ←"
               />
-              <p className="mt-1 text-[11px] font-bold text-primary">فتح صفحة الشركاء ←</p>
             </Link>
-            <LabeledValue
+            <StatCard
               label="بعنا بكام (كاش + تقسيط)"
               value={`${totalSold.toLocaleString("ar-EG")} ج.م`}
               valueDir="ltr"
             />
-            <LabeledValue
+            <StatCard
               label="صرفنا كام من الخزينة (موردين + مصروفات)"
               value={`${totalSpent.toLocaleString("ar-EG")} ج.م`}
               valueDir="ltr"
+              tone="danger"
             />
-            <div>
-              <LabeledValue
-                label="منصرف عن طريق الشركاء (مش من الخزينة)"
-                value={`${totalSpentViaPartners.toLocaleString("ar-EG")} ج.م`}
-                valueDir="ltr"
-              />
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                تكلفة أجهزة ومصروفات موّلها شركاء — اتخصمت من دفترهم، مش من رصيد الخزينة فوق.
-              </p>
-            </div>
-            <LabeledValue
+            <StatCard
+              label="منصرف عن طريق الشركاء (مش من الخزينة)"
+              value={`${totalSpentViaPartners.toLocaleString("ar-EG")} ج.م`}
+              valueDir="ltr"
+              sub="تكلفة أجهزة ومصروفات موّلها شركاء — من دفترهم، مش من الخزينة"
+            />
+            <StatCard
               label="كسبنا كام (صافي الربح)"
               value={`${totalEarned.toLocaleString("ar-EG")} ج.م`}
               valueDir="ltr"
@@ -460,30 +457,35 @@ function TreasuryPage() {
           </div>
         </section>
 
-        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {accounts.map((account) => (
-            <LabeledValue
-              key={account.id}
-              label={`${account.name} (${ACCOUNT_KIND_LABELS[account.kind]})`}
-              value={`${computeAccountBalance(account.id, allMovements).toLocaleString("ar-EG")} ج.م`}
-              valueDir="ltr"
-            />
-          ))}
-        </div>
+        {accounts.length > 0 && (
+          <section className="mt-6">
+            <h2 className="text-sm font-bold text-foreground">أرصدة الحسابات</h2>
+            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {accounts.map((account) => (
+                <LabeledValue
+                  key={account.id}
+                  label={`${account.name} (${ACCOUNT_KIND_LABELS[account.kind]})`}
+                  value={`${computeAccountBalance(account.id, allMovements).toLocaleString("ar-EG")} ج.م`}
+                  valueDir="ltr"
+                />
+              ))}
+            </div>
+          </section>
+        )}
 
-        <section className="mt-8 rounded-xl border border-border bg-card p-5 shadow-sm">
+        <section className="mt-8 rounded-2xl border-2 border-border bg-card p-5 shadow-sm">
           <h2 className="text-sm font-bold text-foreground">الإقفال اليومي (عرض فقط)</h2>
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
-            <Stat label="مبيعات اليوم" value={todaySales} />
-            <Stat label="تحصيلات اليوم" value={todayCollections} />
-            <Stat label="دفعات موردين" value={-todayPurchasePayments} />
-            <Stat label="مصروفات اليوم" value={-todayExpenses} />
-            <Stat label="الصافي" value={todayNet} highlight />
+            <Stat label="مبيعات اليوم" value={todaySales} direction="in" />
+            <Stat label="تحصيلات اليوم" value={todayCollections} direction="in" />
+            <Stat label="دفعات موردين" value={-todayPurchasePayments} direction="out" />
+            <Stat label="مصروفات اليوم" value={-todayExpenses} direction="out" />
+            <Stat label="الصافي" value={todayNet} direction="auto" />
           </div>
         </section>
 
         {cashierAccount && (
-          <section className="mt-8 rounded-xl border border-border bg-card p-5 shadow-sm">
+          <section className="mt-8 rounded-2xl border-2 border-border bg-card p-5 shadow-sm">
             <h2 className="text-sm font-bold text-foreground">وردية الكاشير</h2>
             {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
 
@@ -759,13 +761,25 @@ function TreasuryPage() {
   );
 }
 
-function Stat({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
+/** `direction="in"/"out"` للمؤشرات اللي اتجاهها ثابت (مبيعات دايمًا دخول، دفعات موردين دايمًا
+ * خروج). `"auto"` للصافي — بيتلوّن حسب إشارة القيمة نفسها، مش لون ثابت. */
+function Stat({
+  label,
+  value,
+  direction,
+}: {
+  label: string;
+  value: number;
+  direction: "in" | "out" | "auto";
+}) {
+  const isInflow = direction === "auto" ? value >= 0 : direction === "in";
   return (
     <LabeledValue
       label={label}
       value={`${value.toLocaleString("ar-EG")} ج.م`}
       valueDir="ltr"
-      tone={highlight ? "primary" : "default"}
+      tone={isInflow ? "success" : "danger"}
+      icon={isInflow ? ArrowUpCircle : ArrowDownCircle}
     />
   );
 }
