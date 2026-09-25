@@ -15,7 +15,15 @@ const TONE_VALUE: Record<Tone, string> = {
  * المتكرر في صفحات زي الشركاء/الخزينة/المصروفات. الوصف بلون كحلي (هوية HESBA — نفس `#1b2a41`
  * المُستخدَم لكروت `StatCard` tone="navy") بدل الرمادي الافتراضي، ويلف على أكتر من سطر لو طويل
  * (الخانة بتكبر في الطول مش بتتقص)، والرقم بارز جنبه مش تحته. `icon` اختياري — شارة صغيرة
- * (زي ↑/↓ لاتجاه حركة الخزينة) تتلوّن بنفس لون الـtone، بدل ما كل مستخدِم يضيف أيقونته يدويًا. */
+ * (زي ↑/↓ لاتجاه حركة الخزينة) تتلوّن بنفس لون الـtone، بدل ما كل مستخدِم يضيف أيقونته يدويًا.
+ *
+ * `min-w-fit` على الغلاف الخارجي مش تجميلي — ده الإصلاح الحقيقي لباگ "النص بيختفي عند الزوم":
+ * أي عنصر Grid/Flex عنده `overflow` غير `visible` (زي `overflow-hidden` هنا، لازم يفضل عشان
+ * يقص زوايا الخانتين الملوّنتين على استدارة الكارت) بييجي افتراضيًا بـ`min-width: 0` مش
+ * `min-width: auto` — يعني أي Grid أبوه (زي شبكة كروت الإقفال اليومي) كان يقدر يضغطه لعرض شبه
+ * صفري وقت الزوم، وبما إنه overflow-hidden، أي حاجة جوّاه كانت بتتقص/تختفي بصمت. `min-w-fit`
+ * بيرجّع الحد الأدنى الطبيعي (حسب المحتوى) فيمنع الانضغاط الصفري ده، من غير ما يشيل خاصية
+ * القص نفسها. */
 export function LabeledValue({
   label,
   value,
@@ -30,7 +38,7 @@ export function LabeledValue({
   icon?: LucideIcon;
 }) {
   return (
-    <div className="flex overflow-hidden rounded-xl border-2 border-border">
+    <div className="flex min-w-fit overflow-hidden rounded-xl border-2 border-border">
       <div className="min-w-0 flex-1 border-l-2 border-border bg-muted/30 px-3 py-2.5">
         <p className="text-xs font-extrabold leading-snug text-[#1b2a41]">{label}</p>
       </div>
