@@ -1,7 +1,8 @@
 # قواعد صارمة غير قابلة للتفاوض - ملخص §133 (التفاصيل في Spec)
 
-1. لا وصول عبر Tenants ابدا. RLS الزامية بمجرد ربط Supabase.
-2. Server-side authorization الزامي - لا Business Logic حساس في Frontend فقط.
+1. لا وصول عبر Tenants ابدا. RLS مفعّلة وفعليًا شغالة على كل الجداول (مش "بمجرد ربط" — متصلة بالفعل).
+2. Server-side authorization الزامي لأي دالة سيرفر بتستخدم service role — `resolveServerCaller`
+   (بند 53)، مش `tenantId`/`actorUserId` جاي من العميل بلا تحقق.
 3. لا Hard Delete لأي عملية حساسة (بيع/تحصيل/تقسيط/مخزون/محاسبة) - فقط Cancel/Reverse/Adjustment/Archive/Deactivate.
 4. لا تعديل مباشر لرصيد عميل - فقط عبر Financial Adjustment مسجل.
 5. لا تعديل صامت للمخزون - كل تغيير كمية = Movement مسجل.

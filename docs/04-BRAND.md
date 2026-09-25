@@ -19,6 +19,9 @@
 
 **الخط:** @fontsource - Changa (شعار)، Cairo (h1..h4 تلقائي)، Almarai (ارقام)، Tajawal 700/800 (جسم). لا تضف مكتبة جديدة.
 
-**كروت/شارتس:** StatCard/Panel/LinkCard و Charts.tsx (recharts بالوان الهوية) - مطبقين على /dashboard و /platform. باقي الصفحات لسه قديم.
+**كروت/شارتس:** StatCard/Panel/LinkCard (`src/components/ui/StatCard.tsx`)، LabeledValue
+(`src/components/ui/LabeledValue.tsx`، وصف/رقم أفقي بـtone success/danger + icon اختياري)،
+و Charts.tsx (recharts بألوان الهوية) — مطبّقين على /dashboard, /platform, /treasury. باقي الصفحات
+لسه فيها نمط قديم (`<p>وصف</p><p>رقم</p>` يدوي) يُستحسن توحيده تدريجيًا مش كتلة واحدة.
 
 **جداول كبيرة:** max-h-[26rem] overflow-y-auto + thead sticky top-0 - ثابت لأي جدول جديد.
