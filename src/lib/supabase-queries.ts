@@ -1180,15 +1180,21 @@ export function useSales(tenantId: string | undefined) {
   return useTenantList<Sale>("sales", tenantId, { orderBy: "created_at", ascending: false });
 }
 
+/** Was `COUNT(*)` + year-prefix `ilike`, same non-atomic pattern as the old `nextTenantCode`
+ * (migration 0022) — not currently exploitable here (no single-row hard delete exists for
+ * `sales`), but a real concurrent-request collision under normal traffic (two cashiers ringing
+ * up a sale in the same instant), and fragile the moment any single-row delete is ever added.
+ * These document numbers reset every calendar year (`INV-YYYY-NNNNNN`), so the counter key is
+ * `sales:<year>` — a brand-new year starts a fresh atomic sequence at 1, same as a brand-new
+ * tenant would (migration 0024). */
 async function nextInvoiceNumber(tenantId: string) {
-  const prefix = `INV-${new Date().getFullYear()}-`;
-  const { count, error } = await supabase
-    .from("sales")
-    .select("*", { count: "exact", head: true })
-    .eq("tenant_id", tenantId)
-    .ilike("invoice_number", `${prefix}%`);
+  const year = new Date().getFullYear();
+  const { data, error } = await supabase.rpc("next_tenant_code_counter", {
+    p_tenant_id: tenantId,
+    p_entity: `sales:${year}`,
+  });
   if (error) throw new Error(error.message);
-  return `${prefix}${String((count ?? 0) + 1).padStart(6, "0")}`;
+  return `INV-${year}-${String(data as number).padStart(6, "0")}`;
 }
 
 export interface CreateSaleInput {
@@ -1661,20 +1667,17 @@ export function computeCustomerRiskAssessment(
   return { level, label: RISK_LEVEL_LABEL_AR[level], reasons };
 }
 
-async function nextInstallmentDocNumber(
-  table: string,
-  column: string,
-  tenantId: string,
-  prefix: string,
-) {
-  const yearPrefix = `${prefix}-${new Date().getFullYear()}-`;
-  const { count, error } = await supabase
-    .from(table)
-    .select("*", { count: "exact", head: true })
-    .eq("tenant_id", tenantId)
-    .ilike(column, `${yearPrefix}%`);
+/** Same fix as `nextInvoiceNumber` above, shared by every other year-prefixed document number
+ * (contracts, receipts, purchases, returns, exchanges, journal entries) — atomic per
+ * `<table>:<year>` counter instead of `COUNT(*)` + `ilike`. */
+async function nextInstallmentDocNumber(table: string, tenantId: string, prefix: string) {
+  const year = new Date().getFullYear();
+  const { data, error } = await supabase.rpc("next_tenant_code_counter", {
+    p_tenant_id: tenantId,
+    p_entity: `${table}:${year}`,
+  });
   if (error) throw new Error(error.message);
-  return `${yearPrefix}${String((count ?? 0) + 1).padStart(6, "0")}`;
+  return `${prefix}-${year}-${String(data as number).padStart(6, "0")}`;
 }
 
 export interface CreateInstallmentContractInput {
@@ -1836,7 +1839,6 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
       );
       const contract_number = await nextInstallmentDocNumber(
         "installment_contracts",
-        "contract_number",
         tenantId,
         "CNT",
       );
@@ -2042,12 +2044,7 @@ async function performCollectPayment(
     remaining = Math.round((remaining - apply) * 100) / 100;
   }
 
-  const receipt_number = await nextInstallmentDocNumber(
-    "installment_payments",
-    "receipt_number",
-    tenantId,
-    "RCT",
-  );
+  const receipt_number = await nextInstallmentDocNumber("installment_payments", tenantId, "RCT");
   const { data: payment, error: paymentError } = await supabase
     .from("installment_payments")
     .insert({
@@ -2842,12 +2839,7 @@ export function useCreatePurchase(tenantId: string | undefined) {
         throw new Error(`الدفعة الفورية أكبر من إجمالي أمر الشراء (${total} ج.م)`);
       }
 
-      const purchase_number = await nextInstallmentDocNumber(
-        "purchases",
-        "purchase_number",
-        tenantId,
-        "PUR",
-      );
+      const purchase_number = await nextInstallmentDocNumber("purchases", tenantId, "PUR");
 
       // Every line already validated above, so applying effects here can't fail partway
       // through — same discipline as data-store.ts's createPurchase.
@@ -3755,7 +3747,7 @@ async function performPostTreasuryMovement(
 }
 
 async function nextJournalEntryNumber(tenantId: string) {
-  return nextInstallmentDocNumber("journal_entries", "entry_number", tenantId, "JE");
+  return nextInstallmentDocNumber("journal_entries", tenantId, "JE");
 }
 
 /** The only place a JournalEntry is ever created — mirrors data-store.ts's postJournalEntry,
@@ -4373,12 +4365,7 @@ export function useCreateReturn(tenantId: string | undefined) {
 
       const refund_amount =
         Math.round(returnItems.reduce((sum, i) => sum + i.line_total, 0) * 100) / 100;
-      const return_number = await nextInstallmentDocNumber(
-        "sale_returns",
-        "return_number",
-        tenantId,
-        "RET",
-      );
+      const return_number = await nextInstallmentDocNumber("sale_returns", tenantId, "RET");
 
       if (serialIdsToInspect.size > 0) {
         const { error: updateSerialsError } = await supabase
@@ -4680,7 +4667,6 @@ export function useCreateExchange(tenantId: string | undefined) {
       const price_difference = Math.round((newValue - returnedValue) * 100) / 100;
       const exchange_number = await nextInstallmentDocNumber(
         "exchange_transactions",
-        "exchange_number",
         tenantId,
         "EXC",
       );
