@@ -46,7 +46,7 @@ const TONE_TEXT: Record<Tone, { label: string; value: string; sub: string; cta: 
   },
   success: {
     label: "text-muted-foreground",
-    value: "text-foreground",
+    value: "text-success",
     sub: "text-muted-foreground",
     cta: "text-primary",
   },
@@ -58,7 +58,7 @@ const TONE_TEXT: Record<Tone, { label: string; value: string; sub: string; cta: 
   },
   danger: {
     label: "text-muted-foreground",
-    value: "text-foreground",
+    value: "text-destructive",
     sub: "text-muted-foreground",
     cta: "text-primary",
   },
