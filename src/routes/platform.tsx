@@ -29,6 +29,7 @@ import {
   setTenantStatusServer,
   type ProvisionTenantResult,
 } from "@/lib/platform-server";
+import { getAccessToken } from "@/lib/supabase-client";
 import { sendCredentialsServer } from "@/lib/twilio-server";
 import type { Tenant, TenantStatus } from "@/types";
 
@@ -81,54 +82,48 @@ function PlatformControlRoom() {
 
   const { data: tenants = [], isLoading: tenantsLoading } = useQuery({
     queryKey: ["managed-tenants"],
-    queryFn: () => fetchManagedTenants(),
+    queryFn: async () => fetchManagedTenants({ data: { accessToken: await getAccessToken() } }),
     enabled: Boolean(currentUser?.is_platform_owner),
   });
 
   const { data: storageUsage = [] } = useQuery({
     queryKey: ["tenant-storage-usage"],
-    queryFn: () => fetchTenantStorageUsage({ data: {} }),
+    queryFn: async () => fetchTenantStorageUsage({ data: { accessToken: await getAccessToken() } }),
     enabled: Boolean(currentUser?.is_platform_owner),
   });
   const storageByTenant = new Map(storageUsage.map((u) => [u.tenantId, u.formatted]));
 
   const setTenantStatusMutation = useMutation({
-    mutationFn: (vars: {
-      tenantId: string;
-      status: TenantStatus;
-      actorUserId: string | null;
-      reason: string;
-    }) => setTenantStatusServer({ data: vars }),
+    mutationFn: async (vars: { tenantId: string; status: TenantStatus; reason: string }) =>
+      setTenantStatusServer({ data: { ...vars, accessToken: await getAccessToken() } }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["managed-tenants"] }),
     onError: (e) => toast.error(e instanceof Error ? e.message : "حدث خطأ"),
   });
 
   const extendSubscriptionMutation = useMutation({
-    mutationFn: (vars: { tenantId: string; days: number; actorUserId: string | null }) =>
-      extendTenantSubscriptionServer({ data: vars }),
+    mutationFn: async (vars: { tenantId: string; days: number }) =>
+      extendTenantSubscriptionServer({ data: { ...vars, accessToken: await getAccessToken() } }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["managed-tenants"] }),
     onError: (e) => toast.error(e instanceof Error ? e.message : "حدث خطأ"),
   });
 
   const recordSupportAccessMutation = useMutation({
-    mutationFn: (vars: {
+    mutationFn: async (vars: {
       tenantId: string;
-      userId: string | null;
       action: string;
       entity: string;
       entityId: string | null;
       reason: string;
-    }) => recordCrossTenantAudit({ data: vars }),
+    }) => recordCrossTenantAudit({ data: { ...vars, accessToken: await getAccessToken() } }),
   });
 
   const provisionTenantMutation = useMutation({
-    mutationFn: (vars: {
+    mutationFn: async (vars: {
       name: string;
       owner_name: string;
       phone: string;
       owner_email: string;
-      actorUserId: string | null;
-    }) => provisionTenantServer({ data: vars }),
+    }) => provisionTenantServer({ data: { ...vars, accessToken: await getAccessToken() } }),
     onSuccess: (result) => {
       setJustCreated(result);
       setForm({ name: "", owner_name: "", phone: "", owner_email: "" });
@@ -140,14 +135,14 @@ function PlatformControlRoom() {
   });
 
   const sendCredentialsMutation = useMutation({
-    mutationFn: (vars: {
+    mutationFn: async (vars: {
       tenantId: string;
       userId: string;
       phone: string;
       email: string;
       password: string;
       channel: "sms" | "whatsapp";
-    }) => sendCredentialsServer({ data: vars }),
+    }) => sendCredentialsServer({ data: { ...vars, accessToken: await getAccessToken() } }),
     onSuccess: (r) => toast.success(r.skipped ? "تم الإرسال مسبقًا اليوم" : "تم الإرسال"),
     onError: (e) => toast.error(e instanceof Error ? e.message : "تعذّر الإرسال"),
   });
@@ -163,7 +158,7 @@ function PlatformControlRoom() {
 
   function handleCreate(event: FormEvent) {
     event.preventDefault();
-    provisionTenantMutation.mutate({ ...form, actorUserId: session?.user_id ?? null });
+    provisionTenantMutation.mutate(form);
   }
 
   function copyCredentials(result: ProvisionTenantResult) {
@@ -181,7 +176,6 @@ function PlatformControlRoom() {
     recordSupportAccessMutation.mutate(
       {
         tenantId,
-        userId: session?.user_id ?? null,
         action: "support_access.use",
         entity: "tenant",
         entityId: tenantId,
@@ -487,7 +481,6 @@ function PlatformControlRoom() {
                                   {
                                     tenantId: tenant.id,
                                     status: "active",
-                                    actorUserId: session?.user_id ?? null,
                                     reason: "إعادة تفعيل من غرفة تحكم المنصة",
                                   },
                                   { onSuccess: () => toast.success("تم تفعيل المحل") },
@@ -506,7 +499,6 @@ function PlatformControlRoom() {
                                   {
                                     tenantId: tenant.id,
                                     status: "suspended",
-                                    actorUserId: session?.user_id ?? null,
                                     reason: "تعليق من غرفة تحكم المنصة",
                                   },
                                   { onSuccess: () => toast.success("تم تعليق المحل") },
@@ -525,7 +517,6 @@ function PlatformControlRoom() {
                                 {
                                   tenantId: tenant.id,
                                   days: 30,
-                                  actorUserId: session?.user_id ?? null,
                                 },
                                 { onSuccess: () => toast.success("تم تمديد الاشتراك ٣٠ يوم") },
                               );

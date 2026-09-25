@@ -19,6 +19,7 @@ import {
   useUpdateTenantSettings,
 } from "@/lib/supabase-queries";
 import { exportTenantDataCsv } from "@/lib/export-data";
+import { getAccessToken } from "@/lib/supabase-client";
 import { resetTenantDataServer } from "@/lib/reset-tenant-data-server";
 import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
@@ -68,8 +69,8 @@ function SettingsPage() {
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetDone, setResetDone] = useState(false);
   const resetTenantDataMutation = useMutation({
-    mutationFn: (vars: { tenantId: string; actorUserId: string | null }) =>
-      resetTenantDataServer({ data: vars }),
+    mutationFn: async (vars: { tenantId: string }) =>
+      resetTenantDataServer({ data: { ...vars, accessToken: await getAccessToken() } }),
   });
   const updateSettingsMutation = useUpdateTenantSettings(session?.tenant_id);
   const { data: categories = [] } = useProductCategories(session?.tenant_id);
@@ -169,7 +170,7 @@ function SettingsPage() {
     const confirmed = await requestConfirm();
     if (!confirmed) return;
     try {
-      await resetTenantDataMutation.mutateAsync({ tenantId, actorUserId });
+      await resetTenantDataMutation.mutateAsync({ tenantId });
       setResetConfirmText("");
       setResetDone(true);
     } catch (e) {

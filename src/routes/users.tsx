@@ -12,6 +12,7 @@ import {
   useUserRoles,
   useUsers,
 } from "@/lib/supabase-queries";
+import { getAccessToken } from "@/lib/supabase-client";
 import { createTenantUserWithAuth } from "@/lib/user-provisioning-server";
 import { sendCredentialsServer } from "@/lib/twilio-server";
 import { useRequireSession } from "@/hooks/use-session";
@@ -62,14 +63,13 @@ function UsersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rolesLoading, roles.length, session?.tenant_id]);
   const createUserWithAuthMutation = useMutation({
-    mutationFn: (vars: {
-      tenantId: string;
+    mutationFn: async (vars: {
       fullName: string;
       email: string;
       password: string;
+      phone?: string;
       roleId?: string;
-      actorUserId: string | null;
-    }) => createTenantUserWithAuth({ data: vars }),
+    }) => createTenantUserWithAuth({ data: { ...vars, accessToken: await getAccessToken() } }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["users", session?.tenant_id] });
       void queryClient.invalidateQueries({ queryKey: ["user_roles", session?.tenant_id] });
@@ -83,14 +83,14 @@ function UsersPage() {
   // fixed — no further code change needed.
   const createUserRecordFallback = useCreateUserRecord(session?.tenant_id);
   const sendCredentialsMutation = useMutation({
-    mutationFn: (vars: {
+    mutationFn: async (vars: {
       tenantId: string;
       userId: string;
       phone: string;
       email: string;
       password: string;
       channel: "sms" | "whatsapp";
-    }) => sendCredentialsServer({ data: vars }),
+    }) => sendCredentialsServer({ data: { ...vars, accessToken: await getAccessToken() } }),
     onSuccess: (r) => toast.success(r.skipped ? "تم الإرسال مسبقًا اليوم" : "تم الإرسال"),
     onError: (e) => toast.error(e instanceof Error ? e.message : "تعذّر الإرسال"),
   });
@@ -116,13 +116,11 @@ function UsersPage() {
     };
     try {
       const created = await createUserWithAuthMutation.mutateAsync({
-        tenantId: session.tenant_id,
         fullName: form.full_name.trim(),
         email: form.email.trim(),
         password: form.password,
         ...(form.phone.trim() && { phone: form.phone.trim() }),
         ...(form.role_id && { roleId: form.role_id }),
-        actorUserId,
       });
       if (form.phone.trim()) {
         setJustCreatedUser({

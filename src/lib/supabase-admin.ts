@@ -15,3 +15,40 @@ export function getSupabaseAdmin() {
   }
   return createClient(url, serviceRoleKey);
 }
+
+export interface ServerCaller {
+  userId: string;
+  tenantId: string;
+  isPlatformOwner: boolean;
+}
+
+/** Every server function that uses `getSupabaseAdmin()` bypasses RLS entirely by design — the
+ * *only* thing standing between "signed-in user" and "can read/write any tenant's data" is
+ * whatever this function checks. Before this existed, several of those functions (tenant data
+ * reset, employee provisioning, platform tenant management) trusted a `tenantId`/`actorUserId`
+ * value the CLIENT supplied in the request body — a real cross-tenant bypass, since nothing
+ * stopped a request from claiming to be any tenant/user it liked.
+ *
+ * This cryptographically verifies the caller's Supabase Auth access token (the same real
+ * session `supabase.auth.getSession()` already holds client-side — no new login flow, just
+ * forwarding the existing token) via `auth.getUser()`, then looks up that VERIFIED auth user's
+ * own `users` row to get their real `tenant_id`/`is_platform_owner` — never the client-supplied
+ * ones. A caller who claims to be someone else, or claims a role they don't have, is rejected
+ * before any admin-client query runs. */
+export async function resolveServerCaller(accessToken: string | undefined): Promise<ServerCaller> {
+  if (!accessToken) throw new Error("لا توجد جلسة نشطة — سجّل دخول تاني");
+  const admin = getSupabaseAdmin();
+  const { data: authData, error: authError } = await admin.auth.getUser(accessToken);
+  if (authError || !authData.user) throw new Error("جلسة غير صالحة — سجّل دخول تاني");
+  const { data: userRow, error: userError } = await admin
+    .from("users")
+    .select("id, tenant_id, is_platform_owner")
+    .eq("auth_user_id", authData.user.id)
+    .single();
+  if (userError || !userRow) throw new Error("المستخدم غير موجود");
+  return {
+    userId: userRow["id"] as string,
+    tenantId: userRow["tenant_id"] as string,
+    isPlatformOwner: !!userRow["is_platform_owner"],
+  };
+}

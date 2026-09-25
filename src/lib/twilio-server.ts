@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 
-import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { getSupabaseAdmin, resolveServerCaller } from "@/lib/supabase-admin";
 
 /** Server-only Twilio REST API caller — reads plain (non-VITE_-prefixed) env vars, so this
  * stays out of the client bundle by the same construction as supabase-admin.ts. No Twilio SDK
@@ -260,15 +260,25 @@ export async function sweepAllTenants(): Promise<void> {
 }
 
 /** collections.tsx's manual "send today's reminders" button — tenant-scoped, no Platform Owner
- * gating needed (same reasoning as createTenantUserWithAuth: caller's own tenant only). */
+ * gating needed, but `tenantId` is now verified against the caller's own real session
+ * (`resolveServerCaller`) instead of trusted as-sent — otherwise any signed-in user could
+ * trigger a reminder sweep (and Twilio spend) for a tenant that isn't theirs. */
 export const sendTenantReminderSweepServer = createServerFn({ method: "POST" })
-  .validator((input: { tenantId: string }) => input)
-  .handler(async ({ data }): Promise<SweepResult> => runTenantReminderSweep(data.tenantId));
+  .validator((input: { tenantId: string; accessToken: string }) => input)
+  .handler(async ({ data }): Promise<SweepResult> => {
+    const caller = await resolveServerCaller(data.accessToken);
+    if (caller.tenantId !== data.tenantId) throw new Error("غير مسموح بإرسال تذكيرات محل تاني");
+    return runTenantReminderSweep(data.tenantId);
+  });
 
 /** users.tsx / platform.tsx's "send login credentials" button — entity is always 'user'
  * (works the same for a new employee or a new tenant owner's users.id row). tenantId is the
  * OWNING tenant of that users row (for a brand-new tenant, that's the new tenant's own id —
- * matches recordCrossTenantAudit's "log into the target tenant" convention). */
+ * matches recordCrossTenantAudit's "log into the target tenant" convention). Allowed when the
+ * verified caller either owns that tenant themselves (sending an employee's credentials) or is
+ * a real Platform Owner (sending a brand-new tenant owner's credentials right after
+ * provisioning) — anyone else could otherwise blast an arbitrary SMS/WhatsApp message (any
+ * phone number, any made-up "password" text) using the tenant's own Twilio budget. */
 export const sendCredentialsServer = createServerFn({ method: "POST" })
   .validator(
     (input: {
@@ -278,9 +288,14 @@ export const sendCredentialsServer = createServerFn({ method: "POST" })
       email: string;
       password: string;
       channel: Channel;
+      accessToken: string;
     }) => input,
   )
   .handler(async ({ data }) => {
+    const caller = await resolveServerCaller(data.accessToken);
+    if (caller.tenantId !== data.tenantId && !caller.isPlatformOwner) {
+      throw new Error("غير مسموح بإرسال بيانات دخول لمحل تاني");
+    }
     const body = `بيانات الدخول لمنصة حسبة:\nالبريد: ${data.email}\nكلمة السر: ${data.password}`;
     return sendAndLogOnce({
       tenantId: data.tenantId,

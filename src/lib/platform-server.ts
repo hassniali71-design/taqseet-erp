@@ -1,15 +1,27 @@
 import { createServerFn } from "@tanstack/react-start";
 
-import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { getSupabaseAdmin, resolveServerCaller } from "@/lib/supabase-admin";
 import type { AuditLogEntry, Tenant, TenantStatus } from "@/types";
 
 /** Phase 9 Platform Control Room — the Platform Owner needs to read/write every tenant's
  * `tenants` row, which the anon-key RLS policies (tenants_isolation, current_tenant_id())
- * deliberately do NOT allow: RLS only lets a signed-in user see their own tenant. These three
- * server functions run on the server only and use the service role key
- * (src/lib/supabase-admin.ts) to bypass RLS by design — exactly the pattern documented in
- * supabase/migrations/0001_foundation.sql's own RLS comment. Never expose the service role
- * key itself to the client; only these narrow, purpose-built functions. */
+ * deliberately do NOT allow: RLS only lets a signed-in user see their own tenant. These server
+ * functions run on the server only and use the service role key (src/lib/supabase-admin.ts) to
+ * bypass RLS by design — exactly the pattern documented in supabase/migrations/0001_foundation
+ * .sql's own RLS comment. Never expose the service role key itself to the client; only these
+ * narrow, purpose-built functions.
+ *
+ * Every function here that touches another tenant's data takes `accessToken` (the caller's own
+ * Supabase Auth session token) and calls `assertPlatformOwner` first — a real, cryptographically
+ * verified check via `resolveServerCaller`, not a client-supplied `actorUserId` flag. An earlier
+ * version of this file only did that for `provisionTenantServer`, and even that check trusted a
+ * client-supplied id; the rest had no server-side check at all, meaning any signed-in user could
+ * suspend/extend/read any tenant just by calling these functions directly. */
+async function assertPlatformOwner(accessToken: string) {
+  const caller = await resolveServerCaller(accessToken);
+  if (!caller.isPlatformOwner) throw new Error("مسموح فقط لمشغّلي المنصة");
+  return caller;
+}
 
 const PLATFORM_TENANT_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -62,22 +74,13 @@ export interface ProvisionTenantResult {
  * Auth account (a separate system, not a Postgres FK) is cleaned up explicitly when it exists.
  *
  * Unlike most mutations in this app, this one can spin up a brand-new live login on its own —
- * so, alone among this file's functions, it re-checks the caller is a Platform Owner server-side
- * instead of only trusting the calling route's UI-level gate. */
+ * so, like every other cross-tenant function in this file, it re-verifies the caller is a real,
+ * signed-in Platform Owner server-side before doing anything (`assertPlatformOwner`). */
 export const provisionTenantServer = createServerFn({ method: "POST" })
-  .validator((input: ProvisionTenantInput & { actorUserId: string | null }) => input)
+  .validator((input: ProvisionTenantInput & { accessToken: string }) => input)
   .handler(async ({ data }): Promise<ProvisionTenantResult> => {
+    const caller = await assertPlatformOwner(data.accessToken);
     const supabaseAdmin = getSupabaseAdmin();
-
-    if (!data.actorUserId) throw new Error("لازم تكون مسجّل دخول كمشغّل منصة");
-    const { data: actor, error: actorError } = await supabaseAdmin
-      .from("users")
-      .select("is_platform_owner")
-      .eq("id", data.actorUserId)
-      .maybeSingle();
-    if (actorError || !actor?.["is_platform_owner"]) {
-      throw new Error("مسموح فقط لمشغّلي المنصة بإنشاء عميل جديد");
-    }
 
     const name = data.name.trim();
     const ownerName = data.owner_name.trim();
@@ -210,7 +213,7 @@ export const provisionTenantServer = createServerFn({ method: "POST" })
 
     await supabaseAdmin.from("audit_logs").insert({
       tenant_id: tenantId,
-      user_id: data.actorUserId,
+      user_id: caller.userId,
       action: "tenant.provision",
       entity: "tenants",
       entity_id: tenantId,
@@ -225,27 +228,27 @@ export const provisionTenantServer = createServerFn({ method: "POST" })
     };
   });
 
-export const fetchManagedTenants = createServerFn({ method: "GET" }).handler(async () => {
-  const supabaseAdmin = getSupabaseAdmin();
-  const { data, error } = await supabaseAdmin
-    .from("tenants")
-    .select("*")
-    .neq("id", PLATFORM_TENANT_ID)
-    .order("created_at", { ascending: false });
-  if (error) throw new Error(error.message);
-  return (data ?? []) as Tenant[];
-});
+export const fetchManagedTenants = createServerFn({ method: "GET" })
+  .validator((input: { accessToken: string }) => input)
+  .handler(async ({ data: input }) => {
+    await assertPlatformOwner(input.accessToken);
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data, error } = await supabaseAdmin
+      .from("tenants")
+      .select("*")
+      .neq("id", PLATFORM_TENANT_ID)
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []) as Tenant[];
+  });
 
 export const setTenantStatusServer = createServerFn({ method: "POST" })
   .validator(
-    (input: {
-      tenantId: string;
-      status: TenantStatus;
-      actorUserId: string | null;
-      reason: string;
-    }) => input,
+    (input: { tenantId: string; status: TenantStatus; accessToken: string; reason: string }) =>
+      input,
   )
   .handler(async ({ data }) => {
+    const caller = await assertPlatformOwner(data.accessToken);
     const supabaseAdmin = getSupabaseAdmin();
     const { data: before, error: fetchError } = await supabaseAdmin
       .from("tenants")
@@ -260,7 +263,7 @@ export const setTenantStatusServer = createServerFn({ method: "POST" })
     if (updateError) throw new Error(updateError.message);
     await supabaseAdmin.from("audit_logs").insert({
       tenant_id: data.tenantId,
-      user_id: data.actorUserId,
+      user_id: caller.userId,
       action: "tenant.status_change",
       entity: "tenants",
       entity_id: data.tenantId,
@@ -271,8 +274,9 @@ export const setTenantStatusServer = createServerFn({ method: "POST" })
   });
 
 export const extendTenantSubscriptionServer = createServerFn({ method: "POST" })
-  .validator((input: { tenantId: string; days: number; actorUserId: string | null }) => input)
+  .validator((input: { tenantId: string; days: number; accessToken: string }) => input)
   .handler(async ({ data }) => {
+    const caller = await assertPlatformOwner(data.accessToken);
     const supabaseAdmin = getSupabaseAdmin();
     const { data: before, error: fetchError } = await supabaseAdmin
       .from("tenants")
@@ -290,7 +294,7 @@ export const extendTenantSubscriptionServer = createServerFn({ method: "POST" })
     if (updateError) throw new Error(updateError.message);
     await supabaseAdmin.from("audit_logs").insert({
       tenant_id: data.tenantId,
-      user_id: data.actorUserId,
+      user_id: caller.userId,
       action: "tenant.subscription_extend",
       entity: "tenants",
       entity_id: data.tenantId,
@@ -307,18 +311,19 @@ export const recordCrossTenantAudit = createServerFn({ method: "POST" })
   .validator(
     (input: {
       tenantId: string;
-      userId: string | null;
       action: string;
       entity: string;
       entityId: string | null;
       reason: string;
+      accessToken: string;
     }) => input,
   )
   .handler(async ({ data }) => {
+    const caller = await assertPlatformOwner(data.accessToken);
     const supabaseAdmin = getSupabaseAdmin();
     const { error } = await supabaseAdmin.from("audit_logs").insert({
       tenant_id: data.tenantId,
-      user_id: data.userId,
+      user_id: caller.userId,
       action: data.action,
       entity: data.entity,
       entity_id: data.entityId,
@@ -335,8 +340,11 @@ export const recordCrossTenantAudit = createServerFn({ method: "POST" })
 export type TenantAuditLogRow = Omit<AuditLogEntry, "old_value" | "new_value">;
 
 export const fetchTenantAuditLog = createServerFn({ method: "GET" })
-  .validator((input: { tenantId: string; action?: string; limit?: number }) => input)
+  .validator(
+    (input: { tenantId: string; action?: string; limit?: number; accessToken: string }) => input,
+  )
   .handler(async ({ data }): Promise<TenantAuditLogRow[]> => {
+    await assertPlatformOwner(data.accessToken);
     const supabaseAdmin = getSupabaseAdmin();
     let query = supabaseAdmin
       .from("audit_logs")
@@ -365,8 +373,9 @@ export interface TenantSummary {
 }
 
 export const fetchTenantSummary = createServerFn({ method: "GET" })
-  .validator((input: { tenantId: string }) => input)
+  .validator((input: { tenantId: string; accessToken: string }) => input)
   .handler(async ({ data }): Promise<TenantSummary> => {
+    await assertPlatformOwner(data.accessToken);
     const supabaseAdmin = getSupabaseAdmin();
     const tenantId = data.tenantId;
 
@@ -450,8 +459,9 @@ function formatStorageBytes(bytes: number): string {
  * revoked from the anon/authenticated Postgres roles (migration 0017), so this can only ever
  * work through the service-role client here, never from the browser. */
 export const fetchTenantStorageUsage = createServerFn({ method: "GET" })
-  .validator((input: { tenantId?: string }) => input)
+  .validator((input: { tenantId?: string; accessToken: string }) => input)
   .handler(async ({ data }): Promise<TenantStorageUsage[]> => {
+    await assertPlatformOwner(data.accessToken);
     const supabaseAdmin = getSupabaseAdmin();
     const { data: rows, error } = await supabaseAdmin.rpc("platform_tenant_storage_bytes", {
       p_tenant_id: data.tenantId ?? null,

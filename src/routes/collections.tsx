@@ -11,6 +11,7 @@ import {
   useInstallmentContracts,
   useInstallments,
 } from "@/lib/supabase-queries";
+import { getAccessToken } from "@/lib/supabase-client";
 import { sendTenantReminderSweepServer } from "@/lib/twilio-server";
 import { useRequireSession } from "@/hooks/use-session";
 import type { Installment, InstallmentStatus } from "@/types";
@@ -65,7 +66,8 @@ function CollectionsWorkbenchPage() {
   const { data: allInstallments = [] } = useInstallments(session?.tenant_id);
   const collectPaymentMutation = useCollectPayment(session?.tenant_id);
   const sweepMutation = useMutation({
-    mutationFn: (tenantId: string) => sendTenantReminderSweepServer({ data: { tenantId } }),
+    mutationFn: async (tenantId: string) =>
+      sendTenantReminderSweepServer({ data: { tenantId, accessToken: await getAccessToken() } }),
     onSuccess: (r) => {
       setError(null);
       setSuccessMessage(

@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 
-import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { getSupabaseAdmin, resolveServerCaller } from "@/lib/supabase-admin";
 
 /** Wipes every business-data row for one tenant — customers, products, sales, installment
  * contracts, purchases, treasury, everything — while leaving the tenant's own identity intact
@@ -51,8 +51,16 @@ const TABLES_IN_DELETE_ORDER = [
 ] as const;
 
 export const resetTenantDataServer = createServerFn({ method: "POST" })
-  .validator((input: { tenantId: string; actorUserId: string | null }) => input)
+  .validator((input: { tenantId: string; accessToken: string }) => input)
   .handler(async ({ data }) => {
+    // The caller's real tenant is derived from their verified session, never trusted from the
+    // request body — without this, any signed-in user of any tenant could pass another
+    // tenant's id and wipe its entire business data. Only that tenant's own signed-in user may
+    // reset it (the UI already gates reaching this behind owner-password re-confirmation).
+    const caller = await resolveServerCaller(data.accessToken);
+    if (caller.tenantId !== data.tenantId) {
+      throw new Error("غير مسموح بتصفير بيانات محل تاني");
+    }
     const supabaseAdmin = getSupabaseAdmin();
     for (const table of TABLES_IN_DELETE_ORDER) {
       const { error } = await supabaseAdmin.from(table).delete().eq("tenant_id", data.tenantId);
@@ -60,7 +68,7 @@ export const resetTenantDataServer = createServerFn({ method: "POST" })
     }
     await supabaseAdmin.from("audit_logs").insert({
       tenant_id: data.tenantId,
-      user_id: data.actorUserId,
+      user_id: caller.userId,
       action: "tenant_data.reset",
       entity: "tenants",
       entity_id: data.tenantId,

@@ -18,3 +18,15 @@ export const supabase = createClient(
   url || "https://placeholder.supabase.co",
   anonKey || "placeholder",
 );
+
+/** The access token every security-sensitive `createServerFn` call must forward as
+ * `accessToken` so the server can verify the caller's real identity (`resolveServerCaller` in
+ * supabase-admin.ts) instead of trusting whatever `tenantId`/`actorUserId` the request body
+ * claims. Throws the same "no active session" message `useRequireSession` already redirects on,
+ * since a missing token here means the same thing. */
+export async function getAccessToken(): Promise<string> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("لا توجد جلسة نشطة — سجّل دخول تاني");
+  return token;
+}

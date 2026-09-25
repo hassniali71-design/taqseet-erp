@@ -22,6 +22,7 @@ import {
   fetchTenantStorageUsage,
   fetchTenantSummary,
 } from "@/lib/platform-server";
+import { getAccessToken } from "@/lib/supabase-client";
 
 export const Route = createFileRoute("/platform_/support/$tenantId")({
   component: SupportAccessPage,
@@ -56,23 +57,32 @@ function SupportAccessPage() {
 
   const { data: managedTenants = [], isLoading: tenantsLoading } = useQuery({
     queryKey: ["managed-tenants"],
-    queryFn: () => fetchManagedTenants(),
+    queryFn: async () => fetchManagedTenants({ data: { accessToken: await getAccessToken() } }),
     enabled: Boolean(currentUser?.is_platform_owner),
   });
   const { data: accessLog = [] } = useQuery({
     queryKey: ["tenant-audit-log", tenantId, "support_access.use"],
-    queryFn: () =>
-      fetchTenantAuditLog({ data: { tenantId, action: "support_access.use", limit: 10 } }),
+    queryFn: async () =>
+      fetchTenantAuditLog({
+        data: {
+          tenantId,
+          action: "support_access.use",
+          limit: 10,
+          accessToken: await getAccessToken(),
+        },
+      }),
     enabled: Boolean(currentUser?.is_platform_owner) && Boolean(tenantId),
   });
   const { data: summary } = useQuery({
     queryKey: ["tenant-summary", tenantId],
-    queryFn: () => fetchTenantSummary({ data: { tenantId } }),
+    queryFn: async () =>
+      fetchTenantSummary({ data: { tenantId, accessToken: await getAccessToken() } }),
     enabled: Boolean(currentUser?.is_platform_owner) && Boolean(tenantId),
   });
   const { data: storageRows = [] } = useQuery({
     queryKey: ["tenant-storage-usage", tenantId],
-    queryFn: () => fetchTenantStorageUsage({ data: { tenantId } }),
+    queryFn: async () =>
+      fetchTenantStorageUsage({ data: { tenantId, accessToken: await getAccessToken() } }),
     enabled: Boolean(currentUser?.is_platform_owner) && Boolean(tenantId),
   });
 
