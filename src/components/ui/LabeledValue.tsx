@@ -34,12 +34,9 @@ export function LabeledValue({
       <div className="min-w-0 flex-1 border-l-2 border-border bg-muted/30 px-3 py-2.5">
         <p className="text-xs font-extrabold leading-snug text-[#1b2a41]">{label}</p>
       </div>
-      <div className="flex shrink-0 items-center gap-1.5 bg-card px-3 py-2.5">
+      <div className="flex min-w-0 items-center gap-1.5 bg-card px-3 py-2.5">
         {Icon && <Icon className={cn("h-4 w-4 shrink-0", TONE_VALUE[tone])} />}
-        <p
-          className={cn("whitespace-nowrap text-base font-extrabold", TONE_VALUE[tone])}
-          dir={valueDir}
-        >
+        <p className={cn("break-words text-base font-extrabold", TONE_VALUE[tone])} dir={valueDir}>
           {value}
         </p>
       </div>
