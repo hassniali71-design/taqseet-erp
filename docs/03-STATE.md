@@ -1,7 +1,12 @@
 # الحالة الحقيقية دلوقتي — المرجع الوحيد "وصلنا لفين"
 
-**آخر بند: 58** (بند 58: السبب الحقيقي لاختفاء نص كروت `LabeledValue` عند الزوم —
-`min-width:0` التلقائي لعناصر Grid/Flex بـ`overflow-hidden`، اتصلح بـ`min-w-fit`).
+**آخر بند: 60** (بند 59: تصفير المحل بقى بدون كلمة "احذف" — باسورد الأونر مباشرة —
+وTABLES_IN_DELETE_ORDER بقت تغطي الشركاء (partner_transactions/partners) وmessage_logs/
+tenant_code_counters بعد ما كانت ناقصاهم فعليًا؛ والمقدّم في عقد التقسيط بقى اختياري بالكامل
+(صفر مقبول، معاينة حية للنسبة من قيمة الصفقة). بند 60: صندوق الإشعارات بقى فيه زرار "حذف" لكل
+إشعار على حدة، و"حذف الكل" بنفس حوكمة `audit.tsx` بالحرف (window.confirm ثم باسورد الأونر).
+قبلهم بند 58: السبب الحقيقي لاختفاء نص كروت `LabeledValue` عند الزوم — `min-width:0` التلقائي
+لعناصر Grid/Flex بـ`overflow-hidden`، اتصلح بـ`min-w-fit`).
 كل الوحدات متصلة بـSupabase حقيقي — مفيش Mock/localStorage في أي مسار بيانات حي.
 `src/lib/data-store.ts` القديم بقى Legacy (مش مصدر بيانات فعلي) — أي كود جديد يتبع نمط
 `src/lib/supabase-queries.ts` (useTenantList / insertAuditLog / nextTenantCode أو
