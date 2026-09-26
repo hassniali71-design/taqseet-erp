@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
@@ -63,14 +63,19 @@ function SettingsPage() {
   const { data: settings } = useCurrentTenantSettings(session?.tenant_id);
   const { data: tenant } = useCurrentTenant(session?.tenant_id);
   const { requestConfirm, dialog: passwordDialog } = useOwnerPasswordConfirm();
+  const queryClient = useQueryClient();
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [resetConfirmText, setResetConfirmText] = useState("");
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetDone, setResetDone] = useState(false);
   const resetTenantDataMutation = useMutation({
     mutationFn: async (vars: { tenantId: string }) =>
       resetTenantDataServer({ data: { ...vars, accessToken: await getAccessToken() } }),
+    onSuccess: () => {
+      // تصفير كامل — لازم كل صفحة تانية فاتحة أو هتتفتح تشوف صفر فورًا، مش بيانات قديمة من
+      // الكاش لحد ما حد يعمل Refresh يدوي بالصدفة.
+      void queryClient.invalidateQueries();
+    },
   });
   const updateSettingsMutation = useUpdateTenantSettings(session?.tenant_id);
   const { data: categories = [] } = useProductCategories(session?.tenant_id);
@@ -163,15 +168,11 @@ function SettingsPage() {
 
   async function handleResetTenantData() {
     setResetError(null);
-    if (resetConfirmText.trim() !== "احذف") {
-      setResetError('اكتب كلمة "احذف" بالظبط في المربع فوق قبل ما تقدر تكمل.');
-      return;
-    }
+    if (!window.confirm("تصفير كل بيانات المحل نهائيًا بدون رجعة — متأكد؟")) return;
     const confirmed = await requestConfirm();
     if (!confirmed) return;
     try {
       await resetTenantDataMutation.mutateAsync({ tenantId });
-      setResetConfirmText("");
       setResetDone(true);
     } catch (e) {
       setResetError(e instanceof Error ? e.message : "حدث خطأ أثناء التصفير");
@@ -602,15 +603,6 @@ function SettingsPage() {
             </p>
           ) : (
             <>
-              <label className="mt-3 block max-w-xs space-y-1">
-                <span className="text-xs font-medium text-foreground">اكتب "احذف" للتأكيد</span>
-                <input
-                  value={resetConfirmText}
-                  onChange={(e) => setResetConfirmText(e.target.value)}
-                  className="form-input"
-                  placeholder="احذف"
-                />
-              </label>
               <button
                 onClick={() => void handleResetTenantData()}
                 disabled={resetTenantDataMutation.isPending}

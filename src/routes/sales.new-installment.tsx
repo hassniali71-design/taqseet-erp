@@ -318,7 +318,6 @@ function NewInstallmentSalePage() {
           plan_id: finalPlanId,
         },
         actorUserId,
-        minDownPaymentPct: settings.min_down_payment_pct,
         ...(contractDate && { createdAt: dateInputToTimestamp(contractDate) }),
       },
       {
@@ -707,8 +706,8 @@ function NewInstallmentSalePage() {
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <label className="block space-y-1">
             <span className="text-xs font-medium text-foreground">
-              المقدّم (الحد الأدنى {minDownPayment.toLocaleString("ar-EG")} ج.م —{" "}
-              {settings.min_down_payment_pct}%)
+              المقدّم (اختياري — سيبه صفر لو مفيش مقدّم، الحد المقترح{" "}
+              {minDownPayment.toLocaleString("ar-EG")} ج.م — {settings.min_down_payment_pct}%)
             </span>
             <input
               type="number"
@@ -718,6 +717,15 @@ function NewInstallmentSalePage() {
               className="form-input"
               dir="ltr"
             />
+            {downPaymentNum > 0 && cashSubtotal > 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                ده بيساوي{" "}
+                <span className="font-bold text-foreground">
+                  {((downPaymentNum / cashSubtotal) * 100).toFixed(1)}%
+                </span>{" "}
+                من قيمة الصفقة ({cashSubtotal.toLocaleString("ar-EG")} ج.م).
+              </p>
+            )}
           </label>
           <div className="space-y-1">
             <div className="flex items-center justify-between">

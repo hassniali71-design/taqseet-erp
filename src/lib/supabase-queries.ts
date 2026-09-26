@@ -1695,12 +1695,10 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
     mutationFn: async ({
       input,
       actorUserId,
-      minDownPaymentPct,
       createdAt,
     }: {
       input: CreateInstallmentContractInput;
       actorUserId: string | null;
-      minDownPaymentPct: number;
       /** تاريخ مفتوح اختياري — لعقد قديم بيسجّله العميل دلوقتي بأثر رجعي على التقارير. جدول
        * الأقساط نفسه بيتحسب بادئًا من التاريخ ده (مش من النهاردة) — أول قسط يستحق بعده بشهر. */
       createdAt?: string;
@@ -1816,13 +1814,10 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
       }
 
       const cash_subtotal = saleItems.reduce((sum, i) => sum + i.line_total, 0);
+      // المقدّم اختياري بالكامل — صفر مقبول، ويتمّوَّل كامل قيمة الصفقة على الخطة من غير أي
+      // حد أدنى مفروض. النسبة المقترحة في tenant_settings.min_down_payment_pct بقت للعرض
+      // الاستشاري بس في الواجهة (مش تحقق مُلزِم هنا).
       if (input.down_payment < 0) throw new Error("المقدّم لا يمكن أن يكون سالبًا");
-      const minDownPayment = Math.round(cash_subtotal * (minDownPaymentPct / 100) * 100) / 100;
-      if (input.down_payment < minDownPayment) {
-        throw new Error(
-          `الحد الأدنى للمقدّم ${minDownPayment} ج.م (${minDownPaymentPct}% من قيمة البضاعة)`,
-        );
-      }
       if (input.down_payment >= cash_subtotal) {
         throw new Error("المقدّم يغطي كامل القيمة — استخدم البيع النقدي بدلاً من التقسيط");
       }

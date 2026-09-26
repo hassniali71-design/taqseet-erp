@@ -30,6 +30,9 @@ const TABLES_IN_DELETE_ORDER = [
   "sale_returns",
   "exchange_transactions",
   "delivery_orders",
+  // partner_transactions.partner_id -> partners(id) on delete restrict, فلازم تتحذف الأول.
+  "partner_transactions",
+  "partners",
   "sales",
   "guarantors",
   "customers",
@@ -47,6 +50,10 @@ const TABLES_IN_DELETE_ORDER = [
   "treasury_accounts",
   "journal_entries",
   "installment_plans",
+  "message_logs",
+  // عدّادات توليد الأكواد الذرية (migration 0022/0024) — لازم تتصفّر كمان، وإلا أول عميل/منتج
+  // جديد بعد التصفير هياخد رقم كود مكمّل من قبل التصفير، مش يبدأ من 0001 زي المفروض.
+  "tenant_code_counters",
   "audit_logs",
 ] as const;
 
