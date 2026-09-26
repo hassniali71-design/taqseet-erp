@@ -188,11 +188,20 @@ function NotificationsPage() {
     ...n,
     read: readIds.has(n.id),
   }));
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  // "حذف" إشعار بيتسجّل كمقروء ويختفي من القائمة فورًا — ده أقرب معنى لـ"حذف" هنا، بما إن
+  // الإشعارات نفسها مُشتقة حيًّا وملهاش صف تخزين مستقل (لو نفس الموقف رجع تاني هيظهر كإشعار
+  // جديد بمعرّف جديد، مش نفس القديم اللي اتحذف — سلوك متعمَّد، مش باگ).
+  const visibleNotifications = notifications.filter((n) => !n.read);
 
-  async function handleClearAll() {
+  function handleDeleteOne(id: string) {
+    markNotificationRead(id);
+  }
+
+  async function handleDeleteAll() {
+    if (!window.confirm("حذف كل الإشعارات الحالية؟")) return;
     const confirmed = await requestConfirm();
-    if (confirmed) markAllNotificationsRead(notifications.map((n) => n.id));
+    if (!confirmed) return;
+    markAllNotificationsRead(notifications.map((n) => n.id));
   }
 
   return (
@@ -207,44 +216,39 @@ function NotificationsPage() {
               واتساب/SMS فعلي (Feature Flag متوقف افتراضيًا في الإعدادات).
             </p>
           </div>
-          {unreadCount > 0 && (
+          {visibleNotifications.length > 0 && (
             <button
-              onClick={() => void handleClearAll()}
-              className="whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-xs font-bold text-foreground hover:bg-accent"
+              onClick={() => void handleDeleteAll()}
+              className="whitespace-nowrap rounded-md border border-destructive/40 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/10"
             >
-              تعليم الكل كمقروء ({unreadCount})
+              حذف الكل ({visibleNotifications.length})
             </button>
           )}
         </div>
 
         <div className="mt-6 max-h-[36rem] space-y-3 overflow-y-auto">
-          {notifications.map((n) => (
-            <div
-              key={n.id}
-              className={`rounded-xl border p-4 ${SEVERITY_CLASS[n.severity]} ${n.read ? "opacity-60" : ""}`}
-            >
+          {visibleNotifications.map((n) => (
+            <div key={n.id} className={`rounded-xl border p-4 ${SEVERITY_CLASS[n.severity]}`}>
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                  {!n.read && <span className="h-2 w-2 rounded-full bg-primary" />}
+                  <span className="h-2 w-2 rounded-full bg-primary" />
                   <span
                     className={`rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_BADGE[n.severity]}`}
                   >
                     {CATEGORY_LABEL[n.category]}
                   </span>
                 </div>
-                {!n.read && (
-                  <button
-                    onClick={() => markNotificationRead(n.id)}
-                    className="text-xs font-bold text-primary hover:underline"
-                  >
-                    تعليم كمقروء
-                  </button>
-                )}
+                <button
+                  onClick={() => handleDeleteOne(n.id)}
+                  className="text-xs font-medium text-destructive hover:underline"
+                >
+                  حذف
+                </button>
               </div>
               <p className="mt-2 text-sm text-foreground">{n.message}</p>
             </div>
           ))}
-          {notifications.length === 0 && (
+          {visibleNotifications.length === 0 && (
             <p className="rounded-xl border border-border bg-card px-4 py-6 text-center text-muted-foreground">
               لا يوجد إشعارات حاليًا — كل شيء تحت السيطرة.
             </p>
