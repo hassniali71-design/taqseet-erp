@@ -8,10 +8,12 @@ import {
   dateInputToTimestamp,
   useCollectPayment,
   useCurrentTenantSettings,
+  useCustomers,
   useInstallmentContracts,
   useInstallments,
 } from "@/lib/supabase-queries";
 import { getAccessToken } from "@/lib/supabase-client";
+import { matchesSearch } from "@/lib/text-filter";
 import { sendTenantReminderSweepServer } from "@/lib/twilio-server";
 import { useRequireSession } from "@/hooks/use-session";
 import type { Installment, InstallmentStatus } from "@/types";
@@ -43,7 +45,9 @@ const STATUS_CLASS: Record<InstallmentStatus, string> = {
 type Row = {
   contractId: string;
   contractNumber: string;
+  customerId: string;
   customerName: string;
+  customerCode: string;
   outstanding: number;
   nextDue: Installment;
   effectiveStatus: InstallmentStatus;
@@ -54,6 +58,7 @@ function CollectionsWorkbenchPage() {
   const session = useRequireSession();
   const [, forceRerender] = useState(0);
   const [filter, setFilter] = useState<"all" | "due" | "overdue">("all");
+  const [search, setSearch] = useState("");
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [collectDates, setCollectDates] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +69,7 @@ function CollectionsWorkbenchPage() {
   const { data: settingsData } = useCurrentTenantSettings(session?.tenant_id);
   const { data: allContracts = [] } = useInstallmentContracts(session?.tenant_id);
   const { data: allInstallments = [] } = useInstallments(session?.tenant_id);
+  const { data: allCustomers = [] } = useCustomers(session?.tenant_id);
   const collectPaymentMutation = useCollectPayment(session?.tenant_id);
   const sweepMutation = useMutation({
     mutationFn: async (tenantId: string) =>
@@ -109,7 +115,9 @@ function CollectionsWorkbenchPage() {
     rows.push({
       contractId: contract.id,
       contractNumber: contract.contract_number,
+      customerId: contract.customer_id,
       customerName: contract.customer_name,
+      customerCode: allCustomers.find((c) => c.id === contract.customer_id)?.code ?? "",
       outstanding,
       nextDue,
       effectiveStatus,
@@ -119,11 +127,13 @@ function CollectionsWorkbenchPage() {
 
   rows.sort((a, b) => b.daysOverdue - a.daysOverdue);
 
-  const filteredRows = rows.filter((r) => {
-    if (filter === "due") return r.effectiveStatus === "due";
-    if (filter === "overdue") return r.effectiveStatus === "overdue";
-    return true;
-  });
+  const filteredRows = rows
+    .filter((r) => {
+      if (filter === "due") return r.effectiveStatus === "due";
+      if (filter === "overdue") return r.effectiveStatus === "overdue";
+      return true;
+    })
+    .filter((r) => matchesSearch(search, r.customerName, r.customerCode));
 
   const dueCount = rows.filter((r) => r.effectiveStatus === "due").length;
   const overdueCount = rows.filter((r) => r.effectiveStatus === "overdue").length;
@@ -200,6 +210,13 @@ function CollectionsWorkbenchPage() {
             {sweepMutation.isPending ? "جارٍ الإرسال..." : "إرسال تذكيرات اليوم"}
           </button>
         </div>
+
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="بحث باسم العميل أو كوده..."
+          className="form-input mt-3"
+        />
 
         {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
         {successMessage && <p className="mt-3 text-sm text-success">{successMessage} ✓</p>}
