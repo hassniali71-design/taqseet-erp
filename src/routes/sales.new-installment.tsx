@@ -339,6 +339,7 @@ function NewInstallmentSalePage() {
                   cartCost,
                   splitPct,
                   profitSharePct,
+                  contract.finance_amount,
                 );
                 return {
                   partnerId,
@@ -842,6 +843,7 @@ function NewInstallmentSalePage() {
             onProfitSharesChange={setPartnerProfitShares}
             cashSubtotal={cashSubtotal}
             cost={cartCost}
+            financeAmount={preview?.financeAmount ?? 0}
             {...(singleProductId ? { productId: singleProductId } : {})}
           />
         )}

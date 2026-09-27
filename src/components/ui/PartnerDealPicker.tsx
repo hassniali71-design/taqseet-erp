@@ -6,9 +6,10 @@ import type { Partner, Purchase } from "@/types";
 
 /** قسم اختياري في شاشة البيع: اختيار الشركاء اللي موّلوا الصفقة دي (ممكن أكتر من واحد)، مع
  * نسبة تقسيم لكل شريك (بالتساوي افتراضيًا، قابلة للتعديل يدويًا)، ومعاينة حية لنصيب كل شريك
- * قبل التأكيد. الحساب نفسه (computePartnerDealPreview) بيفترض إن الربح على هامش البضاعة بس
- * (cashSubtotal - cost)، مش على إيراد التمويل — العميل نفسه أوضح كده. مستخدم في sales.new.tsx
- * و sales.new-installment.tsx بنفس الشكل بالظبط.
+ * قبل التأكيد. الشريك بياخد نصيبه من ربح الصفقة الكلي — هامش البضاعة (cashSubtotal - cost)
+ * **زائد** فايدة التمويل لو الصفقة تقسيط (`financeAmount`، صفر افتراضيًا للبيع النقدي) — تأكيد
+ * صريح من العميل. مستخدم في sales.new.tsx (بدون financeAmount، بيع نقدي مفيهوش فايدة تمويل
+ * أصلًا) و sales.new-installment.tsx (بيمرر financeAmount الفعلي بتاع الصفقة).
  *
  * البائع يقدر يدخل نسبة تقسيمه من الصفقة % (زي ما كان) أو مبلغ ربح فلات مباشرة — الاتنين
  * بيتحوّلوا لنفس splitPct الخارجي (مفيش تغيير في الـcontract الخارجي ولا في sales.new*.tsx)،
@@ -30,6 +31,7 @@ export function PartnerDealPicker({
   onProfitSharesChange,
   cashSubtotal,
   cost,
+  financeAmount = 0,
   productId,
 }: {
   partners: Partner[];
@@ -44,6 +46,9 @@ export function PartnerDealPicker({
   onProfitSharesChange: (profitShares: Record<string, string>) => void;
   cashSubtotal: number;
   cost: number;
+  /** فايدة التمويل الحية للصفقة (معاينة الخطة المختارة) — صفر للبيع النقدي، بتتضاف لهامش
+   * البضاعة قبل تقسيم الربح على الشركاء. */
+  financeAmount?: number;
   /** لو الصفقة فيها صنف واحد بس — بيُستخدم لعرض معلومة "آخر مرة اتشرى فيها ده" Best-effort. */
   productId?: string;
 }) {
@@ -56,7 +61,8 @@ export function PartnerDealPicker({
     onSplitsChange(Object.fromEntries(ids.map((id) => [id, String(equalPct)])));
   }
 
-  const margin = cashSubtotal - cost;
+  const goodsMargin = cashSubtotal - cost;
+  const margin = goodsMargin + financeAmount;
 
   /** بيتحوّل مبلغ ربح مطلوب لنسبة تقسيم الصفقة المكافئة (splitPct) — نفس المعادلة العكسية
    * لـ computePartnerDealPreview لجزء الربح بس: profitAmount = margin * (splitPct/100) *
@@ -109,7 +115,13 @@ export function PartnerDealPicker({
             const mode = inputModes[partnerId] ?? "pct";
             const splitPct = Number(splits[partnerId]) || 0;
             const profitSharePct = Number(profitShares[partnerId] ?? partner.profit_share_pct) || 0;
-            const preview = computePartnerDealPreview(cashSubtotal, cost, splitPct, profitSharePct);
+            const preview = computePartnerDealPreview(
+              cashSubtotal,
+              cost,
+              splitPct,
+              profitSharePct,
+              financeAmount,
+            );
             return (
               <div key={partnerId} className="rounded-lg border border-border p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -193,7 +205,21 @@ export function PartnerDealPicker({
                   <span className="text-left font-medium text-foreground" dir="ltr">
                     {cost.toLocaleString("ar-EG")} ج.م
                   </span>
-                  <span className="text-muted-foreground">هامش الربح الكلي (بيع − تكلفة)</span>
+                  <span className="text-muted-foreground">هامش ربح البضاعة (بيع − تكلفة)</span>
+                  <span className="text-left font-medium text-foreground" dir="ltr">
+                    {goodsMargin.toLocaleString("ar-EG")} ج.م
+                  </span>
+                  {financeAmount > 0 && (
+                    <>
+                      <span className="text-muted-foreground">مبلغ فايدة التمويل (تقسيط)</span>
+                      <span className="text-left font-medium text-foreground" dir="ltr">
+                        {financeAmount.toLocaleString("ar-EG")} ج.م
+                      </span>
+                    </>
+                  )}
+                  <span className="text-muted-foreground">
+                    إجمالي هامش الربح{financeAmount > 0 ? " (بضاعة + تمويل)" : ""}
+                  </span>
                   <span className="text-left font-medium text-foreground" dir="ltr">
                     {margin.toLocaleString("ar-EG")} ج.م
                   </span>

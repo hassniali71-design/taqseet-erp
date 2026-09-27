@@ -3131,16 +3131,22 @@ export function computePartnerBalance(
 /** Pure calculation, no DB — one partner's cut of one deal. `splitPct` is this partner's share
  * of the deal itself (equal by default among however many partners are picked, editable per
  * partner at sale time); `profitSharePct` is that partner's own permanent profit-sharing rate
- * (Partner.profit_share_pct). Profit is computed on goods margin only (cashSubtotal - cost),
- * never on installment financing revenue — matches the existing 3000/3100 account split. */
+ * (Partner.profit_share_pct). `financeAmount` (zero by default — cash sales have none) is the
+ * deal's installment financing revenue (`InstallmentContract.finance_amount`), added to goods
+ * margin before splitting — confirmed explicitly with the client: a funding partner shares in
+ * the deal's full profit (goods margin + financing revenue), not goods margin alone. This no
+ * longer matches the 3000/3100 account split 1:1 (that split still separates the two revenue
+ * types for the shop's own books) — it only changes what the *partner's* cut is computed on. */
 export function computePartnerDealPreview(
   cashSubtotal: number,
   cost: number,
   splitPct: number,
   profitSharePct: number,
+  financeAmount = 0,
 ): { costRecovered: number; profitAmount: number; total: number } {
   const shareOfCost = Math.round(cost * (splitPct / 100) * 100) / 100;
-  const shareOfMargin = Math.round((cashSubtotal - cost) * (splitPct / 100) * 100) / 100;
+  const totalMargin = cashSubtotal - cost + financeAmount;
+  const shareOfMargin = Math.round(totalMargin * (splitPct / 100) * 100) / 100;
   const profitAmount = Math.round(shareOfMargin * (profitSharePct / 100) * 100) / 100;
   return {
     costRecovered: shareOfCost,
