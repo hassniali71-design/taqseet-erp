@@ -576,6 +576,10 @@ function NewInstallmentSalePage() {
               <p className="text-xs font-bold text-foreground">
                 جهاز جديد — هيتضاف لقائمة الأجهزة ويتسجل عليه الكمية دي فورًا جاهزة للبيع
               </p>
+              <p className="text-xs text-muted-foreground">
+                السعر هنا هو سعر التقسيط اللي هيتحسب عليه مبلغ التمويل والجدول — مش سعر البيع
+                النقدي، ومش هيظهر أي سعر نقدي في الفاتورة دي أصلًا.
+              </p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
                 <label className="block space-y-1">
                   <span className="text-xs font-medium text-foreground">الاسم *</span>
@@ -599,7 +603,7 @@ function NewInstallmentSalePage() {
                   />
                 </label>
                 <label className="block space-y-1">
-                  <span className="text-xs font-medium text-foreground">سعر البيع *</span>
+                  <span className="text-xs font-medium text-foreground">سعر التقسيط *</span>
                   <input
                     type="number"
                     min="0"
