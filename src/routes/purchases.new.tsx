@@ -40,7 +40,6 @@ function NewPurchasePage() {
   const [showNewProductForm, setShowNewProductForm] = useState(false);
   const [newProductName, setNewProductName] = useState("");
   const [newProductCash, setNewProductCash] = useState("");
-  const [newProductInstallment, setNewProductInstallment] = useState("");
   const [newProductBrand, setNewProductBrand] = useState("");
   const [newProductWarrantyMonths, setNewProductWarrantyMonths] = useState("");
   const [newProductError, setNewProductError] = useState<string | null>(null);
@@ -120,13 +119,8 @@ function NewPurchasePage() {
       return;
     }
     const cash = Number(newProductCash);
-    const installment = Number(newProductInstallment);
     if (!newProductCash || cash < 0) {
       setNewProductError("أدخل سعر نقدي صحيح");
-      return;
-    }
-    if (!newProductInstallment || installment < 0) {
-      setNewProductError("أدخل سعر تقسيط صحيح");
       return;
     }
     try {
@@ -136,7 +130,9 @@ function NewPurchasePage() {
           unit: "قطعة",
           cost_price: 0,
           cash_price: cash,
-          installment_price: installment,
+          // مفيش سعر تقسيط منفصل بيتحدد هنا (اتلغى المفهوم من النظام كله) — بيتشتق دايمًا وقت
+          // البيع من السعر النقدي + الخطة/الفايدة المختارة.
+          installment_price: cash,
           min_stock: 0,
           max_stock: 0,
           serial_required: false,
@@ -152,7 +148,6 @@ function NewPurchasePage() {
       setShowNewProductForm(false);
       setNewProductName("");
       setNewProductCash("");
-      setNewProductInstallment("");
       setNewProductBrand("");
       setNewProductWarrantyMonths("");
     } catch (e) {
@@ -311,17 +306,10 @@ function NewPurchasePage() {
                     className="form-input"
                     dir="ltr"
                   />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-xs font-medium text-foreground">سعر التقسيط *</span>
-                  <input
-                    type="number"
-                    min="0"
-                    value={newProductInstallment}
-                    onChange={(e) => setNewProductInstallment(e.target.value)}
-                    className="form-input"
-                    dir="ltr"
-                  />
+                  <span className="block text-[11px] text-muted-foreground">
+                    سعر التقسيط بيتحسب تلقائيًا منه وقت البيع حسب الخطة والفايدة، مش محتاج تحدده
+                    هنا.
+                  </span>
                 </label>
                 <label className="block space-y-1">
                   <span className="text-xs font-medium text-foreground">الماركة (اختياري)</span>

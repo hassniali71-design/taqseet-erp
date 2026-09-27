@@ -208,6 +208,9 @@ export interface Product {
   unit: string;
   cost_price: number;
   cash_price: number;
+  /** لسه في القاعدة لأسباب تاريخية، لكن مفهوم "سعر تقسيط منفصل" اتلغى من النظام كله — بيتزرع
+   * دايمًا بنفس قيمة `cash_price` وقت الإنشاء/التعديل. سعر التقسيط الفعلي بيتحسب وقت البيع من
+   * `cash_price` + خطة/فايدة التقسيط المختارة، مش من هنا. */
   installment_price: number;
   min_stock: number;
   max_stock: number;
@@ -330,8 +333,10 @@ export interface Installment {
 
 /**
  * §35/§42 Installment Contract — lean subset. `items` nested for the same reason as `Sale`
- * (see its comment). Pricing uses `Product.installment_price`, not `cash_price` (§25 keeps
- * these separate on purpose). §37 finance formula, computed once and frozen here:
+ * (see its comment). Line prices default to `Product.cash_price` (there is no separate
+ * installment sticker price — the whole point of the finance formula below is to derive the
+ * installment total FROM the cash price, not to look up an already-marked-up one). §37 finance
+ * formula, computed once and frozen here:
  *
  *   principal        = cash_subtotal - down_payment      (the financed base)
  *   finance_amount    = principal × plan_rate_pct / 100    (once, not compounded)

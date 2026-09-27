@@ -1682,8 +1682,9 @@ async function nextInstallmentDocNumber(table: string, tenantId: string, prefix:
 
 export interface CreateInstallmentContractInput {
   customer_id: string;
-  /** unit_price اختياري — نفس مبدأ البيع النقدي، بيتجاهل installment_price المسجّل على
-   * المنتج لو البائع غيّره وقت تسجيل الصفقة. */
+  /** unit_price اختياري — لو مش متبعِت، القيمة الافتراضية بقت `product.cash_price` (مفهوم
+   * "سعر تقسيط" منفصل اتلغى من النظام كله؛ سعر التقسيط دايمًا بيتشتق من السعر النقدي + خطة/فايدة
+   * التقسيط المختارة وقت الصفقة، مش سعر مُسجَّل مسبقًا على المنتج). */
   items: Array<{ product_id: string; serial_id?: string; quantity: number; unit_price?: number }>;
   down_payment: number;
   plan_id: string;
@@ -1773,7 +1774,7 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
             throw new Error(`السيريال "${serial.serial_number as string}" غير متاح للبيع`);
           }
           soldSerialIds.add(serial.id as string);
-          const unitPrice = line.unit_price ?? product.installment_price;
+          const unitPrice = line.unit_price ?? product.cash_price;
           saleItems.push({
             product_id: product.id,
             product_name: product.name,
@@ -1795,7 +1796,7 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
           if (line.quantity > stock) {
             throw new Error(`المخزون غير كافٍ للمنتج "${product.name}" (متاح ${stock})`);
           }
-          const unitPrice = line.unit_price ?? product.installment_price;
+          const unitPrice = line.unit_price ?? product.cash_price;
           saleItems.push({
             product_id: product.id,
             product_name: product.name,

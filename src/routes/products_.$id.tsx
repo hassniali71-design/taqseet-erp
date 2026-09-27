@@ -171,9 +171,9 @@ function ProductDetailPage() {
             </p>
           </div>
           <div className="rounded-xl border border-border bg-card p-4">
-            <p className="text-xs text-muted-foreground">سعر التقسيط</p>
+            <p className="text-xs text-muted-foreground">تكلفة الشراء</p>
             <p className="mt-1 text-2xl font-bold text-foreground" dir="ltr">
-              {product.installment_price.toLocaleString("ar-EG")} ج.م
+              {product.cost_price.toLocaleString("ar-EG")} ج.م
             </p>
           </div>
         </div>

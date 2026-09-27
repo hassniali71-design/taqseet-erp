@@ -134,7 +134,7 @@ function NewInstallmentSalePage() {
       setError("اختر جهاز أولًا");
       return;
     }
-    const unitPrice = Number(unitPriceOverride) || selectedProduct.installment_price;
+    const unitPrice = Number(unitPriceOverride) || selectedProduct.cash_price;
     if (unitPrice <= 0) {
       setError("السعر لازم يكون أكبر من صفر");
       return;
@@ -398,7 +398,8 @@ function NewInstallmentSalePage() {
       <main className="flex-1 mx-auto max-w-5xl px-4 py-8">
         <h1 className="text-2xl font-bold text-foreground">بيع بالتقسيط جديد</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          لازم عميل مسجّل، والأسعار هنا سعر التقسيط وليس السعر النقدي.
+          لازم عميل مسجّل. تختار الجهاز بسعره النقدي، وسعر التقسيط بيتحسب تلقائيًا بعد اختيار الخطة
+          والفايدة تحت.
         </p>
 
         <div className="mt-4">
@@ -494,7 +495,7 @@ function NewInstallmentSalePage() {
         </div>
 
         <div className="mt-6 rounded-xl border border-border bg-card p-5 shadow-sm">
-          <h2 className="text-sm font-bold text-foreground">إضافة صنف (سعر التقسيط)</h2>
+          <h2 className="text-sm font-bold text-foreground">إضافة صنف (بسعره النقدي)</h2>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-5">
             <label className="block space-y-1 sm:col-span-2">
               <span className="text-xs font-medium text-foreground">الجهاز</span>
@@ -505,7 +506,7 @@ function NewInstallmentSalePage() {
                   setSelectedProductId(id);
                   setSelectedSerialId("");
                   const product = products.find((p) => p.id === id);
-                  setUnitPriceOverride(product ? String(product.installment_price) : "");
+                  setUnitPriceOverride(product ? String(product.cash_price) : "");
                 }}
                 placeholder="بحث باسم الجهاز..."
                 extraAction={{
@@ -549,13 +550,13 @@ function NewInstallmentSalePage() {
             )}
 
             <label className="block space-y-1">
-              <span className="text-xs font-medium text-foreground">سعر البيع</span>
+              <span className="text-xs font-medium text-foreground">السعر النقدي</span>
               <input
                 type="number"
                 min="0"
                 value={unitPriceOverride}
                 onChange={(e) => setUnitPriceOverride(e.target.value)}
-                placeholder={selectedProduct ? String(selectedProduct.installment_price) : ""}
+                placeholder={selectedProduct ? String(selectedProduct.cash_price) : ""}
                 className="form-input"
                 dir="ltr"
               />
@@ -578,8 +579,8 @@ function NewInstallmentSalePage() {
                 جهاز جديد — هيتضاف لقائمة الأجهزة ويتسجل عليه الكمية دي فورًا جاهزة للبيع
               </p>
               <p className="text-xs text-muted-foreground">
-                السعر هنا هو سعر التقسيط اللي هيتحسب عليه مبلغ التمويل والجدول — مش سعر البيع
-                النقدي، ومش هيظهر أي سعر نقدي في الفاتورة دي أصلًا.
+                حط سعره النقدي (لو كنت هتبيعه كاش) — سعر التقسيط بيتحسب تلقائيًا بعد كده من السعر ده
+                + الخطة والفايدة اللي هتختارها تحت، ومش محتاج تحدده بنفسك.
               </p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
                 <label className="block space-y-1">
@@ -604,7 +605,7 @@ function NewInstallmentSalePage() {
                   />
                 </label>
                 <label className="block space-y-1">
-                  <span className="text-xs font-medium text-foreground">سعر التقسيط *</span>
+                  <span className="text-xs font-medium text-foreground">السعر النقدي *</span>
                   <input
                     type="number"
                     min="0"
@@ -653,7 +654,8 @@ function NewInstallmentSalePage() {
           )}
 
           <p className="mt-2 text-xs text-muted-foreground">
-            سعر التقسيط الأساسي المسجّل على الجهاز معروض كمبدئي — تقدر تغيّره براحتك وقت البيع.
+            السعر النقدي المسجّل على الجهاز معروض كمبدئي — تقدر تغيّره براحتك وقت البيع، وسعر
+            التقسيط هيتحسب منه تلقائيًا بعد اختيار الخطة تحت.
           </p>
         </div>
 
@@ -777,6 +779,13 @@ function NewInstallmentSalePage() {
                   </option>
                 ))}
               </select>
+            )}
+            {preview && plan && cashSubtotal > 0 && (
+              <p className="rounded-md bg-primary/10 px-2 py-1.5 text-xs font-bold text-primary">
+                كده سعر الصفقة قسط بقى{" "}
+                <span dir="ltr">{preview.totalAmount.toLocaleString("ar-EG")} ج.م</span> بدل{" "}
+                <span dir="ltr">{cashSubtotal.toLocaleString("ar-EG")} ج.م</span> كاش.
+              </p>
             )}
           </div>
           <label className="block space-y-1">

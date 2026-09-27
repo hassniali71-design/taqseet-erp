@@ -33,7 +33,6 @@ type FormState = {
   unit: string;
   cost_price: string;
   cash_price: string;
-  installment_price: string;
   min_stock: string;
   max_stock: string;
   warranty_months: string;
@@ -48,7 +47,6 @@ const EMPTY_FORM: FormState = {
   unit: "قطعة",
   cost_price: "",
   cash_price: "",
-  installment_price: "",
   min_stock: "0",
   max_stock: "0",
   warranty_months: "",
@@ -116,7 +114,6 @@ function ProductsPage() {
       unit: product.unit,
       cost_price: String(product.cost_price),
       cash_price: String(product.cash_price),
-      installment_price: String(product.installment_price),
       min_stock: String(product.min_stock),
       max_stock: String(product.max_stock),
       warranty_months: product.warranty_months ? String(product.warranty_months) : "",
@@ -177,7 +174,10 @@ function ProductsPage() {
         unit: form.unit.trim() || "قطعة",
         cost_price: toNumber(form.cost_price),
         cash_price: toNumber(form.cash_price),
-        installment_price: toNumber(form.installment_price),
+        // مفيش سعر تقسيط منفصل بيتحدد هنا (اتلغى المفهوم من النظام كله) — سعر التقسيط دايمًا
+        // بيتشتق وقت البيع من السعر النقدي + خطة/فايدة التقسيط المختارة. العمود لسه موجود في
+        // القاعدة لأسباب تاريخية بس، فبيتزرع بنفس قيمة السعر النقدي عشان يفضل متّسق.
+        installment_price: toNumber(form.cash_price),
         min_stock: toNumber(form.min_stock),
         max_stock: toNumber(form.max_stock),
         ...(form.warranty_months && { warranty_months: toNumber(form.warranty_months) }),
@@ -428,16 +428,10 @@ function ProductsPage() {
                   onChange={(e) => setForm({ ...form, cash_price: e.target.value })}
                   className="form-input"
                 />
-              </Field>
-              <Field label="سعر التقسيط *">
-                <input
-                  type="number"
-                  min="0"
-                  required
-                  value={form.installment_price}
-                  onChange={(e) => setForm({ ...form, installment_price: e.target.value })}
-                  className="form-input"
-                />
+                <span className="block text-[11px] text-muted-foreground">
+                  ده السعر الأساسي بس — سعر التقسيط بيتغيّر تلقائيًا وقت البيع حسب الخطة والفايدة
+                  اللي هتختارها، مش محتاج تحدده هنا.
+                </span>
               </Field>
               <Field label="الحد الأدنى للمخزون">
                 <input
@@ -547,8 +541,7 @@ function ProductsPage() {
                 <th className="px-4 py-3 font-medium">الاسم</th>
                 <th className="px-4 py-3 font-medium">الماركة/الموديل</th>
                 <th className="px-4 py-3 font-medium">المخزون</th>
-                <th className="px-4 py-3 font-medium">السعر النقدي</th>
-                <th className="px-4 py-3 font-medium">سعر التقسيط</th>
+                <th className="px-4 py-3 font-medium">السعر</th>
                 <th className="px-4 py-3 font-medium">الحالة</th>
                 <th className="px-4 py-3 font-medium"></th>
               </tr>
@@ -581,9 +574,6 @@ function ProductsPage() {
                   </td>
                   <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
                     {(product.cash_price ?? 0).toLocaleString("ar-EG")} ج.م
-                  </td>
-                  <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
-                    {(product.installment_price ?? 0).toLocaleString("ar-EG")} ج.م
                   </td>
                   <td className="px-4 py-3">
                     <span
@@ -620,7 +610,7 @@ function ProductsPage() {
               ))}
               {products.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">
                     {isLoading ? "جارٍ التحميل..." : "لا يوجد أجهزة بعد."}
                   </td>
                 </tr>
