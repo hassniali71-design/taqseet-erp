@@ -341,7 +341,7 @@ function PartnerDetailPage() {
           />
           <LabeledValue label="عدد الصفقات" value={String(deals.length)} valueDir="ltr" />
           <LabeledValue
-            label="ليك عند العملاء (لسه مرجعش)"
+            label="ليه برّه عند العملاء (بأرباحه)"
             value={`${outstandingAtCustomers.toLocaleString("ar-EG")} ج.م`}
             valueDir="ltr"
           />
@@ -584,6 +584,13 @@ function PartnerDetailPage() {
                       }
                       valueDir="ltr"
                     />
+                    {source?.contractId && (
+                      <LabeledValue
+                        label="إجمالي على العميل (بالتقسيط)"
+                        value={`${dealOutstanding.customerTotal.toLocaleString("ar-EG")} ج.م`}
+                        valueDir="ltr"
+                      />
+                    )}
                     <LabeledValue
                       label="تكلفة الصفقة كاملة (من المخزون)"
                       value={
@@ -613,18 +620,18 @@ function PartnerDetailPage() {
                       valueDir="ltr"
                     />
                     <LabeledValue
-                      label="اتخصم منه (تكلفته)"
+                      label="دفع في الصفقة (رأس ماله)"
                       value={`${t.cost_recovered.toLocaleString("ar-EG")} ج.م`}
                       valueDir="ltr"
                     />
                     <LabeledValue
-                      label="ربحه من الصفقة دي"
+                      label="هيكسب من الصفقة دي"
                       value={`${t.profit_amount.toLocaleString("ar-EG")} ج.م`}
                       valueDir="ltr"
                       tone="success"
                     />
                     <LabeledValue
-                      label="اتحصّل من نصيبه"
+                      label="اتحصّل من نصيبه (رجعله)"
                       value={
                         dealOutstanding.cancelled
                           ? "العقد ملغي"
@@ -633,7 +640,7 @@ function PartnerDetailPage() {
                       valueDir="ltr"
                     />
                     <LabeledValue
-                      label="المتبقي عند العملاء"
+                      label="المتبقي عند العميل (بأرباحه)"
                       value={`${dealOutstanding.outstanding.toLocaleString("ar-EG")} ج.م`}
                       valueDir="ltr"
                     />

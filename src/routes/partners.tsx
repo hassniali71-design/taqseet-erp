@@ -229,7 +229,9 @@ function PartnersPage() {
                 </p>
               </div>
               <div className="rounded-xl border border-border bg-card p-4">
-                <p className="text-xs text-muted-foreground">إجمالي المبالغ عند العملاء</p>
+                <p className="text-xs text-muted-foreground">
+                  إجمالي المبالغ عند العملاء (بالأرباح)
+                </p>
                 <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
                   {totalOutstandingAll.toLocaleString("ar-EG")} ج.م
                 </p>

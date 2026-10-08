@@ -43,7 +43,7 @@ export function exportPartnerStatementCsv(
     `متاح غير مخصص بعد,${summary.availableFunding}`,
     `إجمالي الأرباح,${summary.totalProfit}`,
     `الرصيد الحالي,${summary.balance}`,
-    `المتبقي عند العملاء (لسه مرجعش),${summary.outstandingAtCustomers}`,
+    `المتبقي عند العملاء (بأرباحه),${summary.outstandingAtCustomers}`,
     `عدد الصفقات,${summary.dealCount}`,
     "",
     "",
