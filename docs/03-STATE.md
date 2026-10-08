@@ -1,6 +1,6 @@
 # الحالة الحقيقية دلوقتي — المرجع الوحيد "وصلنا لفين"
 
-**آخر بند: 65** (بند 65: "المتبقي عند العملاء" للشركاء — `computePartnerDealOutstanding`/
+**آخر بند: 66** (بند 66: `.gitattributes` بيفرض LF على كل الأنظمة — على Windows كان Git بيحوّل لـCRLF والـlint بيفشل في كل سطر. بند 65: "المتبقي عند العملاء" للشركاء — `computePartnerDealOutstanding`/
 `computePartnerOutstanding` في supabase-queries.ts: رأس مال الشريك في الصفقة (`cost_recovered`)
 ناقص نصيبه (`split_pct`) من المحصَّل الفعلي (المقدّم + مجموع `installments.paid_amount`)، صفر للنقدي
 والملغي؛ بيظهر كارت في صفحة الشريك بدل "متوسط الربح لكل صفقة"، وسطر في كل صفقة، وكارت إجمالي في

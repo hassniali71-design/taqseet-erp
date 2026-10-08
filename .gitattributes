@@ -1,0 +1,8 @@
+# Force LF in the working tree on every OS — Prettier (eslint prettier/prettier) expects LF,
+# and Windows Git defaults to CRLF on checkout, which fails lint on every line.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff binary
+*.woff2 binary
