@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { DateInput } from "@/components/ui/DateInput";
 import { SearchPicker } from "@/components/ui/SearchPicker";
 import {
   useCreateProduct,
@@ -214,13 +215,7 @@ function NewPurchasePage() {
           </label>
           <label className="block space-y-1">
             <span className="text-xs font-medium text-foreground">تاريخ إصدار الفاتورة</span>
-            <input
-              type="date"
-              value={issueDate}
-              onChange={(e) => setIssueDate(e.target.value)}
-              className="form-input"
-              dir="ltr"
-            />
+            <DateInput value={issueDate} onChange={(v) => setIssueDate(v)} />
           </label>
           <label className="block space-y-1">
             <span className="text-xs font-medium text-foreground">مدة إرجاع (أيام، اختياري)</span>

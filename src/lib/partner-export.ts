@@ -11,6 +11,7 @@ export function exportPartnerStatementCsv(
     availableFunding: number;
     totalProfit: number;
     balance: number;
+    outstandingAtCustomers: number;
     dealCount: number;
   },
   deals: Array<{
@@ -42,6 +43,7 @@ export function exportPartnerStatementCsv(
     `متاح غير مخصص بعد,${summary.availableFunding}`,
     `إجمالي الأرباح,${summary.totalProfit}`,
     `الرصيد الحالي,${summary.balance}`,
+    `المتبقي عند العملاء (لسه مرجعش),${summary.outstandingAtCustomers}`,
     `عدد الصفقات,${summary.dealCount}`,
     "",
     "",

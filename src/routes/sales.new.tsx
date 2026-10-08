@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { DateInput } from "@/components/ui/DateInput";
 import { PartnerDealPicker } from "@/components/ui/PartnerDealPicker";
 import { SearchPicker } from "@/components/ui/SearchPicker";
 import { subscribeData } from "@/lib/data-store";
@@ -666,13 +667,7 @@ function NewSalePage() {
               <span className="text-xs font-medium text-foreground">
                 تاريخ العملية (سيبه فاضي لو دلوقتي)
               </span>
-              <input
-                type="date"
-                value={saleDate}
-                onChange={(e) => setSaleDate(e.target.value)}
-                className="form-input"
-                dir="ltr"
-              />
+              <DateInput value={saleDate} onChange={(v) => setSaleDate(v)} />
             </label>
           </div>
 

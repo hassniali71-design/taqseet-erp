@@ -3424,6 +3424,65 @@ export function computePartnerAvailableProfit(
   return Math.round((earned - paidOut) * 100) / 100;
 }
 
+/** "المتبقي عند العملاء" لصفقة شريك واحدة (صف sale_settlement واحد) — كام من رأس مال الشريك
+ * اللي دخل في الصفقة دي (`cost_recovered`) لسه برّه عند العميل ومرجعش للمحل. مفيش رقم متخزّن:
+ * بيتحسب وقت القراءة من مصدر الحقيقة الوحيد للتحصيل في المشروع:
+ *   المحصَّل من العقد = المقدّم (`down_payment`، اتقبض وقت التوقيع) + مجموع `installments.paid_amount`
+ *   لكل أقساط العقد — شامل الأقساط اللي حالتها `rescheduled` (المدفوع عليها قبل إعادة الهيكلة
+ *   فلوس اتحصّلت فعلًا ولسه محفوظ عليها) — ده نفس العمود اللي `performCollectPayment` بيحدّثه مع
+ *   كل إيصال، فأي تحصيل/تسوية مبكرة/إعادة هيكلة بتنعكس هنا تلقائيًا.
+ *   نصيب الشريك من المحصَّل = المحصَّل × `split_pct` (نسبته من الصفقة).
+ *   المتبقي عند العملاء = max(0, رأس ماله في الصفقة − نصيبه من المحصَّل).
+ * يعني التحصيل بيرجّع رأس المال الأول (المثال المتفق عليه مع العميل: 30,000 − 5,000 = 25,000)،
+ * والربح بييجي بعد ما رأس ماله يرجع بالكامل.
+ * - صفقة نقدية (`related_sale_id`): اتقبضت كاملة وقت البيع → صفر.
+ * - عقد ملغي: تسويته اتعكست بصف `contract_cancellation` → صفر.
+ * - صفوف قديمة من غير `split_pct` (قبل migration 0015): بتتعامل كأن الشريك ممول الصفقة كلها
+ *   (100%) — مفيش بيانات تاريخية كفاية لاستنتاج نسبته. */
+export function computePartnerDealOutstanding(
+  t: Pick<PartnerTransaction, "cost_recovered" | "split_pct" | "related_contract_id">,
+  contracts: InstallmentContract[],
+  installments: Pick<Installment, "contract_id" | "paid_amount">[],
+): { capital: number; collectedShare: number; outstanding: number; cancelled: boolean } {
+  const capital = Math.round(t.cost_recovered * 100) / 100;
+  if (!t.related_contract_id) {
+    return { capital, collectedShare: capital, outstanding: 0, cancelled: false };
+  }
+  const contract = contracts.find((c) => c.id === t.related_contract_id);
+  if (!contract) return { capital, collectedShare: 0, outstanding: 0, cancelled: false };
+  if (contract.status === "cancelled") {
+    return { capital, collectedShare: 0, outstanding: 0, cancelled: true };
+  }
+  const collected =
+    contract.down_payment +
+    installments
+      .filter((i) => i.contract_id === contract.id)
+      .reduce((sum, i) => sum + i.paid_amount, 0);
+  const splitPct = t.split_pct ?? 100;
+  const collectedShare = Math.round(collected * (splitPct / 100) * 100) / 100;
+  const outstanding = Math.max(0, Math.round((capital - collectedShare) * 100) / 100);
+  return { capital, collectedShare, outstanding, cancelled: false };
+}
+
+/** إجمالي "عند العملاء" لشريك واحد = مجموع computePartnerDealOutstanding على كل صفقاته. */
+export function computePartnerOutstanding(
+  partnerId: string,
+  transactions: PartnerTransaction[],
+  contracts: InstallmentContract[],
+  installments: Pick<Installment, "contract_id" | "paid_amount">[],
+): number {
+  return (
+    Math.round(
+      transactions
+        .filter((t) => t.partner_id === partnerId && t.type === "sale_settlement")
+        .reduce(
+          (sum, t) => sum + computePartnerDealOutstanding(t, contracts, installments).outstanding,
+          0,
+        ) * 100,
+    ) / 100
+  );
+}
+
 /** صرف أرباح حقيقي لشريك — مختلف جوهريًا عن useWithdrawPartnerFunds: ده بيخصم فعليًا من خزينة
  * (أو خزينتين لو المبلغ أكبر من رصيد واحدة) عبر `partner_profit_payout` treasury_movement
  * حقيقي، بينما withdrawal لا يمس أي خزينة إطلاقًا. السقف هنا الأرباح المتاحة فقط (لا رأس

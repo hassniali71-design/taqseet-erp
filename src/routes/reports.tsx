@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { DateInput } from "@/components/ui/DateInput";
 import { SalesTrendChart } from "@/components/ui/Charts";
 import { SearchPicker } from "@/components/ui/SearchPicker";
 import { Panel, StatCard } from "@/components/ui/StatCard";
@@ -93,23 +94,11 @@ function ReportsPage() {
           <div className="mt-4 flex flex-wrap items-end gap-3">
             <label className="block space-y-1">
               <span className="text-xs font-medium text-foreground">من تاريخ</span>
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="form-input"
-                dir="ltr"
-              />
+              <DateInput value={fromDate} onChange={(v) => setFromDate(v)} />
             </label>
             <label className="block space-y-1">
               <span className="text-xs font-medium text-foreground">إلى تاريخ</span>
-              <input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                className="form-input"
-                dir="ltr"
-              />
+              <DateInput value={toDate} onChange={(v) => setToDate(v)} />
             </label>
           </div>
         )}

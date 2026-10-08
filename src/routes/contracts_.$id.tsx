@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { DateInput } from "@/components/ui/DateInput";
 import { LabeledValue } from "@/components/ui/LabeledValue";
 import { CONTRACT_STATUS_LABEL } from "@/lib/contract-status";
 import {
@@ -422,14 +423,7 @@ function ContractDetailPage() {
           >
             <label className="block space-y-1">
               <span className="text-xs font-medium text-foreground">تاريخ الوعد *</span>
-              <input
-                type="date"
-                required
-                value={promiseDate}
-                onChange={(e) => setPromiseDate(e.target.value)}
-                className="form-input"
-                dir="ltr"
-              />
+              <DateInput required value={promiseDate} onChange={(v) => setPromiseDate(v)} />
             </label>
             <label className="block space-y-1">
               <span className="text-xs font-medium text-foreground">المبلغ المتوقع *</span>

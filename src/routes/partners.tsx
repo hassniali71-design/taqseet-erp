@@ -2,15 +2,19 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { DateInput } from "@/components/ui/DateInput";
 import { subscribeData } from "@/lib/data-store";
 import {
   computePartnerAllocatedCost,
   computePartnerBalance,
+  computePartnerOutstanding,
   computePartnerTotalFunded,
   dateInputToTimestamp,
   useAddPartnerFunding,
   useCreatePartner,
   useDeletePartner,
+  useInstallmentContracts,
+  useInstallments,
   usePartners,
   usePartnerTransactions,
   useUpdatePartner,
@@ -57,6 +61,8 @@ function PartnersPage() {
 
   const { data: partners = [] } = usePartners(session?.tenant_id);
   const { data: transactions = [] } = usePartnerTransactions(session?.tenant_id);
+  const { data: contracts = [] } = useInstallmentContracts(session?.tenant_id);
+  const { data: installments = [] } = useInstallments(session?.tenant_id);
   const createPartnerMutation = useCreatePartner(session?.tenant_id);
   const updatePartnerMutation = useUpdatePartner(session?.tenant_id);
   const deletePartnerMutation = useDeletePartner(session?.tenant_id);
@@ -170,6 +176,15 @@ function PartnersPage() {
     (sum, p) => sum + computePartnerBalance(p.id, transactions),
     0,
   );
+  // مجموع "عند العملاء" لكل شريك على حدة — نفس الدالة اللي صفحة الشريك بتستخدمها، فالرقمين
+  // دايمًا متطابقين ومفيش خلط بين الشركاء (كل صف sale_settlement بيتحسب لشريكه بنسبته بس).
+  const totalOutstandingAll =
+    Math.round(
+      partners.reduce(
+        (sum, p) => sum + computePartnerOutstanding(p.id, transactions, contracts, installments),
+        0,
+      ) * 100,
+    ) / 100;
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -194,7 +209,7 @@ function PartnersPage() {
         {partners.length > 0 && (
           <section className="mt-6">
             <h2 className="text-sm font-bold text-foreground">نظرة عامة على كل الشركاء</h2>
-            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
               <div className="rounded-xl border border-border bg-card p-4">
                 <p className="text-xs text-muted-foreground">إجمالي التمويل</p>
                 <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
@@ -211,6 +226,12 @@ function PartnersPage() {
                 <p className="text-xs text-muted-foreground">إجمالي أرباح الشركاء</p>
                 <p className="mt-1 text-xl font-bold text-success" dir="ltr">
                   {totalProfitAll.toLocaleString("ar-EG")} ج.م
+                </p>
+              </div>
+              <div className="rounded-xl border border-border bg-card p-4">
+                <p className="text-xs text-muted-foreground">إجمالي المبالغ عند العملاء</p>
+                <p className="mt-1 text-xl font-bold text-foreground" dir="ltr">
+                  {totalOutstandingAll.toLocaleString("ar-EG")} ج.م
                 </p>
               </div>
               <div className="rounded-xl border-2 border-primary/40 bg-primary/5 p-4">
@@ -261,12 +282,9 @@ function PartnersPage() {
               </Field>
               {editingId === "new" && (
                 <Field label="تاريخ الانضمام (سيبه فاضي لو دلوقتي)">
-                  <input
-                    type="date"
+                  <DateInput
                     value={form.join_date}
-                    onChange={(e) => setForm({ ...form, join_date: e.target.value })}
-                    className="form-input"
-                    dir="ltr"
+                    onChange={(v) => setForm({ ...form, join_date: v })}
                   />
                 </Field>
               )}
@@ -318,6 +336,12 @@ function PartnersPage() {
             const totalProfit = transactions
               .filter((t) => t.partner_id === partner.id && t.type === "sale_settlement")
               .reduce((sum, t) => sum + t.profit_amount, 0);
+            const outstanding = computePartnerOutstanding(
+              partner.id,
+              transactions,
+              contracts,
+              installments,
+            );
             const dealCount = transactions.filter(
               (t) => t.partner_id === partner.id && t.type === "sale_settlement",
             ).length;
@@ -416,6 +440,12 @@ function PartnersPage() {
                     <p className="text-xs text-muted-foreground">رصيده الحالي (بعد الربح)</p>
                     <p className="mt-0.5 text-base font-bold text-primary" dir="ltr">
                       {balance.toLocaleString("ar-EG")} ج.م
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">ليه عند العملاء</p>
+                    <p className="mt-0.5 text-base font-bold text-foreground" dir="ltr">
+                      {outstanding.toLocaleString("ar-EG")} ج.م
                     </p>
                   </div>
                 </div>

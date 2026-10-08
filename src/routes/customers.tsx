@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { DateInput } from "@/components/ui/DateInput";
 import { RiskBadge } from "@/components/ui/StatCard";
 import {
   computeCustomerExposure,
@@ -192,12 +193,9 @@ function CustomersPage() {
               </Field>
               {editingId === "new" && (
                 <Field label="تاريخ الانضمام (سيبه فاضي لو دلوقتي)">
-                  <input
-                    type="date"
+                  <DateInput
                     value={form.join_date}
-                    onChange={(e) => setForm({ ...form, join_date: e.target.value })}
-                    className="form-input"
-                    dir="ltr"
+                    onChange={(v) => setForm({ ...form, join_date: v })}
                   />
                 </Field>
               )}

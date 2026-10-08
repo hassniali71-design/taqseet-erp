@@ -11,6 +11,8 @@ import {
   computePartnerAllocatedCost,
   computePartnerAvailableProfit,
   computePartnerBalance,
+  computePartnerDealOutstanding,
+  computePartnerOutstanding,
   computePartnerTotalFunded,
   useAddPartnerFunding,
   useInstallmentContracts,
@@ -136,8 +138,12 @@ function PartnerDetailPage() {
   const deals = transactions
     .filter((t) => t.type === "sale_settlement")
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const avgProfitPerDeal =
-    deals.length > 0 ? Math.round((totalProfit / deals.length) * 100) / 100 : 0;
+  const outstandingAtCustomers = computePartnerOutstanding(
+    id,
+    allTransactions,
+    contracts,
+    allInstallments,
+  );
   const lastDealDate = deals[0]?.created_at;
 
   function productName(productId?: string) {
@@ -257,6 +263,7 @@ function PartnerDetailPage() {
         availableFunding,
         totalProfit,
         balance,
+        outstandingAtCustomers,
         dealCount: deals.length,
       },
       dealRows,
@@ -334,8 +341,8 @@ function PartnerDetailPage() {
           />
           <LabeledValue label="عدد الصفقات" value={String(deals.length)} valueDir="ltr" />
           <LabeledValue
-            label="متوسط الربح لكل صفقة"
-            value={`${avgProfitPerDeal.toLocaleString("ar-EG")} ج.م`}
+            label="ليك عند العملاء (لسه مرجعش)"
+            value={`${outstandingAtCustomers.toLocaleString("ar-EG")} ج.م`}
             valueDir="ltr"
           />
           <LabeledValue
@@ -522,6 +529,7 @@ function PartnerDetailPage() {
                     .filter((i: Installment) => i.contract_id === source.contractId)
                     .sort((a, b) => a.seq - b.seq)
                 : [];
+              const dealOutstanding = computePartnerDealOutstanding(t, contracts, allInstallments);
               const isExpanded = expandedDealId === t.id;
               return (
                 <div key={t.id} className="rounded-xl border border-border bg-card p-4 shadow-sm">
@@ -614,6 +622,20 @@ function PartnerDetailPage() {
                       value={`${t.profit_amount.toLocaleString("ar-EG")} ج.م`}
                       valueDir="ltr"
                       tone="success"
+                    />
+                    <LabeledValue
+                      label="اتحصّل من نصيبه"
+                      value={
+                        dealOutstanding.cancelled
+                          ? "العقد ملغي"
+                          : `${dealOutstanding.collectedShare.toLocaleString("ar-EG")} ج.م`
+                      }
+                      valueDir="ltr"
+                    />
+                    <LabeledValue
+                      label="المتبقي عند العملاء"
+                      value={`${dealOutstanding.outstanding.toLocaleString("ar-EG")} ج.م`}
+                      valueDir="ltr"
                     />
                   </div>
 

@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { DateInput } from "@/components/ui/DateInput";
 import {
   useAdvanceDeliveryStatus,
   useDeliveryOrders,
@@ -115,13 +116,7 @@ function DeliveriesPage() {
             </label>
             <label className="block space-y-1">
               <span className="text-xs font-medium text-foreground">تاريخ التوصيل *</span>
-              <input
-                type="date"
-                value={scheduledDate}
-                onChange={(e) => setScheduledDate(e.target.value)}
-                className="form-input"
-                dir="ltr"
-              />
+              <DateInput value={scheduledDate} onChange={(v) => setScheduledDate(v)} />
             </label>
           </div>
           <button

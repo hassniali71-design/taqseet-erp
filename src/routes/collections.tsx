@@ -3,6 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { DateInput } from "@/components/ui/DateInput";
 import { getDaysOverdue, getEffectiveInstallmentStatus, subscribeData } from "@/lib/data-store";
 import {
   dateInputToTimestamp,
@@ -279,15 +280,13 @@ function CollectionsWorkbenchPage() {
                         className="form-input w-24"
                         dir="ltr"
                       />
-                      <input
-                        type="date"
+                      <DateInput
                         title="تاريخ التحصيل (سيبه فاضي لو دلوقتي)"
                         value={collectDates[row.contractId] ?? ""}
-                        onChange={(e) =>
-                          setCollectDates((prev) => ({ ...prev, [row.contractId]: e.target.value }))
+                        onChange={(v) =>
+                          setCollectDates((prev) => ({ ...prev, [row.contractId]: v }))
                         }
-                        className="form-input w-32"
-                        dir="ltr"
+                        className="w-44"
                       />
                       <button
                         onClick={() =>
