@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
-    "postbuild": "bun run scripts/fix-cloudflare-chunks.ts",
+    "postbuild": "bun run scripts/fix-cloudflare-chunks.ts && bun run scripts/check-no-secrets-in-bundle.ts",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "deploy": "bun run build && bunx nitro deploy --prebuilt",
