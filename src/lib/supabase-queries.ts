@@ -2158,13 +2158,20 @@ export function useCollectPayment(tenantId: string | undefined) {
   });
 }
 
-/** تعديل/حذف إيصال تحصيل متسجّل بالغلط (بند 69 — طلب العميل الصريح، migration 0025). نفس
- * الدالة للاتنين: `newAmount = 0` يعني حذف. بتعكس توزيع الإيصال القديم على الأقساط، وتعيد توزيع
- * المبلغ الجديد بنفس قاعدة performCollectPayment بالظبط (الأقدم استحقاقًا أولًا)، وتحدّث حالة
- * كل قسط وحالة العقد، وتسجّل الفرق في الخزينة والمحاسبة كحركة/قيد عكسي (مفيش حذف لأي حركة
- * مالية — الخزينة والقيود append-only زي ما هم). كل الأرقام اللي بتتحسب من الأقساط (المديونية،
- * التحصيل، كشف الحساب، "المتبقي عند العملاء" للشركاء، التقارير) بتتزامن تلقائيًا لأنها مش
- * متخزّنة في أي حتة تانية. */
+/** تعديل/حذف إيصال تحصيل متسجّل بالغلط (بند 69/70 — طلب العميل الصريح، migration 0025). نفس
+ * الدالة للاتنين: `newAmount = 0` يعني حذف.
+ *
+ * بعد التعديل/الحذف بيتعاد ترتيب **كل** إيصالات العقد (بند 70): الإيصالات بتتفرد من جديد بترتيب
+ * تاريخها، وكل إيصال بيسدد الأقدم استحقاقًا الأول — نفس قاعدة performCollectPayment بالظبط —
+ * فالنتيجة دايمًا زي ما لو الإيصالات الصح بس هي اللي اتسجلت من الأول (مفيش قسط قديم يبان متأخر
+ * وقسط بعده مدفوع). الأقساط اللي اتعملها إعادة هيكلة/إعفاء (rescheduled/waived) مجمّدة زي ما هي:
+ * الجزء من أي إيصال اللي كان عليها بيفضل عليها، والباقي بس هو اللي بيتعاد توزيعه على الأقساط
+ * السارية. أي مدفوع على قسط مش متفسَّر بإيصال (بيانات قديمة) بيتساب كأساس ومبيتلمسش.
+ *
+ * الأثر المالي: الفرق بين المبلغ القديم والجديد بس بيتسجل في الخزينة والمحاسبة كحركة/قيد عكسي
+ * (مفيش حذف لأي حركة مالية — الخزينة والقيود append-only). إعادة الترتيب نفسها مالهاش أثر مالي
+ * (نفس الفلوس، اتوزعت على أقساط تانية). كل الأرقام اللي بتتحسب من الأقساط (المديونية، التحصيل،
+ * كشف الحساب، "المتبقي عند العملاء" للشركاء، التقارير) بتتزامن تلقائيًا. */
 async function performRewritePayment(
   tenantId: string,
   paymentId: string,
@@ -2184,7 +2191,6 @@ async function performRewritePayment(
     .single();
   if (paymentError || !payment) throw new Error("الإيصال غير موجود");
   const oldAmount = payment.amount as number;
-  const oldAllocations = (payment.allocations ?? []) as InstallmentPayment["allocations"];
   const receipt = payment.receipt_number as string;
 
   const { data: contract, error: contractError } = await supabase
@@ -2195,60 +2201,85 @@ async function performRewritePayment(
   if (contractError || !contract) throw new Error("العقد غير موجود");
   if (contract.status === "cancelled") throw new Error("العقد ده ملغي — مينفعش تعديل تحصيلاته");
 
-  const { data: rows, error: instError } = await supabase
-    .from("installments")
-    .select("*")
-    .eq("contract_id", contract.id as string);
+  const [{ data: instRows, error: instError }, { data: payRows, error: payError }] =
+    await Promise.all([
+      supabase
+        .from("installments")
+        .select("*")
+        .eq("contract_id", contract.id as string),
+      supabase
+        .from("installment_payments")
+        .select("*")
+        .eq("contract_id", contract.id as string),
+    ]);
   if (instError) throw new Error(instError.message);
-  const installments = (rows ?? []) as Installment[];
-  const byId = new Map(installments.map((i) => [i.id, i]));
+  if (payError) throw new Error(payError.message);
+  const installments = (instRows ?? []) as Installment[];
+  const payments = (payRows ?? []) as InstallmentPayment[];
+  const isLive = (i: Installment) => i.status !== "waived" && i.status !== "rescheduled";
+  const liveIds = new Set(installments.filter(isLive).map((i) => i.id));
+  const live = installments.filter(isLive).sort((a, b) => a.seq - b.seq);
 
-  for (const a of oldAllocations) {
-    const inst = byId.get(a.installment_id);
-    if (!inst || inst.status === "rescheduled" || inst.status === "waived") {
-      throw new Error(
-        "العقد ده اتعمله إعادة هيكلة أو إعفاء بعد الإيصال ده — مينفعش تعديله أو حذفه دلوقتي",
-      );
-    }
-  }
-
-  const paid = new Map(installments.map((i) => [i.id, i.paid_amount]));
-  for (const a of oldAllocations) {
-    paid.set(a.installment_id, Math.max(0, round((paid.get(a.installment_id) ?? 0) - a.amount)));
-  }
-
-  const live = installments
-    .filter((i) => i.status !== "waived" && i.status !== "rescheduled")
-    .sort((a, b) => a.seq - b.seq);
-  const newAllocations: InstallmentPayment["allocations"] = [];
-  if (newAmount > 0) {
-    const owed = round(
-      live.reduce((sum, i) => sum + Math.max(0, i.amount - (paid.get(i.id) ?? 0)), 0),
+  const edited = payments.find((p) => p.id === paymentId) ?? (payment as InstallmentPayment);
+  if (edited.allocations.some((a) => !liveIds.has(a.installment_id))) {
+    throw new Error(
+      "الإيصال ده كان على أقساط اتعملها إعادة هيكلة أو إعفاء — مينفعش تعديله أو حذفه دلوقتي",
     );
-    if (newAmount > owed) {
-      throw new Error(`المبلغ (${newAmount}) أكبر من المتبقي على العقد (${owed} ج.م)`);
-    }
-    let remaining = newAmount;
+  }
+
+  // الأساس: المدفوع على كل قسط ساري اللي مش متفسَّر بأي إيصال (بيانات قديمة) — بيفضل زي ما هو.
+  const paid = new Map<string, number>();
+  for (const inst of live) {
+    const explained = payments
+      .flatMap((p) => p.allocations)
+      .filter((a) => a.installment_id === inst.id)
+      .reduce((sum, a) => sum + a.amount, 0);
+    paid.set(inst.id, Math.max(0, round(inst.paid_amount - explained)));
+  }
+
+  // الإيصالات بالترتيب الزمني بعد التعديل (الإيصال المعدّل بتاريخه الجديد لو اتغيّر).
+  const ordered = payments
+    .filter((p) => p.id !== paymentId || newAmount > 0)
+    .map((p) => ({
+      p,
+      amount: p.id === paymentId ? newAmount : p.amount,
+      date: p.id === paymentId && newCreatedAt ? newCreatedAt : p.created_at,
+    }))
+    .sort(
+      (x, y) =>
+        x.date.localeCompare(y.date) || x.p.receipt_number.localeCompare(y.p.receipt_number),
+    );
+
+  const newAllocations = new Map<string, InstallmentPayment["allocations"]>();
+  for (const { p, amount } of ordered) {
+    const frozen = p.allocations.filter((a) => !liveIds.has(a.installment_id));
+    let remaining = round(amount - frozen.reduce((sum, a) => sum + a.amount, 0));
+    const allocs = [...frozen];
     for (const inst of live) {
       if (remaining <= 0) break;
       const owedHere = round(inst.amount - (paid.get(inst.id) ?? 0));
       if (owedHere <= 0) continue;
       const apply = Math.min(owedHere, remaining);
-      newAllocations.push({ installment_id: inst.id, amount: apply });
+      allocs.push({ installment_id: inst.id, amount: apply });
       paid.set(inst.id, round((paid.get(inst.id) ?? 0) + apply));
       remaining = round(remaining - apply);
     }
+    if (remaining > 0) {
+      const totalLive = round(live.reduce((sum, i) => sum + i.amount, 0));
+      throw new Error(`المبلغ ده مع باقي تحصيلات العقد أكبر من إجمالي أقساطه (${totalLive} ج.م)`);
+    }
+    newAllocations.set(p.id, allocs);
   }
 
-  // الإيصال نفسه الأول: لو migration 0025 لسه متطبّقش، RLS بترفض بصمت (صفر صفوف) — نوقف هنا
-  // قبل ما نلمس أي قسط.
+  // الإيصال المعدّل الأول: لو migration 0025 لسه متطبّقش، RLS بترفض بصمت (صفر صفوف) — نوقف هنا
+  // قبل ما نلمس أي قسط أو إيصال تاني.
   const change =
     newAmount > 0
       ? supabase
           .from("installment_payments")
           .update({
             amount: newAmount,
-            allocations: newAllocations,
+            allocations: newAllocations.get(paymentId),
             ...(newCreatedAt ? { created_at: newCreatedAt } : {}),
           })
           .eq("id", paymentId)
@@ -2262,7 +2293,19 @@ async function performRewritePayment(
     );
   }
 
-  for (const inst of installments) {
+  // باقي الإيصالات اللي توزيعها اتغيّر بسبب إعادة الترتيب (المبلغ نفسه مبيتغيّرش).
+  for (const p of payments) {
+    if (p.id === paymentId) continue;
+    const allocs = newAllocations.get(p.id);
+    if (!allocs || JSON.stringify(allocs) === JSON.stringify(p.allocations)) continue;
+    const { error } = await supabase
+      .from("installment_payments")
+      .update({ allocations: allocs })
+      .eq("id", p.id);
+    if (error) throw new Error(error.message);
+  }
+
+  for (const inst of live) {
     const nextPaid = paid.get(inst.id) ?? 0;
     if (nextPaid === inst.paid_amount) continue;
     const status = nextPaid >= inst.amount ? "paid" : nextPaid > 0 ? "partially_paid" : "scheduled";
@@ -2275,7 +2318,7 @@ async function performRewritePayment(
 
   if (contract.status !== "restructured") {
     const allPaid = live.every((i) => (paid.get(i.id) ?? 0) >= i.amount);
-    const anyPaid = installments.some((i) => (paid.get(i.id) ?? 0) > 0);
+    const anyPaid = [...paid.values()].some((v) => v > 0);
     const nextStatus = allPaid
       ? contract.status === "settled_early"
         ? "settled_early"
@@ -2301,7 +2344,11 @@ async function performRewritePayment(
     old_value: payment,
     new_value:
       newAmount > 0
-        ? { amount: newAmount, allocations: newAllocations, created_at: newCreatedAt }
+        ? {
+            amount: newAmount,
+            allocations: newAllocations.get(paymentId),
+            created_at: newCreatedAt,
+          }
         : null,
     reason: reason.trim(),
   });
