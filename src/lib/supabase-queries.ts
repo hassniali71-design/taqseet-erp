@@ -2158,6 +2158,238 @@ export function useCollectPayment(tenantId: string | undefined) {
   });
 }
 
+/** تعديل/حذف إيصال تحصيل متسجّل بالغلط (بند 69 — طلب العميل الصريح، migration 0025). نفس
+ * الدالة للاتنين: `newAmount = 0` يعني حذف. بتعكس توزيع الإيصال القديم على الأقساط، وتعيد توزيع
+ * المبلغ الجديد بنفس قاعدة performCollectPayment بالظبط (الأقدم استحقاقًا أولًا)، وتحدّث حالة
+ * كل قسط وحالة العقد، وتسجّل الفرق في الخزينة والمحاسبة كحركة/قيد عكسي (مفيش حذف لأي حركة
+ * مالية — الخزينة والقيود append-only زي ما هم). كل الأرقام اللي بتتحسب من الأقساط (المديونية،
+ * التحصيل، كشف الحساب، "المتبقي عند العملاء" للشركاء، التقارير) بتتزامن تلقائيًا لأنها مش
+ * متخزّنة في أي حتة تانية. */
+async function performRewritePayment(
+  tenantId: string,
+  paymentId: string,
+  newAmount: number,
+  reason: string,
+  actorUserId: string | null,
+  newCreatedAt?: string,
+): Promise<void> {
+  if (!reason.trim()) throw new Error("سبب التعديل/الحذف مطلوب");
+  if (newAmount < 0) throw new Error("المبلغ لا يمكن أن يكون سالبًا");
+  const round = (n: number) => Math.round(n * 100) / 100;
+
+  const { data: payment, error: paymentError } = await supabase
+    .from("installment_payments")
+    .select("*")
+    .eq("id", paymentId)
+    .single();
+  if (paymentError || !payment) throw new Error("الإيصال غير موجود");
+  const oldAmount = payment.amount as number;
+  const oldAllocations = (payment.allocations ?? []) as InstallmentPayment["allocations"];
+  const receipt = payment.receipt_number as string;
+
+  const { data: contract, error: contractError } = await supabase
+    .from("installment_contracts")
+    .select("*")
+    .eq("id", payment.contract_id as string)
+    .single();
+  if (contractError || !contract) throw new Error("العقد غير موجود");
+  if (contract.status === "cancelled") throw new Error("العقد ده ملغي — مينفعش تعديل تحصيلاته");
+
+  const { data: rows, error: instError } = await supabase
+    .from("installments")
+    .select("*")
+    .eq("contract_id", contract.id as string);
+  if (instError) throw new Error(instError.message);
+  const installments = (rows ?? []) as Installment[];
+  const byId = new Map(installments.map((i) => [i.id, i]));
+
+  for (const a of oldAllocations) {
+    const inst = byId.get(a.installment_id);
+    if (!inst || inst.status === "rescheduled" || inst.status === "waived") {
+      throw new Error(
+        "العقد ده اتعمله إعادة هيكلة أو إعفاء بعد الإيصال ده — مينفعش تعديله أو حذفه دلوقتي",
+      );
+    }
+  }
+
+  const paid = new Map(installments.map((i) => [i.id, i.paid_amount]));
+  for (const a of oldAllocations) {
+    paid.set(a.installment_id, Math.max(0, round((paid.get(a.installment_id) ?? 0) - a.amount)));
+  }
+
+  const live = installments
+    .filter((i) => i.status !== "waived" && i.status !== "rescheduled")
+    .sort((a, b) => a.seq - b.seq);
+  const newAllocations: InstallmentPayment["allocations"] = [];
+  if (newAmount > 0) {
+    const owed = round(
+      live.reduce((sum, i) => sum + Math.max(0, i.amount - (paid.get(i.id) ?? 0)), 0),
+    );
+    if (newAmount > owed) {
+      throw new Error(`المبلغ (${newAmount}) أكبر من المتبقي على العقد (${owed} ج.م)`);
+    }
+    let remaining = newAmount;
+    for (const inst of live) {
+      if (remaining <= 0) break;
+      const owedHere = round(inst.amount - (paid.get(inst.id) ?? 0));
+      if (owedHere <= 0) continue;
+      const apply = Math.min(owedHere, remaining);
+      newAllocations.push({ installment_id: inst.id, amount: apply });
+      paid.set(inst.id, round((paid.get(inst.id) ?? 0) + apply));
+      remaining = round(remaining - apply);
+    }
+  }
+
+  // الإيصال نفسه الأول: لو migration 0025 لسه متطبّقش، RLS بترفض بصمت (صفر صفوف) — نوقف هنا
+  // قبل ما نلمس أي قسط.
+  const change =
+    newAmount > 0
+      ? supabase
+          .from("installment_payments")
+          .update({
+            amount: newAmount,
+            allocations: newAllocations,
+            ...(newCreatedAt ? { created_at: newCreatedAt } : {}),
+          })
+          .eq("id", paymentId)
+          .select("id")
+      : supabase.from("installment_payments").delete().eq("id", paymentId).select("id");
+  const { data: changed, error: changeError } = await change;
+  if (changeError) throw new Error(changeError.message);
+  if (!changed || changed.length === 0) {
+    throw new Error(
+      "قاعدة البيانات رفضت التعديل — لازم migration 0025 يتشغّل على Supabase الأول (SQL Editor)",
+    );
+  }
+
+  for (const inst of installments) {
+    const nextPaid = paid.get(inst.id) ?? 0;
+    if (nextPaid === inst.paid_amount) continue;
+    const status = nextPaid >= inst.amount ? "paid" : nextPaid > 0 ? "partially_paid" : "scheduled";
+    const { error } = await supabase
+      .from("installments")
+      .update({ paid_amount: nextPaid, status })
+      .eq("id", inst.id);
+    if (error) throw new Error(error.message);
+  }
+
+  if (contract.status !== "restructured") {
+    const allPaid = live.every((i) => (paid.get(i.id) ?? 0) >= i.amount);
+    const anyPaid = installments.some((i) => (paid.get(i.id) ?? 0) > 0);
+    const nextStatus = allPaid
+      ? contract.status === "settled_early"
+        ? "settled_early"
+        : "settled"
+      : anyPaid
+        ? "partially_paid"
+        : "active";
+    if (nextStatus !== contract.status) {
+      const { error } = await supabase
+        .from("installment_contracts")
+        .update({ status: nextStatus })
+        .eq("id", contract.id as string);
+      if (error) throw new Error(error.message);
+    }
+  }
+
+  await insertAuditLog({
+    tenant_id: tenantId,
+    user_id: actorUserId,
+    action: newAmount > 0 ? "installment_payment.update" : "installment_payment.delete",
+    entity: "installment_payments",
+    entity_id: paymentId,
+    old_value: payment,
+    new_value:
+      newAmount > 0
+        ? { amount: newAmount, allocations: newAllocations, created_at: newCreatedAt }
+        : null,
+    reason: reason.trim(),
+  });
+
+  const delta = round(newAmount - oldAmount);
+  if (delta !== 0) {
+    try {
+      const { data: original } = await supabase
+        .from("treasury_movements")
+        .select("account_id")
+        .eq("tenant_id", tenantId)
+        .eq("type", "collection")
+        .eq("reference", receipt)
+        .order("created_at", { ascending: true })
+        .limit(1);
+      const accountId =
+        (original?.[0]?.account_id as string | undefined) ??
+        (await findAccountIdByKind(tenantId, "cashier"));
+      const label = newAmount > 0 ? "تعديل" : "إلغاء";
+      if (accountId) {
+        await performPostTreasuryMovement(
+          tenantId,
+          accountId,
+          delta,
+          "collection",
+          actorUserId,
+          receipt,
+          `${label} تحصيل ${receipt}: ${reason.trim()}`,
+        );
+      }
+      const abs = Math.abs(delta);
+      await performPostJournalEntry(
+        tenantId,
+        delta > 0
+          ? [
+              { account_code: "1000", account_name: ACCOUNT_NAMES["1000"], debit: abs, credit: 0 },
+              { account_code: "1100", account_name: ACCOUNT_NAMES["1100"], debit: 0, credit: abs },
+            ]
+          : [
+              { account_code: "1100", account_name: ACCOUNT_NAMES["1100"], debit: abs, credit: 0 },
+              { account_code: "1000", account_name: ACCOUNT_NAMES["1000"], debit: 0, credit: abs },
+            ],
+        `${label} تحصيل ${receipt}`,
+        "installment_payment_adjustment",
+        paymentId,
+      );
+    } catch (e) {
+      console.warn("فشل ترحيل فرق التحصيل المالي:", e instanceof Error ? e.message : e);
+    }
+  }
+}
+
+/** تعديل إيصال تحصيل (newAmount > 0) أو حذفه (newAmount = 0) — انظر performRewritePayment. */
+export function useRewriteInstallmentPayment(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      paymentId: string;
+      newAmount: number;
+      reason: string;
+      actorUserId: string | null;
+      newCreatedAt?: string;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      await performRewritePayment(
+        tenantId,
+        input.paymentId,
+        input.newAmount,
+        input.reason,
+        input.actorUserId,
+        input.newCreatedAt,
+      );
+    },
+    onSuccess: () => {
+      for (const key of [
+        "installments",
+        "installment_contracts",
+        "installment_payments",
+        "treasury_movements",
+        "journal_entries",
+        "audit-logs",
+      ]) {
+        void queryClient.invalidateQueries({ queryKey: [key, tenantId] });
+      }
+    },
+  });
+}
+
 export function useRecordPromise(tenantId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({

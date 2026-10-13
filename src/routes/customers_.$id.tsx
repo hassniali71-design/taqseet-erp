@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { CustomerStatement } from "@/components/CustomerStatement";
 import { RiskBadge } from "@/components/ui/StatCard";
 import { CONTRACT_STATUS_LABEL } from "@/lib/contract-status";
 import {
@@ -120,6 +121,11 @@ function CustomerDetailPage() {
               {customer.code}
               {customer.phone ? ` · ${customer.phone}` : ""}
             </p>
+            {customer.ledger_book && (
+              <p className="mt-1 text-sm text-muted-foreground">
+                الدفتر: <span className="font-bold text-foreground">{customer.ledger_book}</span>
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <RiskBadge
@@ -167,6 +173,20 @@ function CustomerDetailPage() {
             </p>
           </div>
         </div>
+
+        <section className="mt-8">
+          <h2 className="text-lg font-bold text-foreground">كشف حساب العميل</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            كل فواتيره وعقوده وتحصيلاته ومرتجعاته — أي تحصيل متسجّل بالغلط تقدر تعدّل مبلغه/تاريخه
+            أو تحذفه من هنا (باسورد الأونر + سبب)، والمديونية والأقساط والخزينة وأرقام الشركاء
+            بتتحدّث تلقائيًا.
+          </p>
+          <CustomerStatement
+            tenantId={session.tenant_id}
+            customer={customer}
+            actorUserId={actorUserId}
+          />
+        </section>
 
         <section className="mt-8">
           <div className="flex items-center justify-between">

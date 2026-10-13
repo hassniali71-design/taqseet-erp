@@ -147,6 +147,8 @@ export interface Customer {
   alt_phone?: string;
   address?: string;
   notes?: string;
+  /** "الدفتر" — نص حر اختياري (migration 0025). */
+  ledger_book?: string | null;
   status: "active" | "inactive";
   created_at: string;
 }

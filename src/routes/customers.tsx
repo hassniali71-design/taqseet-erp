@@ -19,6 +19,7 @@ import {
   useSales,
   useUpdateCustomer,
 } from "@/lib/supabase-queries";
+import { matchesSearch } from "@/lib/text-filter";
 import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
 import type { Customer } from "@/types";
@@ -33,6 +34,7 @@ type FormState = {
   alt_phone: string;
   address: string;
   notes: string;
+  ledger_book: string;
   join_date: string;
 };
 
@@ -42,6 +44,7 @@ const EMPTY_FORM: FormState = {
   alt_phone: "",
   address: "",
   notes: "",
+  ledger_book: "",
   join_date: "",
 };
 
@@ -62,12 +65,16 @@ function CustomersPage() {
   const deleteCustomerMutation = useDeleteCustomer(session?.tenant_id);
   const { requestConfirm, dialog: passwordDialog } = useOwnerPasswordConfirm();
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
 
   if (!session) return null;
   const gracePeriodDays = settingsData?.grace_period_days ?? 3;
   // Extracted so nested closures below see a plain `string`, not the `Session | null` union
   // TypeScript falls back to for a captured outer variable inside a function body.
   const actorUserId = session.user_id;
+  const filteredCustomers = customers.filter((c) =>
+    matchesSearch(search, c.name, c.code, c.phone, c.ledger_book),
+  );
 
   function startCreate() {
     setForm(EMPTY_FORM);
@@ -81,6 +88,7 @@ function CustomersPage() {
       alt_phone: customer.alt_phone ?? "",
       address: customer.address ?? "",
       notes: customer.notes ?? "",
+      ledger_book: customer.ledger_book ?? "",
       join_date: "",
     });
     setEditingId(customer.id);
@@ -95,14 +103,20 @@ function CustomersPage() {
       ...(form.alt_phone.trim() && { alt_phone: form.alt_phone.trim() }),
       ...(form.notes.trim() && { notes: form.notes.trim() }),
     };
+    const ledgerBook = form.ledger_book.trim();
     if (editingId === "new") {
       createCustomerMutation.mutate({
-        input: payload,
+        input: { ...payload, ...(ledgerBook && { ledger_book: ledgerBook }) },
         actorUserId,
         ...(form.join_date && { createdAt: dateInputToTimestamp(form.join_date) }),
       });
     } else if (editingId) {
-      updateCustomerMutation.mutate({ id: editingId, patch: payload, actorUserId });
+      // null صريح عشان مسح الدفتر من التعديل يتحفظ فعلًا (مش يتجاهل).
+      updateCustomerMutation.mutate({
+        id: editingId,
+        patch: { ...payload, ledger_book: ledgerBook || null },
+        actorUserId,
+      });
     }
     setEditingId(null);
     setForm(EMPTY_FORM);
@@ -191,6 +205,14 @@ function CustomersPage() {
                   dir="ltr"
                 />
               </Field>
+              <Field label="الدفتر (اختياري — نص حر)">
+                <input
+                  value={form.ledger_book}
+                  onChange={(e) => setForm({ ...form, ledger_book: e.target.value })}
+                  placeholder="مثلًا: دفتر 3 / دفتر الحاج محمد"
+                  className="form-input"
+                />
+              </Field>
               {editingId === "new" && (
                 <Field label="تاريخ الانضمام (سيبه فاضي لو دلوقتي)">
                   <DateInput
@@ -229,7 +251,17 @@ function CustomersPage() {
           </form>
         )}
 
-        <div className="mt-6 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
+        <label className="mt-6 block max-w-sm space-y-1">
+          <span className="text-xs font-medium text-foreground">بحث عن عميل</span>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="اكتب اسم العميل (أو كوده/تليفونه/دفتره)..."
+            className="form-input"
+          />
+        </label>
+
+        <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-right text-sm">
             <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
               <tr>
@@ -237,6 +269,7 @@ function CustomersPage() {
                 <th className="px-4 py-3 font-medium">الاسم</th>
                 <th className="px-4 py-3 font-medium">الهاتف</th>
                 <th className="px-4 py-3 font-medium">العنوان</th>
+                <th className="px-4 py-3 font-medium">الدفتر</th>
                 <th className="px-4 py-3 font-medium">إجمالي المشتريات</th>
                 <th className="px-4 py-3 font-medium">المديونية الحالية</th>
                 <th className="px-4 py-3 font-medium">التقييم</th>
@@ -245,7 +278,7 @@ function CustomersPage() {
               </tr>
             </thead>
             <tbody>
-              {customers.map((customer) => {
+              {filteredCustomers.map((customer) => {
                 const totalPurchased =
                   sales
                     .filter((s) => s.customer_id === customer.id)
@@ -272,6 +305,7 @@ function CustomersPage() {
                       {customer.phone ?? "—"}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{customer.address ?? "—"}</td>
+                    <td className="px-4 py-3 text-foreground">{customer.ledger_book || "—"}</td>
                     <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
                       {totalPurchased.toLocaleString("ar-EG")} ج.م
                     </td>
@@ -327,10 +361,14 @@ function CustomersPage() {
                   </tr>
                 );
               })}
-              {customers.length === 0 && (
+              {filteredCustomers.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">
-                    {isLoading ? "جارٍ التحميل..." : "لا يوجد عملاء بعد."}
+                  <td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">
+                    {isLoading
+                      ? "جارٍ التحميل..."
+                      : customers.length === 0
+                        ? "لا يوجد عملاء بعد."
+                        : "مفيش عميل بالاسم ده."}
                   </td>
                 </tr>
               )}

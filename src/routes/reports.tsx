@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { CustomerStatement } from "@/components/CustomerStatement";
 import { DateInput } from "@/components/ui/DateInput";
 import { SalesTrendChart } from "@/components/ui/Charts";
 import { SearchPicker } from "@/components/ui/SearchPicker";
@@ -110,6 +111,7 @@ function ReportsPage() {
             customerId={statementCustomerId}
             onCustomerChange={setStatementCustomerId}
             tenantId={session.tenant_id}
+            actorUserId={session.user_id}
           />
         )}
         {tab === "movement" && <MovementReport from={from} to={to} tenantId={session.tenant_id} />}
@@ -306,59 +308,15 @@ function StatementReport({
   customerId,
   onCustomerChange,
   tenantId,
+  actorUserId,
 }: {
   customerId: string;
   onCustomerChange: (id: string) => void;
   tenantId: string;
+  actorUserId: string | null;
 }) {
   const { data: customers = [] } = useCustomers(tenantId);
-  const { data: allSales = [] } = useSales(tenantId);
-  const { data: allContracts = [] } = useInstallmentContracts(tenantId);
-  const { data: allInstallments = [] } = useInstallments(tenantId);
-  const { data: allPayments = [] } = useInstallmentPayments(tenantId);
-  const { data: allReturns = [] } = useSaleReturns(tenantId);
   const customer = customers.find((c) => c.id === customerId);
-
-  const sales = customer ? allSales.filter((s) => s.customer_id === customer.id) : [];
-  const contracts = customer ? allContracts.filter((c) => c.customer_id === customer.id) : [];
-  const contractIds = new Set(contracts.map((c) => c.id));
-  const payments = allPayments.filter((p) => contractIds.has(p.contract_id));
-  const returns = customer ? allReturns.filter((r) => r.customer_id === customer.id) : [];
-
-  const totalPurchased =
-    sales.reduce((sum, s) => sum + (s.total ?? 0), 0) +
-    contracts.reduce((sum, c) => sum + (c.total_amount ?? 0), 0);
-  const exposure = customer
-    ? computeCustomerExposure(customer.id, allContracts, allInstallments)
-    : 0;
-  const lastPaymentDate = [...payments].sort((a, b) => b.created_at.localeCompare(a.created_at))[0]
-    ?.created_at;
-
-  type Row = { date: string; label: string; amount: number };
-  const rows: Row[] = [
-    ...sales.map((s) => ({
-      date: s.created_at,
-      label: `فاتورة ${s.invoice_number}`,
-      amount: s.total ?? 0,
-    })),
-    ...contracts.map((c) => ({
-      date: c.created_at,
-      label: `عقد تقسيط ${c.contract_number}`,
-      amount: c.total_amount ?? 0,
-    })),
-    ...payments.map((p) => ({
-      date: p.created_at,
-      label: `تحصيل ${p.receipt_number}`,
-      amount: -p.amount,
-    })),
-    ...returns.map((r) => ({
-      date: r.created_at,
-      label: `مرتجع ${r.return_number}`,
-      amount: -r.refund_amount,
-    })),
-  ].sort((a, b) => a.date.localeCompare(b.date));
-
-  const balance = rows.reduce((sum, r) => sum + r.amount, 0);
 
   return (
     <section className="mt-6">
@@ -371,75 +329,8 @@ function StatementReport({
           placeholder="بحث باسم العميل..."
         />
       </label>
-
       {customer && (
-        <>
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatCard
-              label="تاريخ الانضمام"
-              value={new Date(customer.created_at).toLocaleDateString("ar-EG")}
-              valueDir="ltr"
-            />
-            <StatCard
-              label="إجمالي الشراء"
-              value={`${totalPurchased.toLocaleString("ar-EG")} ج.م`}
-              valueDir="ltr"
-              tone="primary"
-            />
-            <StatCard
-              label="المديونية الحالية"
-              value={`${exposure.toLocaleString("ar-EG")} ج.م`}
-              valueDir="ltr"
-              tone={exposure > 0 ? "warning" : "default"}
-            />
-            <StatCard
-              label="آخر تحصيل"
-              value={lastPaymentDate ? new Date(lastPaymentDate).toLocaleDateString("ar-EG") : "—"}
-              valueDir="ltr"
-            />
-          </div>
-          <p className="mt-4 text-sm text-muted-foreground">
-            صافي الحركة (فواتير/عقود مطروحًا منها تحصيلات ومرتجعات):{" "}
-            <span className="font-bold text-foreground" dir="ltr">
-              {balance.toLocaleString("ar-EG")} ج.م
-            </span>
-          </p>
-          <div className="mt-3 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
-            <table className="w-full text-right text-sm">
-              <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-3 font-medium">الحركة</th>
-                  <th className="px-4 py-3 font-medium">المبلغ</th>
-                  <th className="px-4 py-3 font-medium">التاريخ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r, i) => (
-                  <tr key={i} className="border-b border-border last:border-0">
-                    <td className="px-4 py-3 text-foreground">{r.label}</td>
-                    <td
-                      className={`px-4 py-3 font-medium ${r.amount >= 0 ? "text-foreground" : "text-success"}`}
-                      dir="ltr"
-                    >
-                      {r.amount >= 0 ? "" : "-"}
-                      {Math.abs(r.amount).toLocaleString("ar-EG")}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
-                      {new Date(r.date).toLocaleDateString("ar-EG")}
-                    </td>
-                  </tr>
-                ))}
-                {rows.length === 0 && (
-                  <tr>
-                    <td colSpan={3} className="px-4 py-6 text-center text-muted-foreground">
-                      لا يوجد حركة لهذا العميل بعد.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </>
+        <CustomerStatement tenantId={tenantId} customer={customer} actorUserId={actorUserId} />
       )}
     </section>
   );

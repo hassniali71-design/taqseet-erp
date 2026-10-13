@@ -62,6 +62,7 @@ function NewSalePage() {
   const [newCustomerAddress, setNewCustomerAddress] = useState("");
   const [newCustomerPhone, setNewCustomerPhone] = useState("");
   const [newCustomerNotes, setNewCustomerNotes] = useState("");
+  const [newCustomerLedgerBook, setNewCustomerLedgerBook] = useState("");
   const [newCustomerError, setNewCustomerError] = useState<string | null>(null);
 
   const [showNewProductForm, setShowNewProductForm] = useState(false);
@@ -188,6 +189,7 @@ function NewSalePage() {
           address: newCustomerAddress.trim(),
           ...(newCustomerPhone.trim() && { phone: newCustomerPhone.trim() }),
           ...(newCustomerNotes.trim() && { notes: newCustomerNotes.trim() }),
+          ...(newCustomerLedgerBook.trim() && { ledger_book: newCustomerLedgerBook.trim() }),
         },
         actorUserId,
       });
@@ -197,6 +199,7 @@ function NewSalePage() {
       setNewCustomerAddress("");
       setNewCustomerPhone("");
       setNewCustomerNotes("");
+      setNewCustomerLedgerBook("");
     } catch (e) {
       setNewCustomerError(e instanceof Error ? e.message : "حدث خطأ");
     }
@@ -393,6 +396,15 @@ function NewSalePage() {
                   <input
                     value={newCustomerNotes}
                     onChange={(e) => setNewCustomerNotes(e.target.value)}
+                    className="form-input"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">الدفتر (اختياري)</span>
+                  <input
+                    value={newCustomerLedgerBook}
+                    onChange={(e) => setNewCustomerLedgerBook(e.target.value)}
+                    placeholder="نص حر — مثلًا: دفتر 3"
                     className="form-input"
                   />
                 </label>
