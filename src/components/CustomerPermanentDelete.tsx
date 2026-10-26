@@ -125,8 +125,8 @@ export function CustomerPermanentDelete({
 
   return (
     <section
-      className={`rounded-xl border-2 border-destructive/40 p-5 shadow-sm ${
-        presetCustomerId ? "bg-card" : "mt-8 bg-destructive/5"
+      className={`rounded-xl border-2 border-destructive/40 shadow-sm ${
+        presetCustomerId ? "bg-card p-4" : "mt-8 bg-destructive/5 p-5"
       }`}
     >
       <h2 className="text-sm font-bold text-destructive">حذف عميل نهائيًا (للمالك بس)</h2>
@@ -157,9 +157,9 @@ export function CustomerPermanentDelete({
       )}
 
       {customer && (
-        <div className="mt-3 space-y-3 rounded-lg border border-border bg-card p-4 text-sm">
+        <div className="mt-3 space-y-2.5 rounded-lg border border-border bg-card p-3 text-sm">
           <p className="text-foreground">
-            <span className="font-bold">{customer.name}</span> — كود{" "}
+            <span className="font-bold">{customer.name}</span> —{" "}
             <span dir="ltr" className="font-bold">
               {customer.code}
             </span>
@@ -170,35 +170,40 @@ export function CustomerPermanentDelete({
               </>
             )}
           </p>
-          <ul className="list-inside list-disc text-xs text-muted-foreground">
-            <li>
-              عقود تقسيط: {customerContracts.length} (منها ملغي{" "}
-              {customerContracts.length - openContracts.length})
-            </li>
-            <li>إيصالات تحصيل على عقوده: {receiptCount}</li>
-            <li>فواتير نقدي: {cashSalesCount} (بتفضل محفوظة كمستند مالي من غير ربط بالعميل)</li>
-          </ul>
+          <p className="text-xs text-muted-foreground">
+            {customerContracts.length} عقد (ملغي {customerContracts.length - openContracts.length})
+            · {receiptCount} إيصال تحصيل · {cashSalesCount} فاتورة نقدي (بتفضل محفوظة)
+          </p>
 
           {(receiptCount > 0 || openContracts.length > 0) && (
-            <p className="rounded-md bg-destructive/10 p-3 text-xs font-bold text-destructive">
-              تحذير: العميل ده عليه {openContracts.length} عقد شغال و{receiptCount} إيصال تحصيل
-              بإجمالي {receivedTotal.toLocaleString("ar-EG")} ج.م — كل ده هيتمسح، والمبالغ دي هتتشال
-              من الخزينة والتقارير كأنها ما اتحصّلتش.
+            <p className="rounded-md bg-destructive/10 p-2.5 text-xs font-bold text-destructive">
+              تحذير: {openContracts.length} عقد شغال و{receiptCount} إيصال بإجمالي{" "}
+              {receivedTotal.toLocaleString("ar-EG")} ج.م — كله هيتمسح ويتشال من الخزينة والتقارير.
             </p>
           )}
-          <>
-            <label className="flex items-start gap-2 text-xs text-foreground">
-              <input
-                type="checkbox"
-                checked={acknowledged}
-                onChange={(e) => setAcknowledged(e.target.checked)}
-                className="mt-0.5"
-              />
-              فاهم إن العميل ده وكل عقوده وتحصيلاته هيتمسحوا نهائيًا ومفيش رجوع.
-            </label>
-            <label className="block max-w-xs space-y-1">
+
+          <label className="flex items-start gap-2 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={acknowledged}
+              onChange={(e) => setAcknowledged(e.target.checked)}
+              className="mt-0.5"
+            />
+            فاهم إن العميل وكل عقوده وتحصيلاته هيتمسحوا نهائيًا ومفيش رجوع.
+          </label>
+          <label className="block space-y-1">
+            <span className="text-xs font-medium text-foreground">سبب الحذف *</span>
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="مثلًا: عميل اتسجل بالغلط مرتين"
+              className="form-input"
+            />
+          </label>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <label className="block space-y-1">
               <span className="text-xs font-medium text-foreground">
-                اكتب كود العميل للتأكيد (<span dir="ltr">{customer.code}</span>)
+                اكتب الكود للتأكيد (<span dir="ltr">{customer.code}</span>)
               </span>
               <input
                 value={confirmCode}
@@ -209,15 +214,6 @@ export function CustomerPermanentDelete({
               />
             </label>
             <label className="block space-y-1">
-              <span className="text-xs font-medium text-foreground">سبب الحذف *</span>
-              <input
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="مثلًا: عميل اتسجل بالغلط مرتين"
-                className="form-input"
-              />
-            </label>
-            <label className="block max-w-xs space-y-1">
               <span className="text-xs font-medium text-foreground">كلمة سر المالك</span>
               <input
                 type="password"
@@ -228,6 +224,20 @@ export function CustomerPermanentDelete({
                 autoComplete="current-password"
               />
             </label>
+          </div>
+        </div>
+      )}
+      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      {done && <p className="mt-2 text-sm font-bold text-success">{done}</p>}
+      {(customer || onClose) && (
+        <div
+          className={`mt-3 flex flex-wrap gap-2 ${
+            presetCustomerId
+              ? "sticky bottom-0 -mx-4 -mb-4 border-t border-border bg-card px-4 py-3"
+              : ""
+          }`}
+        >
+          {customer && (
             <button
               onClick={() => void handleDelete()}
               disabled={!canSubmit}
@@ -235,18 +245,16 @@ export function CustomerPermanentDelete({
             >
               {deleteMutation.isPending ? "جارٍ الحذف..." : "حذف العميل نهائيًا"}
             </button>
-          </>
+          )}
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="rounded-md border border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
+            >
+              {done ? "تم — إغلاق" : "إلغاء"}
+            </button>
+          )}
         </div>
-      )}
-      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
-      {done && <p className="mt-2 text-sm font-bold text-success">{done}</p>}
-      {onClose && (
-        <button
-          onClick={onClose}
-          className="mt-3 rounded-md border border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
-        >
-          {done ? "تم — إغلاق" : "إلغاء"}
-        </button>
       )}
     </section>
   );

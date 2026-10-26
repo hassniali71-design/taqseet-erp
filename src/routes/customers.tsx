@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, type FormEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import { CustomerPermanentDelete } from "@/components/CustomerPermanentDelete";
@@ -356,23 +357,28 @@ function CustomersPage() {
             </tbody>
           </table>
         </div>
-        {deletingId && (
-          <div
-            className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4"
-            onClick={(e) => {
-              if (e.target === e.currentTarget) setDeletingId(null);
-            }}
-          >
-            <div className="my-8 w-full max-w-xl">
-              <CustomerPermanentDelete
-                tenantId={session.tenant_id}
-                userId={actorUserId}
-                presetCustomerId={deletingId}
-                onClose={() => setDeletingId(null)}
-              />
-            </div>
-          </div>
-        )}
+        {deletingId &&
+          typeof document !== "undefined" &&
+          // Portal على body مباشرة: النافذة متتأثرش بأي scroll/transform في الصفحة، ودايمًا قد
+          // الشاشة — والكارت نفسه ليه scroll داخلي (max-h = ارتفاع الشاشة)، فمفيش داعي لـzoom out.
+          createPortal(
+            <div
+              className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-3"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setDeletingId(null);
+              }}
+            >
+              <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-lg overflow-y-auto overscroll-contain rounded-xl">
+                <CustomerPermanentDelete
+                  tenantId={session.tenant_id}
+                  userId={actorUserId}
+                  presetCustomerId={deletingId}
+                  onClose={() => setDeletingId(null)}
+                />
+              </div>
+            </div>,
+            document.body,
+          )}
       </main>
     </div>
   );
