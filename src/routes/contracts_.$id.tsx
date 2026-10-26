@@ -151,6 +151,8 @@ function ContractDetailPage() {
   const canCancel = contract.status === "active" && totalPaid === 0;
 
   function handleCollect() {
+    // ضد الضغط المتكرر: إيصال واحد لكل ضغطة لحد ما الحفظ يخلص (بند 71).
+    if (collectPaymentMutation.isPending) return;
     setPayError(null);
     const amount = Number(payAmount);
     if (!payAmount || amount <= 0) {
@@ -537,9 +539,10 @@ function ContractDetailPage() {
               </label>
               <button
                 onClick={handleCollect}
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                disabled={collectPaymentMutation.isPending}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
-                تحصيل
+                {collectPaymentMutation.isPending ? "جارٍ التحصيل..." : "تحصيل"}
               </button>
               {paySuccess && <span className="text-sm text-success">تم التحصيل ✓</span>}
             </div>

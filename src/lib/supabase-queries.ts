@@ -384,18 +384,77 @@ function useTenantList<T>(
 ) {
   return useQuery({
     queryKey: [table, tenantId],
-    queryFn: async () => {
-      let query = supabase
-        .from(table)
-        .select("*")
-        .eq("tenant_id", tenantId as string);
-      if (opts?.orderBy) query = query.order(opts.orderBy, { ascending: opts.ascending ?? true });
-      const { data, error } = await query;
-      if (error) throw new Error(error.message);
-      return (data ?? []) as T[];
-    },
+    queryFn: () => fetchAllTenantRows<T>(table, tenantId as string, opts),
     enabled: Boolean(tenantId),
   });
+}
+
+/** بند 71 — السبب الجذري لبلاغ "التحصيل مش بينعكس على المتبقي" عند عميل حقيقي: Supabase
+ * (PostgREST) بيرجّع **أقصى 1000 صف** في الطلب الواحد افتراضيًا (إعداد Max Rows)، والطلب ده كان
+ * `select("*")` واحد من غير pagination. محل عنده أكتر من ~80 عقد (12 قسط للعقد) بيعدّي الـ1000
+ * صف في `installments`، فأقساط بعض العقود (الأحدث غالبًا) مكانتش بتوصل للمتصفح أصلًا — صفحة
+ * العقد كانت بتحسب "المتبقي" = إجمالي العقد − مجموع مدفوع أقساط **مش موجودة**، يعني الإجمالي
+ * كامل، رغم إن التحصيل اتسجل صح في القاعدة. نسخة الديمو مفيهاش البيانات دي فمكنتش بتبان.
+ *
+ * دلوقتي كل جدول بيتجاب كامل على صفحات: نفس الترتيب المطلوب + `id` كترتيب ثانوي ثابت (عشان
+ * الصفحات متتداخلش)، و`count: "exact"` بيقول العدد الحقيقي فبنكمّل لحد ما نجيبه كله مهما كان
+ * إعداد Max Rows على المشروع (حتى لو أقل من 1000). */
+const PAGE_SIZE = 1000;
+
+/** نفس مشكلة fetchAllTenantRows بس لقراءات جوه العمليات نفسها (حساب رصيد خزينة قبل/بعد حركة،
+ * مخزون منتج قبل البيع، رصيد مورد/شريك...): أي `select` بيرجّع أكتر من 1000 صف كان بيتقطع بصمت،
+ * والحساب بيطلع غلط (رصيد خزينة ناقص، مخزون "خلصان" وهو موجود). بياخد نفس الاستعلام من غير
+ * تنفيذ، يرتّبه بـ`id`، ويجيبه صفحة صفحة لحد ما يخلص. نفس شكل `{ data, error }` بتاع Supabase
+ * عشان أماكن الاستدعاء تفضل زي ما هي. */
+type PagedQuery<R> = {
+  order(column: string, options?: { ascending?: boolean }): PagedQuery<R>;
+  range(
+    from: number,
+    to: number,
+  ): PromiseLike<{ data: R[] | null; error: { message: string } | null }>;
+};
+
+async function fetchAll<R>(
+  query: PagedQuery<R>,
+): Promise<{ data: R[]; error: { message: string } | null }> {
+  const rows: R[] = [];
+  const ordered = query.order("id", { ascending: true });
+  for (let page = 0; page < 500; page++) {
+    const { data, error } = await ordered.range(rows.length, rows.length + PAGE_SIZE - 1);
+    if (error) return { data: rows, error };
+    const batch = data ?? [];
+    rows.push(...batch);
+    // بنقف بس على صفحة فاضية — مش "أقل من 1000" — عشان لو Max Rows على المشروع أقل من 1000
+    // منقفش بدري ونفوّت صفوف.
+    if (batch.length === 0) break;
+  }
+  return { data: rows, error: null };
+}
+
+async function fetchAllTenantRows<T>(
+  table: string,
+  tenantId: string,
+  opts?: { orderBy?: string; ascending?: boolean },
+): Promise<T[]> {
+  const rows: T[] = [];
+  let total: number | null = null;
+  // حد أمان ضد لوب لا نهائي لو العدد اتغيّر أثناء الجلب (صف اتضاف/اتحذف في النص).
+  for (let page = 0; page < 500; page++) {
+    let query = supabase
+      .from(table)
+      .select("*", page === 0 ? { count: "exact" } : {})
+      .eq("tenant_id", tenantId);
+    if (opts?.orderBy) query = query.order(opts.orderBy, { ascending: opts.ascending ?? true });
+    query = query.order("id", { ascending: true }).range(rows.length, rows.length + PAGE_SIZE - 1);
+    const { data, error, count } = await query;
+    if (error) throw new Error(error.message);
+    if (page === 0) total = count ?? null;
+    const batch = (data ?? []) as T[];
+    rows.push(...batch);
+    if (batch.length === 0) break;
+    if (total !== null ? rows.length >= total : batch.length < PAGE_SIZE) break;
+  }
+  return rows;
 }
 
 /** Audit insert failures never block the mutation they describe from succeeding — the write
@@ -1006,10 +1065,9 @@ async function performReceiveStock(
 
   let before: number;
   if (product.serial_required) {
-    const { data: existingSerials, error: existingError } = await supabase
-      .from("product_serials")
-      .select("id, serial_number")
-      .eq("tenant_id", tenantId);
+    const { data: existingSerials, error: existingError } = await fetchAll(
+      supabase.from("product_serials").select("id, serial_number").eq("tenant_id", tenantId),
+    );
     if (existingError) throw new Error(existingError.message);
     const duplicate = numbers.find((n) =>
       (existingSerials ?? []).some(
@@ -1026,11 +1084,13 @@ async function performReceiveStock(
     if (countError) throw new Error(countError.message);
     before = count ?? 0;
   } else {
-    const { data: movements, error: movementsError } = await supabase
-      .from("inventory_movements")
-      .select("quantity")
-      .eq("tenant_id", tenantId)
-      .eq("product_id", product.id);
+    const { data: movements, error: movementsError } = await fetchAll(
+      supabase
+        .from("inventory_movements")
+        .select("quantity")
+        .eq("tenant_id", tenantId)
+        .eq("product_id", product.id),
+    );
     if (movementsError) throw new Error(movementsError.message);
     before = (movements ?? []).reduce((sum, m) => sum + (m.quantity as number), 0);
   }
@@ -1127,11 +1187,13 @@ export function useAdjustStock(tenantId: string | undefined) {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
       if (product.serial_required) throw new Error("منتجات السيريال لا تُجرد بهذه الطريقة");
 
-      const { data: movements, error: movementsError } = await supabase
-        .from("inventory_movements")
-        .select("quantity")
-        .eq("tenant_id", tenantId)
-        .eq("product_id", product.id);
+      const { data: movements, error: movementsError } = await fetchAll(
+        supabase
+          .from("inventory_movements")
+          .select("quantity")
+          .eq("tenant_id", tenantId)
+          .eq("product_id", product.id),
+      );
       if (movementsError) throw new Error(movementsError.message);
       const before = (movements ?? []).reduce((sum, m) => sum + (m.quantity as number), 0);
       const diff = actualQuantity - before;
@@ -1232,12 +1294,14 @@ export function useCreateSale(tenantId: string | undefined) {
         { data: allSerials, error: serialsError },
         { data: movements, error: movementsError },
       ] = await Promise.all([
-        supabase.from("products").select("*").eq("tenant_id", tenantId),
-        supabase.from("product_serials").select("*").eq("tenant_id", tenantId),
-        supabase
-          .from("inventory_movements")
-          .select("product_id, quantity")
-          .eq("tenant_id", tenantId),
+        fetchAll(supabase.from("products").select("*").eq("tenant_id", tenantId)),
+        fetchAll(supabase.from("product_serials").select("*").eq("tenant_id", tenantId)),
+        fetchAll(
+          supabase
+            .from("inventory_movements")
+            .select("product_id, quantity")
+            .eq("tenant_id", tenantId),
+        ),
       ]);
       if (productsError) throw new Error(productsError.message);
       if (serialsError) throw new Error(serialsError.message);
@@ -1716,12 +1780,14 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
       ] = await Promise.all([
         supabase.from("customers").select("*").eq("id", input.customer_id).single(),
         supabase.from("installment_plans").select("*").eq("id", input.plan_id).single(),
-        supabase.from("products").select("*").eq("tenant_id", tenantId),
-        supabase.from("product_serials").select("*").eq("tenant_id", tenantId),
-        supabase
-          .from("inventory_movements")
-          .select("product_id, quantity")
-          .eq("tenant_id", tenantId),
+        fetchAll(supabase.from("products").select("*").eq("tenant_id", tenantId)),
+        fetchAll(supabase.from("product_serials").select("*").eq("tenant_id", tenantId)),
+        fetchAll(
+          supabase
+            .from("inventory_movements")
+            .select("product_id, quantity")
+            .eq("tenant_id", tenantId),
+        ),
       ]);
       if (customerError || !customerRow) throw new Error("العميل غير موجود");
       if (planError || !planRow) throw new Error("خطة التقسيط غير موجودة");
@@ -2057,11 +2123,19 @@ async function performCollectPayment(
   if (paymentError) throw new Error(paymentError.message);
 
   for (const u of updates) {
-    const { error: updateError } = await supabase
+    // `.select("id")` + فحص عدد الصفوف: لو RLS/صلاحيات رفضت التحديث، Supabase بيرجّع صفر صفوف
+    // من غير error — من غير الفحص ده الإيصال كان هيبان "تم" والأقساط/المتبقي متتحدّثش (بند 71).
+    const { data: updated, error: updateError } = await supabase
       .from("installments")
       .update({ paid_amount: u.paid_amount, status: u.status })
-      .eq("id", u.id);
+      .eq("id", u.id)
+      .select("id");
     if (updateError) throw new Error(updateError.message);
+    if (!updated || updated.length === 0) {
+      throw new Error(
+        `اتسجّل الإيصال ${receipt_number} لكن قاعدة البيانات رفضت تحديث الأقساط — بلّغ الدعم ومتعيدش التحصيل`,
+      );
+    }
   }
 
   const { data: refreshed, error: refreshedError } = await supabase
@@ -2719,11 +2793,13 @@ export function useCancelInstallmentContract(tenantId: string | undefined) {
         { data: allSerials, error: serialsError },
         { data: movements, error: movementsError },
       ] = await Promise.all([
-        supabase.from("product_serials").select("*").eq("tenant_id", tenantId),
-        supabase
-          .from("inventory_movements")
-          .select("product_id, quantity")
-          .eq("tenant_id", tenantId),
+        fetchAll(supabase.from("product_serials").select("*").eq("tenant_id", tenantId)),
+        fetchAll(
+          supabase
+            .from("inventory_movements")
+            .select("product_id, quantity")
+            .eq("tenant_id", tenantId),
+        ),
       ]);
       if (serialsError) throw new Error(serialsError.message);
       if (movementsError) throw new Error(movementsError.message);
@@ -3057,15 +3133,13 @@ export function useCreatePurchase(tenantId: string | undefined) {
       if (supplierError || !supplier) throw new Error("المورد غير موجود");
       if (!supplier.active) throw new Error("المورد غير نشط");
 
-      const { data: products, error: productsError } = await supabase
-        .from("products")
-        .select("*")
-        .eq("tenant_id", tenantId);
+      const { data: products, error: productsError } = await fetchAll(
+        supabase.from("products").select("*").eq("tenant_id", tenantId),
+      );
       if (productsError) throw new Error(productsError.message);
-      const { data: existingSerials, error: serialsError } = await supabase
-        .from("product_serials")
-        .select("serial_number")
-        .eq("tenant_id", tenantId);
+      const { data: existingSerials, error: serialsError } = await fetchAll(
+        supabase.from("product_serials").select("serial_number").eq("tenant_id", tenantId),
+      );
       if (serialsError) throw new Error(serialsError.message);
 
       const seenSerialsThisPurchase = new Set<string>();
@@ -3120,11 +3194,13 @@ export function useCreatePurchase(tenantId: string | undefined) {
       // through — same discipline as data-store.ts's createPurchase.
       for (const item of purchaseItems) {
         const productBefore = (products ?? []).find((p) => p.id === item.product_id) as Product;
-        const { data: movements, error: movementsError } = await supabase
-          .from("inventory_movements")
-          .select("quantity")
-          .eq("tenant_id", tenantId)
-          .eq("product_id", item.product_id);
+        const { data: movements, error: movementsError } = await fetchAll(
+          supabase
+            .from("inventory_movements")
+            .select("quantity")
+            .eq("tenant_id", tenantId)
+            .eq("product_id", item.product_id),
+        );
         if (movementsError) throw new Error(movementsError.message);
         const stockBefore = productBefore.serial_required
           ? 0 // serial-tracked products don't use weighted-average cost math below anyway
@@ -3311,16 +3387,20 @@ export function useRecordSupplierPayment(tenantId: string | undefined) {
 
       const [{ data: purchases, error: purchasesError }, { data: payments, error: paymentsError }] =
         await Promise.all([
-          supabase
-            .from("purchases")
-            .select("total")
-            .eq("tenant_id", tenantId)
-            .eq("supplier_id", supplierId),
-          supabase
-            .from("supplier_payments")
-            .select("amount")
-            .eq("tenant_id", tenantId)
-            .eq("supplier_id", supplierId),
+          fetchAll(
+            supabase
+              .from("purchases")
+              .select("total")
+              .eq("tenant_id", tenantId)
+              .eq("supplier_id", supplierId),
+          ),
+          fetchAll(
+            supabase
+              .from("supplier_payments")
+              .select("amount")
+              .eq("tenant_id", tenantId)
+              .eq("supplier_id", supplierId),
+          ),
         ]);
       if (purchasesError) throw new Error(purchasesError.message);
       if (paymentsError) throw new Error(paymentsError.message);
@@ -3796,11 +3876,13 @@ export function usePayPartnerProfit(tenantId: string | undefined) {
       const totalAmount =
         Math.round(validAllocations.reduce((sum, a) => sum + a.amount, 0) * 100) / 100;
 
-      const { data: transactions, error: transactionsError } = await supabase
-        .from("partner_transactions")
-        .select("type, amount, profit_amount")
-        .eq("tenant_id", tenantId)
-        .eq("partner_id", partnerId);
+      const { data: transactions, error: transactionsError } = await fetchAll(
+        supabase
+          .from("partner_transactions")
+          .select("type, amount, profit_amount")
+          .eq("tenant_id", tenantId)
+          .eq("partner_id", partnerId),
+      );
       if (transactionsError) throw new Error(transactionsError.message);
       const availableProfit = computePartnerAvailableProfit(
         partnerId,
@@ -3872,11 +3954,13 @@ export function useWithdrawPartnerFunds(tenantId: string | undefined) {
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
       if (amount <= 0) throw new Error("المبلغ يجب أن يكون أكبر من صفر");
-      const { data: transactions, error: transactionsError } = await supabase
-        .from("partner_transactions")
-        .select("amount")
-        .eq("tenant_id", tenantId)
-        .eq("partner_id", partnerId);
+      const { data: transactions, error: transactionsError } = await fetchAll(
+        supabase
+          .from("partner_transactions")
+          .select("amount")
+          .eq("tenant_id", tenantId)
+          .eq("partner_id", partnerId),
+      );
       if (transactionsError) throw new Error(transactionsError.message);
       const balance =
         Math.round((transactions ?? []).reduce((sum, t) => sum + (t.amount as number), 0) * 100) /
@@ -4066,11 +4150,13 @@ async function performPostTreasuryMovement(
   reason?: string,
   createdAt?: string,
 ): Promise<TreasuryMovement> {
-  const { data: movements, error: movementsError } = await supabase
-    .from("treasury_movements")
-    .select("amount")
-    .eq("tenant_id", tenantId)
-    .eq("account_id", accountId);
+  const { data: movements, error: movementsError } = await fetchAll(
+    supabase
+      .from("treasury_movements")
+      .select("amount")
+      .eq("tenant_id", tenantId)
+      .eq("account_id", accountId),
+  );
   if (movementsError) throw new Error(movementsError.message);
   const before =
     Math.round((movements ?? []).reduce((sum, m) => sum + (m.amount as number), 0) * 100) / 100;
@@ -4644,8 +4730,8 @@ export function useCreateReturn(tenantId: string | undefined) {
         { data: allSerials, error: serialsError },
       ] = await Promise.all([
         supabase.from("sale_returns").select("items").eq("sale_id", input.sale_id),
-        supabase.from("products").select("*").eq("tenant_id", tenantId),
-        supabase.from("product_serials").select("*").eq("tenant_id", tenantId),
+        fetchAll(supabase.from("products").select("*").eq("tenant_id", tenantId)),
+        fetchAll(supabase.from("product_serials").select("*").eq("tenant_id", tenantId)),
       ]);
       if (previousReturnsError) throw new Error(previousReturnsError.message);
       if (productsError) throw new Error(productsError.message);
@@ -4728,11 +4814,13 @@ export function useCreateReturn(tenantId: string | undefined) {
       if (nonSerialItems.length > 0) {
         const movementInserts = [];
         for (const item of nonSerialItems) {
-          const { data: movements, error: movementsError } = await supabase
-            .from("inventory_movements")
-            .select("quantity")
-            .eq("tenant_id", tenantId)
-            .eq("product_id", item.product_id);
+          const { data: movements, error: movementsError } = await fetchAll(
+            supabase
+              .from("inventory_movements")
+              .select("quantity")
+              .eq("tenant_id", tenantId)
+              .eq("product_id", item.product_id),
+          );
           if (movementsError) throw new Error(movementsError.message);
           const before = (movements ?? []).reduce((sum, m) => sum + (m.quantity as number), 0);
           movementInserts.push({
@@ -4862,12 +4950,14 @@ export function useCreateExchange(tenantId: string | undefined) {
         { data: priorReturns, error: priorReturnsError },
         { data: priorExchanges, error: priorExchangesError },
       ] = await Promise.all([
-        supabase.from("products").select("*").eq("tenant_id", tenantId),
-        supabase.from("product_serials").select("*").eq("tenant_id", tenantId),
-        supabase
-          .from("inventory_movements")
-          .select("product_id, quantity")
-          .eq("tenant_id", tenantId),
+        fetchAll(supabase.from("products").select("*").eq("tenant_id", tenantId)),
+        fetchAll(supabase.from("product_serials").select("*").eq("tenant_id", tenantId)),
+        fetchAll(
+          supabase
+            .from("inventory_movements")
+            .select("product_id, quantity")
+            .eq("tenant_id", tenantId),
+        ),
         supabase.from("sale_returns").select("items").eq("sale_id", input.original_sale_id),
         supabase
           .from("exchange_transactions")
@@ -5038,11 +5128,13 @@ export function useCreateExchange(tenantId: string | undefined) {
       const nonSerialReturned = returnedItems.filter((i) => !i.serial_id);
       const movementInserts: Array<Record<string, unknown>> = [];
       for (const item of nonSerialReturned) {
-        const { data: itemMovements, error: itemMovementsError } = await supabase
-          .from("inventory_movements")
-          .select("quantity")
-          .eq("tenant_id", tenantId)
-          .eq("product_id", item.product_id);
+        const { data: itemMovements, error: itemMovementsError } = await fetchAll(
+          supabase
+            .from("inventory_movements")
+            .select("quantity")
+            .eq("tenant_id", tenantId)
+            .eq("product_id", item.product_id),
+        );
         if (itemMovementsError) throw new Error(itemMovementsError.message);
         const before = (itemMovements ?? []).reduce((sum, m) => sum + (m.quantity as number), 0);
         movementInserts.push({
@@ -5352,11 +5444,15 @@ export async function fetchWarrantyInfo(
   const serialById = new Map((matchedSerials ?? []).map((s) => [s.id as string, s]));
 
   const [{ data: cashSales }, { data: contracts }] = await Promise.all([
-    supabase.from("sales").select("created_at, customer_name, items").eq("tenant_id", tenantId),
-    supabase
-      .from("installment_contracts")
-      .select("created_at, customer_name, items")
-      .eq("tenant_id", tenantId),
+    fetchAll(
+      supabase.from("sales").select("created_at, customer_name, items").eq("tenant_id", tenantId),
+    ),
+    fetchAll(
+      supabase
+        .from("installment_contracts")
+        .select("created_at, customer_name, items")
+        .eq("tenant_id", tenantId),
+    ),
   ]);
 
   const results: WarrantyInfo[] = [];

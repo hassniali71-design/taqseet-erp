@@ -140,6 +140,8 @@ function CollectionsWorkbenchPage() {
   const overdueCount = rows.filter((r) => r.effectiveStatus === "overdue").length;
 
   function handleCollect(contractId: string, contractNumber: string, outstanding: number) {
+    // ضد الضغط المتكرر: إيصال واحد لكل ضغطة لحد ما الحفظ يخلص (بند 71).
+    if (collectPaymentMutation.isPending) return;
     setError(null);
     const raw = amounts[contractId];
     const amount = Number(raw);
@@ -292,9 +294,10 @@ function CollectionsWorkbenchPage() {
                         onClick={() =>
                           handleCollect(row.contractId, row.contractNumber, row.outstanding)
                         }
-                        className="rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
+                        disabled={collectPaymentMutation.isPending}
+                        className="rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50"
                       >
-                        تحصيل
+                        {collectPaymentMutation.isPending ? "..." : "تحصيل"}
                       </button>
                     </div>
                   </td>
