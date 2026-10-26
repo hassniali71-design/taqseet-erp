@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { CustomerPermanentDelete } from "@/components/CustomerPermanentDelete";
 import { DateInput } from "@/components/ui/DateInput";
 import { RiskBadge } from "@/components/ui/StatCard";
 import {
@@ -11,7 +12,6 @@ import {
   useCreateCustomer,
   useCurrentTenantSettings,
   useCustomers,
-  useDeleteCustomer,
   useInstallmentContracts,
   useInstallmentPayments,
   useInstallments,
@@ -20,7 +20,6 @@ import {
   useUpdateCustomer,
 } from "@/lib/supabase-queries";
 import { matchesSearch } from "@/lib/text-filter";
-import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
 import type { Customer } from "@/types";
 
@@ -62,9 +61,9 @@ function CustomersPage() {
   const { data: sales = [] } = useSales(session?.tenant_id);
   const createCustomerMutation = useCreateCustomer(session?.tenant_id);
   const updateCustomerMutation = useUpdateCustomer(session?.tenant_id);
-  const deleteCustomerMutation = useDeleteCustomer(session?.tenant_id);
-  const { requestConfirm, dialog: passwordDialog } = useOwnerPasswordConfirm();
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  // زرار "حذف" بيفتح نفس الحذف النهائي الكامل بتاع الإعدادات (بند 75): العميل بكل عقوده وأقساطه
+  // وتحصيلاته، بكلمة سر المالك على السيرفر — بدل الحذف القديم اللي كان بيرفض أي عميل له عقود.
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
   if (!session) return null;
@@ -128,24 +127,6 @@ function CustomersPage() {
       patch: { status: customer.status === "active" ? "inactive" : "active" },
       actorUserId,
     });
-  }
-
-  async function handleDelete(customer: Customer) {
-    setDeleteError(null);
-    if (
-      !window.confirm(
-        `حذف "${customer.name}" نهائيًا؟ فواتير البيع القديمة بتاعته هتفضل محفوظة برقمها ومبلغها بدون ما تتأثر، بس هتبقى بدون اسم عميل مرتبط.`,
-      )
-    ) {
-      return;
-    }
-    const confirmed = await requestConfirm();
-    if (!confirmed) return;
-    try {
-      await deleteCustomerMutation.mutateAsync({ id: customer.id, actorUserId });
-    } catch (e) {
-      setDeleteError(e instanceof Error ? e.message : "حدث خطأ أثناء الحذف");
-    }
   }
 
   return (
@@ -352,7 +333,7 @@ function CustomersPage() {
                         {customer.status === "active" ? "إيقاف" : "تفعيل"}
                       </button>
                       <button
-                        onClick={() => void handleDelete(customer)}
+                        onClick={() => setDeletingId(customer.id)}
                         className="text-xs font-medium text-destructive hover:underline"
                       >
                         حذف
@@ -375,8 +356,23 @@ function CustomersPage() {
             </tbody>
           </table>
         </div>
-        {deleteError && <p className="mt-2 text-sm text-destructive">{deleteError}</p>}
-        {passwordDialog}
+        {deletingId && (
+          <div
+            className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setDeletingId(null);
+            }}
+          >
+            <div className="my-8 w-full max-w-xl">
+              <CustomerPermanentDelete
+                tenantId={session.tenant_id}
+                userId={actorUserId}
+                presetCustomerId={deletingId}
+                onClose={() => setDeletingId(null)}
+              />
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

@@ -15,13 +15,19 @@ import {
 
 /** قسم "حذف عميل نهائيًا" في الإعدادات (بند 72) — بيظهر للمالك بس. الفحص هنا للعرض والتوضيح
  * قبل ما المالك يكتب كلمة السر؛ القرار الحقيقي (المالك، كلمة السر، الأهلية، الحذف الذري) كله على
- * السيرفر وفي قاعدة البيانات — انظر src/lib/customer-delete-server.ts وmigration 0026. */
+ * السيرفر وفي قاعدة البيانات — انظر src/lib/customer-delete-server.ts وmigration 0027. نفس المكوّن
+ * بيتفتح كنافذة من زرار "حذف" في جدول العملاء (presetCustomerId). */
 export function CustomerPermanentDelete({
   tenantId,
   userId,
+  presetCustomerId,
+  onClose,
 }: {
   tenantId: string;
   userId: string;
+  /** من زرار "حذف" في جدول العملاء: العميل محدد مسبقًا، ومن غير قايمة اختيار. */
+  presetCustomerId?: string;
+  onClose?: () => void;
 }) {
   const queryClient = useQueryClient();
   const { data: roles = [] } = useRoles(tenantId);
@@ -31,7 +37,7 @@ export function CustomerPermanentDelete({
   const { data: payments = [] } = useInstallmentPayments(tenantId);
   const { data: sales = [] } = useSales(tenantId);
 
-  const [customerId, setCustomerId] = useState("");
+  const [customerId, setCustomerId] = useState(presetCustomerId ?? "");
   const [confirmCode, setConfirmCode] = useState("");
   const [reason, setReason] = useState("");
   const [password, setPassword] = useState("");
@@ -57,7 +63,21 @@ export function CustomerPermanentDelete({
 
   const ownerRoleId = roles.find((r) => r.name === "owner")?.id;
   const isOwner = userRoles.some((ur) => ur.user_id === userId && ur.role_id === ownerRoleId);
-  if (!isOwner) return null;
+  if (!isOwner) {
+    return presetCustomerId ? (
+      <section className="rounded-xl border border-border bg-card p-5 text-sm">
+        <p className="font-bold text-destructive">الحذف النهائي للعملاء متاح لمالك المحل بس.</p>
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="mt-3 rounded-md border border-input px-4 py-2 text-sm font-medium hover:bg-accent"
+          >
+            إغلاق
+          </button>
+        )}
+      </section>
+    ) : null;
+  }
 
   const customer = customers.find((c) => c.id === customerId);
   const customerContracts = contracts.filter((c) => c.customer_id === customerId);
@@ -88,7 +108,7 @@ export function CustomerPermanentDelete({
           result.serials_returned
         } سيريال رجع للمخزون`,
       );
-      setCustomerId("");
+      if (!presetCustomerId) setCustomerId("");
       reset();
     } catch (e) {
       setPassword("");
@@ -104,7 +124,11 @@ export function CustomerPermanentDelete({
     !deleteMutation.isPending;
 
   return (
-    <section className="mt-8 rounded-xl border-2 border-destructive/40 bg-destructive/5 p-5 shadow-sm">
+    <section
+      className={`rounded-xl border-2 border-destructive/40 p-5 shadow-sm ${
+        presetCustomerId ? "bg-card" : "mt-8 bg-destructive/5"
+      }`}
+    >
       <h2 className="text-sm font-bold text-destructive">حذف عميل نهائيًا (للمالك بس)</h2>
       <p className="mt-1 text-xs text-muted-foreground">
         بيمسح العميل وكل عقوده (أي حالة) وأقساطها وتحصيلاتها وضامنيه، وأثرها في الخزينة والقيود
@@ -112,23 +136,25 @@ export function CustomerPermanentDelete({
         محفوظة من غير ربط بالعميل. كل حذف بيتسجل في سجل العمليات بكل اللي اتمسح.
       </p>
 
-      <label className="mt-3 block max-w-md space-y-1">
-        <span className="text-xs font-medium text-foreground">العميل</span>
-        <SearchPicker
-          items={customers.map((c) => ({
-            id: c.id,
-            label: `${c.name} — ${c.code}${c.phone ? ` — ${c.phone}` : ""}`,
-          }))}
-          value={customerId}
-          onChange={(id) => {
-            setCustomerId(id);
-            setError(null);
-            setDone(null);
-            reset();
-          }}
-          placeholder="ابحث بالاسم أو الكود..."
-        />
-      </label>
+      {!presetCustomerId && (
+        <label className="mt-3 block max-w-md space-y-1">
+          <span className="text-xs font-medium text-foreground">العميل</span>
+          <SearchPicker
+            items={customers.map((c) => ({
+              id: c.id,
+              label: `${c.name} — ${c.code}${c.phone ? ` — ${c.phone}` : ""}`,
+            }))}
+            value={customerId}
+            onChange={(id) => {
+              setCustomerId(id);
+              setError(null);
+              setDone(null);
+              reset();
+            }}
+            placeholder="ابحث بالاسم أو الكود..."
+          />
+        </label>
+      )}
 
       {customer && (
         <div className="mt-3 space-y-3 rounded-lg border border-border bg-card p-4 text-sm">
@@ -214,6 +240,14 @@ export function CustomerPermanentDelete({
       )}
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
       {done && <p className="mt-2 text-sm font-bold text-success">{done}</p>}
+      {onClose && (
+        <button
+          onClick={onClose}
+          className="mt-3 rounded-md border border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
+        >
+          {done ? "تم — إغلاق" : "إلغاء"}
+        </button>
+      )}
     </section>
   );
 }

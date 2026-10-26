@@ -28,6 +28,7 @@ import { Logo } from "@/components/Logo";
 import { getUsers, signOut, type Session } from "@/lib/data-store";
 import { cn } from "@/lib/utils";
 import { useRealtimeSync } from "@/hooks/use-realtime-sync";
+import { APP_BUILD_TIME, APP_VERSION } from "@/lib/app-version";
 
 interface NavItem {
   to: string;
@@ -168,6 +169,10 @@ export function AppSidebar({ session }: { session: Session }) {
           <LogOut className="h-3.5 w-3.5" />
           تسجيل خروج
         </button>
+        <p className="mt-2 text-center text-[10px] text-sidebar-foreground/60" dir="rtl">
+          {APP_VERSION}
+          {APP_BUILD_TIME && ` · ${new Date(APP_BUILD_TIME).toLocaleString("ar-EG")}`}
+        </p>
       </div>
     </aside>
   );

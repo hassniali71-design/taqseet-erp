@@ -65,5 +65,8 @@ export default defineConfig({
   // elsewhere since it's just an explicit bind address, not a duplicate plugin.
   vite: {
     server: { host: "0.0.0.0" },
+    // وقت البناء بيظهر تحت في الشريط الجانبي (src/lib/app-version.ts) — عشان المالك يعرف من أي
+    // جهاز (حتى تابلت العميل) إن النسخة المنشورة هي الأخيرة فعلًا.
+    define: { __APP_BUILD_TIME__: JSON.stringify(new Date().toISOString()) },
   },
 });
