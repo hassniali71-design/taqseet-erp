@@ -10,21 +10,12 @@ import { getSupabaseAdmin, resolveServerCaller } from "@/lib/supabase-admin";
  * 2) المستدعي لازم يكون عنده دور `owner` في نفس المحل.
  * 3) كلمة سر المالك بتتأكد بتسجيل دخول حقيقي على Supabase Auth من السيرفر (client منفصل من غير
  *    حفظ جلسة) — مش مقارنة في الواجهة، ومبتتسجلش ولا بتتطبع في أي log أو رسالة خطأ.
- * 4) كود العميل لازم يتكتب بالحرف (ضد الحذف بالغلط لعميل اسمه شبه التاني).
  * 5) الحذف نفسه دالة Postgres واحدة (migration 0027، بتستبدل 0026) جوه transaction واحدة — يا كله
  *    يتمسح يا مفيش حاجة — بتمسح العميل وكل عقوده وتحصيلاته وأثرها المالي والمخزني (قرار المالك)،
  *    وبتعيد فحص إن المستدعي owner وكل حذف متقيد بمحله بس.
  * أي محاولة مرفوضة بسبب كلمة سر غلط بتتسجل في audit_logs (من غير كلمة السر). */
 export const deleteCustomerPermanentlyServer = createServerFn({ method: "POST" })
-  .validator(
-    (input: {
-      accessToken: string;
-      customerId: string;
-      confirmCode: string;
-      password: string;
-      reason: string;
-    }) => input,
-  )
+  .validator((input: { accessToken: string; customerId: string; password: string }) => input)
   .handler(async ({ data }) => {
     const caller = await resolveServerCaller(data.accessToken);
     const admin = getSupabaseAdmin();
@@ -45,8 +36,6 @@ export const deleteCustomerPermanentlyServer = createServerFn({ method: "POST" }
       : { data: null };
     if (!assignment) throw new Error("الحذف النهائي للعملاء متاح لمالك المحل بس");
 
-    if (!data.reason.trim()) throw new Error("اكتب سبب الحذف");
-
     const { data: customer } = await admin
       .from("customers")
       .select("id, code, tenant_id")
@@ -54,9 +43,6 @@ export const deleteCustomerPermanentlyServer = createServerFn({ method: "POST" }
       .maybeSingle();
     if (!customer || customer["tenant_id"] !== caller.tenantId) {
       throw new Error("العميل غير موجود");
-    }
-    if ((customer["code"] as string).trim() !== data.confirmCode.trim()) {
-      throw new Error("كود العميل اللي اتكتب مش مطابق — اكتبه بالظبط زي ما هو ظاهر");
     }
 
     const url = process.env["SUPABASE_URL"] ?? import.meta.env["VITE_SUPABASE_URL"];
@@ -93,7 +79,7 @@ export const deleteCustomerPermanentlyServer = createServerFn({ method: "POST" }
     });
     const { data: result, error } = await asUser.rpc("delete_customer_permanently", {
       p_customer_id: data.customerId,
-      p_reason: data.reason.trim(),
+      p_reason: "حذف نهائي بواسطة المالك",
     });
     if (error) throw new Error(translateDeleteError(error.message, error.code));
     return result as {

@@ -38,10 +38,7 @@ export function CustomerPermanentDelete({
   const { data: sales = [] } = useSales(tenantId);
 
   const [customerId, setCustomerId] = useState(presetCustomerId ?? "");
-  const [confirmCode, setConfirmCode] = useState("");
-  const [reason, setReason] = useState("");
   const [password, setPassword] = useState("");
-  const [acknowledged, setAcknowledged] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
 
@@ -51,9 +48,7 @@ export function CustomerPermanentDelete({
         data: {
           accessToken: await getAccessToken(),
           customerId,
-          confirmCode,
           password,
-          reason,
         },
       }),
     onSuccess: () => {
@@ -89,10 +84,7 @@ export function CustomerPermanentDelete({
   const cashSalesCount = sales.filter((s) => s.customer_id === customerId).length;
 
   function reset() {
-    setConfirmCode("");
-    setReason("");
     setPassword("");
-    setAcknowledged(false);
   }
 
   async function handleDelete() {
@@ -116,12 +108,7 @@ export function CustomerPermanentDelete({
     }
   }
 
-  const canSubmit =
-    acknowledged &&
-    confirmCode.trim() === customer?.code &&
-    reason.trim() !== "" &&
-    password !== "" &&
-    !deleteMutation.isPending;
+  const canSubmit = password !== "" && !deleteMutation.isPending;
 
   return (
     <section
@@ -131,9 +118,7 @@ export function CustomerPermanentDelete({
     >
       <h2 className="text-sm font-bold text-destructive">حذف عميل نهائيًا (للمالك بس)</h2>
       <p className="mt-1 text-xs text-muted-foreground">
-        بيمسح العميل وكل عقوده (أي حالة) وأقساطها وتحصيلاتها وضامنيه، وأثرها في الخزينة والقيود
-        والشركاء، والأجهزة بترجع المخزون — كأنه ما اتدخلش، ومفيش رجوع. فواتير البيع النقدي بتفضل
-        محفوظة من غير ربط بالعميل. كل حذف بيتسجل في سجل العمليات بكل اللي اتمسح.
+        بيمسح العميل بكل عقوده وأقساطه وتحصيلاته نهائيًا. اكتب كلمة سر المالك واضغط حذف.
       </p>
 
       {!presetCustomerId && (
@@ -175,56 +160,20 @@ export function CustomerPermanentDelete({
             · {receiptCount} إيصال تحصيل · {cashSalesCount} فاتورة نقدي (بتفضل محفوظة)
           </p>
 
-          {(receiptCount > 0 || openContracts.length > 0) && (
-            <p className="rounded-md bg-destructive/10 p-2.5 text-xs font-bold text-destructive">
-              تحذير: {openContracts.length} عقد شغال و{receiptCount} إيصال بإجمالي{" "}
-              {receivedTotal.toLocaleString("ar-EG")} ج.م — كله هيتمسح ويتشال من الخزينة والتقارير.
-            </p>
-          )}
-
-          <label className="flex items-start gap-2 text-xs text-foreground">
+          <label className="block max-w-xs space-y-1">
+            <span className="text-xs font-medium text-foreground">كلمة سر المالك</span>
             <input
-              type="checkbox"
-              checked={acknowledged}
-              onChange={(e) => setAcknowledged(e.target.checked)}
-              className="mt-0.5"
-            />
-            فاهم إن العميل وكل عقوده وتحصيلاته هيتمسحوا نهائيًا ومفيش رجوع.
-          </label>
-          <label className="block space-y-1">
-            <span className="text-xs font-medium text-foreground">سبب الحذف *</span>
-            <input
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="مثلًا: عميل اتسجل بالغلط مرتين"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && canSubmit) void handleDelete();
+              }}
               className="form-input"
+              dir="ltr"
+              autoComplete="current-password"
             />
           </label>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <label className="block space-y-1">
-              <span className="text-xs font-medium text-foreground">
-                اكتب الكود للتأكيد (<span dir="ltr">{customer.code}</span>)
-              </span>
-              <input
-                value={confirmCode}
-                onChange={(e) => setConfirmCode(e.target.value)}
-                className="form-input"
-                dir="ltr"
-                autoComplete="off"
-              />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-xs font-medium text-foreground">كلمة سر المالك</span>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="form-input"
-                dir="ltr"
-                autoComplete="current-password"
-              />
-            </label>
-          </div>
         </div>
       )}
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
