@@ -117,11 +117,12 @@ function RootComponent() {
    * module-level singleton) keeps this instance scoped per component tree, matching
    * TanStack Start's SSR guidance — a shared client would leak cached data between requests
    * on the server. */
-  // staleTime: مع البيانات الكبيرة، كل فتح صفحة كان بيعيد جلب كل الجداول من الصفر حتى لو اتجابت
-  // من ثواني. التحديث الحقيقي بييجي من: أي عملية على نفس الجهاز (invalidate)، والتغييرات من أي
-  // جهاز تاني لحظيًا (useRealtimeSync)، والرجوع للتاب بعد دقيقة (refetchOnWindowFocus).
+  // staleTime 5 دقايق (بند 78): كل فتحة صفحة كانت بتعيد تحميل جداول المحل كاملة حتى لو اتجابت من
+  // ثواني — ده بيستهلك "Egress" (حد النقل الشهري في خطة Supabase المجانية) من غير فايدة. التحديث
+  // الحقيقي بييجي من: أي عملية على نفس الجهاز (invalidate فوري)، والتغييرات من أي جهاز تاني
+  // لحظيًا (useRealtimeSync — محتاج migration 0028)، والرجوع للتاب بعد 5 دقايق.
   const [queryClient] = useState(
-    () => new QueryClient({ defaultOptions: { queries: { staleTime: 60_000 } } }),
+    () => new QueryClient({ defaultOptions: { queries: { staleTime: 5 * 60_000 } } }),
   );
 
   return (

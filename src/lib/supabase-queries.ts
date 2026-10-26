@@ -7,6 +7,7 @@ import {
   RISK_LEVEL_LABEL_AR,
 } from "@/lib/data-store";
 import type { CustomerRiskAssessment } from "@/lib/data-store";
+import { fetchAll, type PagedQuery } from "@/lib/fetch-all";
 import { supabase } from "@/lib/supabase-client";
 import type {
   AccountCode,
@@ -390,71 +391,21 @@ function useTenantList<T>(
 }
 
 /** بند 71 — السبب الجذري لبلاغ "التحصيل مش بينعكس على المتبقي" عند عميل حقيقي: Supabase
- * (PostgREST) بيرجّع **أقصى 1000 صف** في الطلب الواحد افتراضيًا (إعداد Max Rows)، والطلب ده كان
- * `select("*")` واحد من غير pagination. محل عنده أكتر من ~80 عقد (12 قسط للعقد) بيعدّي الـ1000
- * صف في `installments`، فأقساط بعض العقود (الأحدث غالبًا) مكانتش بتوصل للمتصفح أصلًا — صفحة
- * العقد كانت بتحسب "المتبقي" = إجمالي العقد − مجموع مدفوع أقساط **مش موجودة**، يعني الإجمالي
- * كامل، رغم إن التحصيل اتسجل صح في القاعدة. نسخة الديمو مفيهاش البيانات دي فمكنتش بتبان.
- *
- * دلوقتي كل جدول بيتجاب كامل على صفحات: نفس الترتيب المطلوب + `id` كترتيب ثانوي ثابت (عشان
- * الصفحات متتداخلش)، و`count: "exact"` بيقول العدد الحقيقي فبنكمّل لحد ما نجيبه كله مهما كان
- * إعداد Max Rows على المشروع (حتى لو أقل من 1000). */
-const PAGE_SIZE = 1000;
-
-/** نفس مشكلة fetchAllTenantRows بس لقراءات جوه العمليات نفسها (حساب رصيد خزينة قبل/بعد حركة،
- * مخزون منتج قبل البيع، رصيد مورد/شريك...): أي `select` بيرجّع أكتر من 1000 صف كان بيتقطع بصمت،
- * والحساب بيطلع غلط (رصيد خزينة ناقص، مخزون "خلصان" وهو موجود). بياخد نفس الاستعلام من غير
- * تنفيذ، يرتّبه بـ`id`، ويجيبه صفحة صفحة لحد ما يخلص. نفس شكل `{ data, error }` بتاع Supabase
- * عشان أماكن الاستدعاء تفضل زي ما هي. */
-type PagedQuery<R> = {
-  order(column: string, options?: { ascending?: boolean }): PagedQuery<R>;
-  range(
-    from: number,
-    to: number,
-  ): PromiseLike<{ data: R[] | null; error: { message: string } | null }>;
-};
-
-async function fetchAll<R>(
-  query: PagedQuery<R>,
-): Promise<{ data: R[]; error: { message: string } | null }> {
-  const rows: R[] = [];
-  const ordered = query.order("id", { ascending: true });
-  for (let page = 0; page < 500; page++) {
-    const { data, error } = await ordered.range(rows.length, rows.length + PAGE_SIZE - 1);
-    if (error) return { data: rows, error };
-    const batch = data ?? [];
-    rows.push(...batch);
-    // بنقف بس على صفحة فاضية — مش "أقل من 1000" — عشان لو Max Rows على المشروع أقل من 1000
-    // منقفش بدري ونفوّت صفوف.
-    if (batch.length === 0) break;
-  }
-  return { data: rows, error: null };
-}
-
+ * (PostgREST) بيرجّع أقصى عدد صفوف = Max Rows (1000 افتراضيًا) في الطلب الواحد، والطلب ده كان
+ * `select("*")` واحد من غير pagination — محل عدّى 1000 صف أقساط كانت أقساط بعض عقوده مش بتوصل
+ * للمتصفح، والمتبقي بيطلع = الإجمالي. دلوقتي كل جدول بيتجاب كامل عن طريق `fetchAll`
+ * (src/lib/fetch-all.ts — المكان الوحيد اللي بيتعامل مع حد Max Rows)، بنفس الترتيب المطلوب +
+ * `id` كترتيب ثانوي ثابت، و`count: "exact"` عشان نعرف إمتى نقف. */
 async function fetchAllTenantRows<T>(
   table: string,
   tenantId: string,
   opts?: { orderBy?: string; ascending?: boolean },
 ): Promise<T[]> {
-  const rows: T[] = [];
-  let total: number | null = null;
-  // حد أمان ضد لوب لا نهائي لو العدد اتغيّر أثناء الجلب (صف اتضاف/اتحذف في النص).
-  for (let page = 0; page < 500; page++) {
-    let query = supabase
-      .from(table)
-      .select("*", page === 0 ? { count: "exact" } : {})
-      .eq("tenant_id", tenantId);
-    if (opts?.orderBy) query = query.order(opts.orderBy, { ascending: opts.ascending ?? true });
-    query = query.order("id", { ascending: true }).range(rows.length, rows.length + PAGE_SIZE - 1);
-    const { data, error, count } = await query;
-    if (error) throw new Error(error.message);
-    if (page === 0) total = count ?? null;
-    const batch = (data ?? []) as T[];
-    rows.push(...batch);
-    if (batch.length === 0) break;
-    if (total !== null ? rows.length >= total : batch.length < PAGE_SIZE) break;
-  }
-  return rows;
+  let query = supabase.from(table).select("*", { count: "exact" }).eq("tenant_id", tenantId);
+  if (opts?.orderBy) query = query.order(opts.orderBy, { ascending: opts.ascending ?? true });
+  const { data, error } = await fetchAll<T>(query as unknown as PagedQuery<T>);
+  if (error) throw new Error(error.message);
+  return data;
 }
 
 /** Audit insert failures never block the mutation they describe from succeeding — the write
@@ -2052,14 +2003,109 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
 
 /** Shared by useCollectPayment and useEarlySettleContract — same Oldest-Due-First allocation
  * (§46), same receipt/status/promise side effects, just a different caller-supplied amount. */
+/** اللي بيحصل بعد ما الإيصال والأقساط يتسجلوا (بأي طريقة — الدالة الذرية أو القديمة): الوعود
+ * المتحققة، سطر التدقيق، وحركة الخزينة + القيد (best-effort زي ما كانت). */
+async function afterCollect(
+  tenantId: string,
+  contractId: string,
+  payment: InstallmentPayment,
+  amount: number,
+  actorUserId: string | null,
+  createdAt?: string,
+): Promise<void> {
+  const { data: keepablePromises, error: promisesError } = await supabase
+    .from("promises_to_pay")
+    .select("id, promise_date")
+    .eq("contract_id", contractId)
+    .eq("status", "pending");
+  if (promisesError) throw new Error(promisesError.message);
+  const nowIso = new Date().toISOString();
+  const keepableIds = (keepablePromises ?? [])
+    .filter((p) => nowIso <= (p.promise_date as string))
+    .map((p) => p.id as string);
+  if (keepableIds.length > 0) {
+    const { error: keepError } = await supabase
+      .from("promises_to_pay")
+      .update({ status: "kept" })
+      .in("id", keepableIds);
+    if (keepError) throw new Error(keepError.message);
+  }
+
+  await insertAuditLog({
+    tenant_id: tenantId,
+    user_id: actorUserId,
+    action: "installment_payment.collect",
+    entity: "installment_payments",
+    entity_id: payment.id,
+    new_value: payment,
+  });
+
+  await postFinancials(
+    tenantId,
+    "cashier",
+    "collection",
+    amount,
+    actorUserId,
+    payment.receipt_number,
+    [
+      { account_code: "1000", account_name: ACCOUNT_NAMES["1000"], debit: amount, credit: 0 },
+      { account_code: "1100", account_name: ACCOUNT_NAMES["1100"], debit: 0, credit: amount },
+    ],
+    `تحصيل ${payment.receipt_number}`,
+    "installment_payment",
+    payment.id,
+    createdAt,
+  );
+}
+
+/** بند 78: الطريق الأساسي للتحصيل — دالة Postgres واحدة (migration 0029) بتقفل العقد، وتسجّل
+ * الإيصال والأقساط وحالة العقد في transaction واحدة، ومحمية من التكرار بـidempotencyKey. بترجّع
+ * null لو الدالة لسه مش موجودة على القاعدة (migration متطبّقش) — ساعتها بنكمّل بالطريقة القديمة
+ * بالظبط، فمفيش حاجة بتبوظ قبل التطبيق. */
+async function tryAtomicCollect(
+  contractId: string,
+  amount: number,
+  createdAt: string | undefined,
+  idempotencyKey: string | undefined,
+): Promise<{ payment: InstallmentPayment; replayed: boolean } | null> {
+  const { data, error } = await supabase.rpc("collect_installment_payment", {
+    p_contract_id: contractId,
+    p_amount: amount,
+    ...(createdAt ? { p_created_at: createdAt } : {}),
+    ...(idempotencyKey ? { p_idempotency_key: idempotencyKey } : {}),
+  });
+  if (error) {
+    const missing =
+      error.code === "PGRST202" ||
+      error.code === "42883" ||
+      (error.message ?? "").includes("collect_installment_payment");
+    if (missing) return null;
+    throw new Error(error.message);
+  }
+  const result = data as { payment: InstallmentPayment; replayed: boolean };
+  return { payment: result.payment, replayed: Boolean(result.replayed) };
+}
+
 async function performCollectPayment(
   tenantId: string,
   contractId: string,
   amount: number,
   actorUserId: string | null,
   createdAt?: string,
+  idempotencyKey?: string,
 ): Promise<InstallmentPayment> {
   if (amount <= 0) throw new Error("المبلغ يجب أن يكون أكبر من صفر");
+
+  const atomic = await tryAtomicCollect(contractId, amount, createdAt, idempotencyKey);
+  if (atomic) {
+    // إعادة إرسال لنفس العملية (نت فصل وجه تاني): الإيصال موجود أصلًا — مفيش خزينة/قيد تاني.
+    if (!atomic.replayed) {
+      await afterCollect(tenantId, contractId, atomic.payment, amount, actorUserId, createdAt);
+    }
+    return atomic.payment;
+  }
+
+  // الطريقة القديمة (لحد ما migration 0029 يتطبّق).
   const { data: contract, error: contractError } = await supabase
     .from("installment_contracts")
     .select("*")
@@ -2155,47 +2201,12 @@ async function performCollectPayment(
     if (statusError) throw new Error(statusError.message);
   }
 
-  const { data: keepablePromises, error: promisesError } = await supabase
-    .from("promises_to_pay")
-    .select("id, promise_date")
-    .eq("contract_id", contractId)
-    .eq("status", "pending");
-  if (promisesError) throw new Error(promisesError.message);
-  const nowIso = new Date().toISOString();
-  const keepableIds = (keepablePromises ?? [])
-    .filter((p) => nowIso <= (p.promise_date as string))
-    .map((p) => p.id as string);
-  if (keepableIds.length > 0) {
-    const { error: keepError } = await supabase
-      .from("promises_to_pay")
-      .update({ status: "kept" })
-      .in("id", keepableIds);
-    if (keepError) throw new Error(keepError.message);
-  }
-
-  await insertAuditLog({
-    tenant_id: tenantId,
-    user_id: actorUserId,
-    action: "installment_payment.collect",
-    entity: "installment_payments",
-    entity_id: payment.id as string,
-    new_value: payment,
-  });
-
-  await postFinancials(
+  await afterCollect(
     tenantId,
-    "cashier",
-    "collection",
+    contractId,
+    payment as InstallmentPayment,
     amount,
     actorUserId,
-    payment.receipt_number as string,
-    [
-      { account_code: "1000", account_name: ACCOUNT_NAMES["1000"], debit: amount, credit: 0 },
-      { account_code: "1100", account_name: ACCOUNT_NAMES["1100"], debit: 0, credit: amount },
-    ],
-    `تحصيل ${payment.receipt_number as string}`,
-    "installment_payment",
-    payment.id as string,
     createdAt,
   );
 
@@ -2210,15 +2221,26 @@ export function useCollectPayment(tenantId: string | undefined) {
       amount,
       actorUserId,
       createdAt,
+      idempotencyKey,
     }: {
       contractId: string;
       amount: number;
       actorUserId: string | null;
       /** تاريخ تحصيل مفتوح اختياري — لتحصيلة قديمة بتتسجّل دلوقتي بأثر رجعي. */
       createdAt?: string;
+      /** مفتاح ثابت لنفس عملية التحصيل حتى لو اتبعتت أكتر من مرة (انقطاع نت/ضغطتين) — انظر
+       * tryAtomicCollect. الصفحة بتولّده مرة وتعيد استخدامه لحد ما التحصيل ينجح. */
+      idempotencyKey?: string;
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
-      return performCollectPayment(tenantId, contractId, amount, actorUserId, createdAt);
+      return performCollectPayment(
+        tenantId,
+        contractId,
+        amount,
+        actorUserId,
+        createdAt,
+        idempotencyKey,
+      );
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["installments", tenantId] });
@@ -2596,7 +2618,14 @@ export function useEarlySettleContract(tenantId: string | undefined) {
         ) / 100;
       if (remaining <= 0) throw new Error("لا يوجد مبلغ متبقي لتسويته");
 
-      const payment = await performCollectPayment(tenantId, contractId, remaining, actorUserId);
+      const payment = await performCollectPayment(
+        tenantId,
+        contractId,
+        remaining,
+        actorUserId,
+        undefined,
+        crypto.randomUUID(),
+      );
 
       const { error: statusError } = await supabase
         .from("installment_contracts")
@@ -4369,11 +4398,13 @@ export function useCloseShift(tenantId: string | undefined) {
       if (shiftError || !shift) throw new Error("الوردية غير موجودة");
       if (shift.status === "closed") throw new Error("الوردية مقفلة بالفعل");
 
-      const { data: movements, error: movementsError } = await supabase
-        .from("treasury_movements")
-        .select("amount")
-        .eq("account_id", shift.account_id as string)
-        .gte("created_at", shift.opened_at as string);
+      const { data: movements, error: movementsError } = await fetchAll(
+        supabase
+          .from("treasury_movements")
+          .select("amount")
+          .eq("account_id", shift.account_id as string)
+          .gte("created_at", shift.opened_at as string),
+      );
       if (movementsError) throw new Error(movementsError.message);
       const netMovement = (movements ?? []).reduce((sum, m) => sum + (m.amount as number), 0);
       const expected = Math.round(((shift.opening_balance as number) + netMovement) * 100) / 100;

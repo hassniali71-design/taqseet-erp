@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import { DateInput } from "@/components/ui/DateInput";
@@ -98,6 +98,9 @@ function ContractDetailPage() {
   const { data: allPromises = [] } = usePromisesToPay(session?.tenant_id);
   const { data: allRestructureEvents = [] } = useRestructureEvents(session?.tenant_id);
   const collectPaymentMutation = useCollectPayment(session?.tenant_id);
+  // مفتاح واحد لكل عملية تحصيل: لو الطلب اتبعت ومعرفناش النتيجة (نت فصل) وضغط تاني، نفس المفتاح
+  // بيرجع نفس الإيصال بدل ما يتسجّل مرتين. بيتصفّر بعد النجاح أو لما المبلغ يتغيّر (بند 78).
+  const collectKeyRef = useRef<string | null>(null);
   const recordPromiseMutation = useRecordPromise(session?.tenant_id);
   const earlySettleMutation = useEarlySettleContract(session?.tenant_id);
   const restructureMutation = useRestructureContract(session?.tenant_id);
@@ -159,10 +162,12 @@ function ContractDetailPage() {
       setPayError("أدخل مبلغ صحيح");
       return;
     }
+    collectKeyRef.current ??= crypto.randomUUID();
     collectPaymentMutation.mutate(
-      { contractId, amount, actorUserId },
+      { contractId, amount, actorUserId, idempotencyKey: collectKeyRef.current },
       {
         onSuccess: () => {
+          collectKeyRef.current = null;
           setPayAmount("");
           setPaySuccess(true);
           setTimeout(() => setPaySuccess(false), 2000);
@@ -532,7 +537,10 @@ function ContractDetailPage() {
                   min="0"
                   max={remaining}
                   value={payAmount}
-                  onChange={(e) => setPayAmount(e.target.value)}
+                  onChange={(e) => {
+                    collectKeyRef.current = null;
+                    setPayAmount(e.target.value);
+                  }}
                   className="form-input"
                   dir="ltr"
                 />

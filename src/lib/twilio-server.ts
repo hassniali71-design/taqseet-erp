@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 
+import { fetchAll } from "@/lib/fetch-all";
 import { getSupabaseAdmin, resolveServerCaller } from "@/lib/supabase-admin";
 
 /** Server-only Twilio REST API caller — reads plain (non-VITE_-prefixed) env vars, so this
@@ -174,31 +175,34 @@ export async function runTenantReminderSweep(tenantId: string): Promise<SweepRes
   const channel: Channel = settings["whatsapp_notifications_enabled"] ? "whatsapp" : "sms";
   const gracePeriodDays = (settings["grace_period_days"] as number | null) ?? 0;
 
-  const { data: contracts } = await supabaseAdmin
-    .from("installment_contracts")
-    .select("id, contract_number, customer_id")
-    .eq("tenant_id", tenantId)
-    .in("status", ["active", "partially_paid", "overdue"]);
+  // بند 78: كل القراءات هنا على صفحات (fetchAll) — قبل كده كانت بتقف عند حد Max Rows (1000)
+  // فتذكيرات أقساط كتير مكانتش بتتبعت، و`.in(contract_id, [كل العقود])` كان بيعدّي طول الـURL
+  // المسموح أول ما العقود تبقى بالمئات. دلوقتي بنجيب أقساط المحل المفتوحة كلها ونفلترها هنا.
+  const { data: contracts } = await fetchAll(
+    supabaseAdmin
+      .from("installment_contracts")
+      .select("id, contract_number, customer_id")
+      .eq("tenant_id", tenantId)
+      .in("status", ["active", "partially_paid", "overdue"]),
+  );
   if (!contracts || contracts.length === 0) return totals;
   const contractById = new Map(contracts.map((c) => [c["id"] as string, c]));
 
-  const { data: installments } = await supabaseAdmin
-    .from("installments")
-    .select("id, contract_id, due_date, amount, paid_amount, status")
-    .eq("tenant_id", tenantId)
-    .in(
-      "contract_id",
-      contracts.map((c) => c["id"] as string),
-    )
-    .not("status", "in", "(paid,waived,rescheduled)");
-  if (!installments || installments.length === 0) return totals;
+  const { data: allOpenInstallments } = await fetchAll(
+    supabaseAdmin
+      .from("installments")
+      .select("id, contract_id, due_date, amount, paid_amount, status")
+      .eq("tenant_id", tenantId)
+      .not("status", "in", "(paid,waived,rescheduled)"),
+  );
+  const installments = allOpenInstallments.filter((i) =>
+    contractById.has(i["contract_id"] as string),
+  );
+  if (installments.length === 0) return totals;
 
-  const customerIds = [...new Set(contracts.map((c) => c["customer_id"] as string))];
-  const { data: customers } = await supabaseAdmin
-    .from("customers")
-    .select("id, phone, alt_phone")
-    .eq("tenant_id", tenantId)
-    .in("id", customerIds);
+  const { data: customers } = await fetchAll(
+    supabaseAdmin.from("customers").select("id, phone, alt_phone").eq("tenant_id", tenantId),
+  );
   const phoneByCustomerId = new Map(
     (customers ?? []).map((c) => [
       c["id"] as string,

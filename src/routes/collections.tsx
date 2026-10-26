@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import { DateInput } from "@/components/ui/DateInput";
@@ -72,6 +72,8 @@ function CollectionsWorkbenchPage() {
   const { data: allInstallments = [] } = useInstallments(session?.tenant_id);
   const { data: allCustomers = [] } = useCustomers(session?.tenant_id);
   const collectPaymentMutation = useCollectPayment(session?.tenant_id);
+  // مفتاح لكل عقد لعملية التحصيل الجارية — نفس منطق صفحة العقد (بند 78).
+  const collectKeys = useRef(new Map<string, string>());
   const sweepMutation = useMutation({
     mutationFn: async (tenantId: string) =>
       sendTenantReminderSweepServer({ data: { tenantId, accessToken: await getAccessToken() } }),
@@ -154,15 +156,19 @@ function CollectionsWorkbenchPage() {
       return;
     }
     const collectDate = collectDates[contractId];
+    const key = collectKeys.current.get(contractId) ?? crypto.randomUUID();
+    collectKeys.current.set(contractId, key);
     collectPaymentMutation.mutate(
       {
         contractId,
         amount,
         actorUserId,
+        idempotencyKey: key,
         ...(collectDate && { createdAt: dateInputToTimestamp(collectDate) }),
       },
       {
         onSuccess: (payment) => {
+          collectKeys.current.delete(contractId);
           setAmounts((prev) => ({ ...prev, [contractId]: "" }));
           setCollectDates((prev) => ({ ...prev, [contractId]: "" }));
           // A page-level message (not a per-row indicator) — a fully-collected overdue/due
@@ -276,9 +282,10 @@ function CollectionsWorkbenchPage() {
                         max={row.outstanding}
                         placeholder="المبلغ"
                         value={amounts[row.contractId] ?? ""}
-                        onChange={(e) =>
-                          setAmounts((prev) => ({ ...prev, [row.contractId]: e.target.value }))
-                        }
+                        onChange={(e) => {
+                          collectKeys.current.delete(row.contractId);
+                          setAmounts((prev) => ({ ...prev, [row.contractId]: e.target.value }));
+                        }}
                         className="form-input w-24"
                         dir="ltr"
                       />
