@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { CustomerPermanentDelete } from "@/components/CustomerPermanentDelete";
 import { subscribeData } from "@/lib/data-store";
 import {
   useCreateInstallmentPlan,
@@ -589,6 +590,8 @@ function SettingsPage() {
           </button>
           {exportError && <p className="mt-2 text-sm text-destructive">{exportError}</p>}
         </section>
+
+        <CustomerPermanentDelete tenantId={tenantId} userId={actorUserId} />
 
         <section className="mt-8 rounded-xl border-2 border-destructive/40 bg-destructive/5 p-5 shadow-sm">
           <h2 className="text-sm font-bold text-destructive">تصفير بيانات المحل (نهائي)</h2>

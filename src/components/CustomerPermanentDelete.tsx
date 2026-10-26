@@ -1,0 +1,220 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+
+import { SearchPicker } from "@/components/ui/SearchPicker";
+import { deleteCustomerPermanentlyServer } from "@/lib/customer-delete-server";
+import { getAccessToken } from "@/lib/supabase-client";
+import {
+  useCustomers,
+  useInstallmentContracts,
+  useInstallmentPayments,
+  useRoles,
+  useSales,
+  useUserRoles,
+} from "@/lib/supabase-queries";
+
+/** قسم "حذف عميل نهائيًا" في الإعدادات (بند 72) — بيظهر للمالك بس. الفحص هنا للعرض والتوضيح
+ * قبل ما المالك يكتب كلمة السر؛ القرار الحقيقي (المالك، كلمة السر، الأهلية، الحذف الذري) كله على
+ * السيرفر وفي قاعدة البيانات — انظر src/lib/customer-delete-server.ts وmigration 0026. */
+export function CustomerPermanentDelete({
+  tenantId,
+  userId,
+}: {
+  tenantId: string;
+  userId: string;
+}) {
+  const queryClient = useQueryClient();
+  const { data: roles = [] } = useRoles(tenantId);
+  const { data: userRoles = [] } = useUserRoles(tenantId);
+  const { data: customers = [] } = useCustomers(tenantId);
+  const { data: contracts = [] } = useInstallmentContracts(tenantId);
+  const { data: payments = [] } = useInstallmentPayments(tenantId);
+  const { data: sales = [] } = useSales(tenantId);
+
+  const [customerId, setCustomerId] = useState("");
+  const [confirmCode, setConfirmCode] = useState("");
+  const [reason, setReason] = useState("");
+  const [password, setPassword] = useState("");
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  const deleteMutation = useMutation({
+    mutationFn: async () =>
+      deleteCustomerPermanentlyServer({
+        data: {
+          accessToken: await getAccessToken(),
+          customerId,
+          confirmCode,
+          password,
+          reason,
+        },
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries();
+    },
+  });
+
+  const ownerRoleId = roles.find((r) => r.name === "owner")?.id;
+  const isOwner = userRoles.some((ur) => ur.user_id === userId && ur.role_id === ownerRoleId);
+  if (!isOwner) return null;
+
+  const customer = customers.find((c) => c.id === customerId);
+  const customerContracts = contracts.filter((c) => c.customer_id === customerId);
+  const contractIds = new Set(customerContracts.map((c) => c.id));
+  const receiptCount = payments.filter((p) => contractIds.has(p.contract_id)).length;
+  const openContracts = customerContracts.filter((c) => c.status !== "cancelled");
+  const cashSalesCount = sales.filter((s) => s.customer_id === customerId).length;
+  const eligible = receiptCount === 0 && openContracts.length === 0;
+
+  function reset() {
+    setConfirmCode("");
+    setReason("");
+    setPassword("");
+    setAcknowledged(false);
+  }
+
+  async function handleDelete() {
+    setError(null);
+    setDone(null);
+    if (!customer) return;
+    try {
+      const result = await deleteMutation.mutateAsync();
+      setDone(
+        `اتحذف ${customer.name} (${customer.code}) نهائيًا${
+          result.contracts_deleted > 0 ? ` ومعاه ${result.contracts_deleted} عقد ملغي` : ""
+        } ✓`,
+      );
+      setCustomerId("");
+      reset();
+    } catch (e) {
+      setPassword("");
+      setError(e instanceof Error ? e.message : "حدث خطأ أثناء الحذف");
+    }
+  }
+
+  const canSubmit =
+    eligible &&
+    acknowledged &&
+    confirmCode.trim() === customer?.code &&
+    reason.trim() !== "" &&
+    password !== "" &&
+    !deleteMutation.isPending;
+
+  return (
+    <section className="mt-8 rounded-xl border-2 border-destructive/40 bg-destructive/5 p-5 shadow-sm">
+      <h2 className="text-sm font-bold text-destructive">حذف عميل نهائيًا (للمالك بس)</h2>
+      <p className="mt-1 text-xs text-muted-foreground">
+        بيمسح العميل وعقوده الملغية وأقساطها وضامنيه كأنه ما اتدخلش، ومفيش رجوع. مسموح بس لعميل مفيش
+        على عقوده أي تحصيل، وكل عقوده ملغية (الإلغاء من صفحة العقد بيرجّع المخزون والخزينة الأول).
+        عميل عليه تحصيلات سجله المالي لازم يفضل — استخدم «إيقاف» من صفحة العملاء.
+      </p>
+
+      <label className="mt-3 block max-w-md space-y-1">
+        <span className="text-xs font-medium text-foreground">العميل</span>
+        <SearchPicker
+          items={customers.map((c) => ({
+            id: c.id,
+            label: `${c.name} — ${c.code}${c.phone ? ` — ${c.phone}` : ""}`,
+          }))}
+          value={customerId}
+          onChange={(id) => {
+            setCustomerId(id);
+            setError(null);
+            setDone(null);
+            reset();
+          }}
+          placeholder="ابحث بالاسم أو الكود..."
+        />
+      </label>
+
+      {customer && (
+        <div className="mt-3 space-y-3 rounded-lg border border-border bg-card p-4 text-sm">
+          <p className="text-foreground">
+            <span className="font-bold">{customer.name}</span> — كود{" "}
+            <span dir="ltr" className="font-bold">
+              {customer.code}
+            </span>
+            {customer.phone && (
+              <>
+                {" "}
+                — <span dir="ltr">{customer.phone}</span>
+              </>
+            )}
+          </p>
+          <ul className="list-inside list-disc text-xs text-muted-foreground">
+            <li>
+              عقود تقسيط: {customerContracts.length} (منها ملغي{" "}
+              {customerContracts.length - openContracts.length})
+            </li>
+            <li>إيصالات تحصيل على عقوده: {receiptCount}</li>
+            <li>فواتير نقدي: {cashSalesCount} (بتفضل محفوظة كمستند مالي من غير ربط بالعميل)</li>
+          </ul>
+
+          {!eligible ? (
+            <p className="rounded-md bg-destructive/10 p-3 text-xs font-medium text-destructive">
+              {receiptCount > 0
+                ? `مينفعش يتحذف: على عقوده ${receiptCount} إيصال تحصيل — سجل مالي لازم يفضل. استخدم «إيقاف» العميل من صفحة العملاء بدل الحذف.`
+                : `مينفعش يتحذف دلوقتي: عنده ${openContracts.length} عقد مش ملغي (${openContracts
+                    .map((c) => c.contract_number)
+                    .join("، ")}). ألغِ العقد الأول من صفحته، وبعدها ارجع هنا.`}
+            </p>
+          ) : (
+            <>
+              <label className="flex items-start gap-2 text-xs text-foreground">
+                <input
+                  type="checkbox"
+                  checked={acknowledged}
+                  onChange={(e) => setAcknowledged(e.target.checked)}
+                  className="mt-0.5"
+                />
+                فاهم إن العميل ده وعقوده الملغية هيتمسحوا نهائيًا ومفيش رجوع.
+              </label>
+              <label className="block max-w-xs space-y-1">
+                <span className="text-xs font-medium text-foreground">
+                  اكتب كود العميل للتأكيد (<span dir="ltr">{customer.code}</span>)
+                </span>
+                <input
+                  value={confirmCode}
+                  onChange={(e) => setConfirmCode(e.target.value)}
+                  className="form-input"
+                  dir="ltr"
+                  autoComplete="off"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs font-medium text-foreground">سبب الحذف *</span>
+                <input
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="مثلًا: عميل اتسجل بالغلط مرتين"
+                  className="form-input"
+                />
+              </label>
+              <label className="block max-w-xs space-y-1">
+                <span className="text-xs font-medium text-foreground">كلمة سر المالك</span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="form-input"
+                  dir="ltr"
+                  autoComplete="current-password"
+                />
+              </label>
+              <button
+                onClick={() => void handleDelete()}
+                disabled={!canSubmit}
+                className="rounded-md bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {deleteMutation.isPending ? "جارٍ الحذف..." : "حذف العميل نهائيًا"}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      {done && <p className="mt-2 text-sm font-bold text-success">{done}</p>}
+    </section>
+  );
+}
