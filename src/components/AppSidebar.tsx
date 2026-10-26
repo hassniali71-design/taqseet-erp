@@ -27,6 +27,7 @@ import {
 import { Logo } from "@/components/Logo";
 import { getUsers, signOut, type Session } from "@/lib/data-store";
 import { cn } from "@/lib/utils";
+import { useRealtimeSync } from "@/hooks/use-realtime-sync";
 
 interface NavItem {
   to: string;
@@ -108,6 +109,8 @@ const NAV_GROUPS: NavGroup[] = [
 
 export function AppSidebar({ session }: { session: Session }) {
   const navigate = useNavigate();
+  // الشريط الجانبي موجود في كل صفحة جوه النظام — مكان واحد يفضل الاشتراك فيه شغال طول الجلسة.
+  useRealtimeSync(session.tenant_id);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const user = getUsers().find((u) => u.id === session.user_id);
 

@@ -117,7 +117,12 @@ function RootComponent() {
    * module-level singleton) keeps this instance scoped per component tree, matching
    * TanStack Start's SSR guidance — a shared client would leak cached data between requests
    * on the server. */
-  const [queryClient] = useState(() => new QueryClient());
+  // staleTime: مع البيانات الكبيرة، كل فتح صفحة كان بيعيد جلب كل الجداول من الصفر حتى لو اتجابت
+  // من ثواني. التحديث الحقيقي بييجي من: أي عملية على نفس الجهاز (invalidate)، والتغييرات من أي
+  // جهاز تاني لحظيًا (useRealtimeSync)، والرجوع للتاب بعد دقيقة (refetchOnWindowFocus).
+  const [queryClient] = useState(
+    () => new QueryClient({ defaultOptions: { queries: { staleTime: 60_000 } } }),
+  );
 
   return (
     <QueryClientProvider client={queryClient}>

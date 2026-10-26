@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
@@ -41,6 +42,7 @@ type CartLine = {
 
 function NewSalePage() {
   const session = useRequireSession();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [, forceRerender] = useState(0);
   const [customerId, setCustomerId] = useState("");
@@ -325,6 +327,10 @@ function NewSalePage() {
                   splitPct,
                   profitSharePct,
                 };
+              }),
+            ).then(() =>
+              queryClient.invalidateQueries({
+                queryKey: ["partner_transactions", session.tenant_id],
               }),
             );
           }

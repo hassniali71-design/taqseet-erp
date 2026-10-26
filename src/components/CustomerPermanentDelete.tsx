@@ -62,10 +62,11 @@ export function CustomerPermanentDelete({
   const customer = customers.find((c) => c.id === customerId);
   const customerContracts = contracts.filter((c) => c.customer_id === customerId);
   const contractIds = new Set(customerContracts.map((c) => c.id));
-  const receiptCount = payments.filter((p) => contractIds.has(p.contract_id)).length;
+  const customerPayments = payments.filter((p) => contractIds.has(p.contract_id));
+  const receiptCount = customerPayments.length;
+  const receivedTotal = customerPayments.reduce((sum, p) => sum + p.amount, 0);
   const openContracts = customerContracts.filter((c) => c.status !== "cancelled");
   const cashSalesCount = sales.filter((s) => s.customer_id === customerId).length;
-  const eligible = receiptCount === 0 && openContracts.length === 0;
 
   function reset() {
     setConfirmCode("");
@@ -81,9 +82,11 @@ export function CustomerPermanentDelete({
     try {
       const result = await deleteMutation.mutateAsync();
       setDone(
-        `اتحذف ${customer.name} (${customer.code}) نهائيًا${
-          result.contracts_deleted > 0 ? ` ومعاه ${result.contracts_deleted} عقد ملغي` : ""
-        } ✓`,
+        `اتحذف ${customer.name} (${customer.code}) نهائيًا ✓ — ${result.contracts_deleted} عقد، ${
+          result.receipts_deleted
+        } إيصال، ${result.treasury_movements_deleted} حركة خزينة، ${
+          result.serials_returned
+        } سيريال رجع للمخزون`,
       );
       setCustomerId("");
       reset();
@@ -94,7 +97,6 @@ export function CustomerPermanentDelete({
   }
 
   const canSubmit =
-    eligible &&
     acknowledged &&
     confirmCode.trim() === customer?.code &&
     reason.trim() !== "" &&
@@ -105,9 +107,9 @@ export function CustomerPermanentDelete({
     <section className="mt-8 rounded-xl border-2 border-destructive/40 bg-destructive/5 p-5 shadow-sm">
       <h2 className="text-sm font-bold text-destructive">حذف عميل نهائيًا (للمالك بس)</h2>
       <p className="mt-1 text-xs text-muted-foreground">
-        بيمسح العميل وعقوده الملغية وأقساطها وضامنيه كأنه ما اتدخلش، ومفيش رجوع. مسموح بس لعميل مفيش
-        على عقوده أي تحصيل، وكل عقوده ملغية (الإلغاء من صفحة العقد بيرجّع المخزون والخزينة الأول).
-        عميل عليه تحصيلات سجله المالي لازم يفضل — استخدم «إيقاف» من صفحة العملاء.
+        بيمسح العميل وكل عقوده (أي حالة) وأقساطها وتحصيلاتها وضامنيه، وأثرها في الخزينة والقيود
+        والشركاء، والأجهزة بترجع المخزون — كأنه ما اتدخلش، ومفيش رجوع. فواتير البيع النقدي بتفضل
+        محفوظة من غير ربط بالعميل. كل حذف بيتسجل في سجل العمليات بكل اللي اتمسح.
       </p>
 
       <label className="mt-3 block max-w-md space-y-1">
@@ -151,66 +153,63 @@ export function CustomerPermanentDelete({
             <li>فواتير نقدي: {cashSalesCount} (بتفضل محفوظة كمستند مالي من غير ربط بالعميل)</li>
           </ul>
 
-          {!eligible ? (
-            <p className="rounded-md bg-destructive/10 p-3 text-xs font-medium text-destructive">
-              {receiptCount > 0
-                ? `مينفعش يتحذف: على عقوده ${receiptCount} إيصال تحصيل — سجل مالي لازم يفضل. استخدم «إيقاف» العميل من صفحة العملاء بدل الحذف.`
-                : `مينفعش يتحذف دلوقتي: عنده ${openContracts.length} عقد مش ملغي (${openContracts
-                    .map((c) => c.contract_number)
-                    .join("، ")}). ألغِ العقد الأول من صفحته، وبعدها ارجع هنا.`}
+          {(receiptCount > 0 || openContracts.length > 0) && (
+            <p className="rounded-md bg-destructive/10 p-3 text-xs font-bold text-destructive">
+              تحذير: العميل ده عليه {openContracts.length} عقد شغال و{receiptCount} إيصال تحصيل
+              بإجمالي {receivedTotal.toLocaleString("ar-EG")} ج.م — كل ده هيتمسح، والمبالغ دي هتتشال
+              من الخزينة والتقارير كأنها ما اتحصّلتش.
             </p>
-          ) : (
-            <>
-              <label className="flex items-start gap-2 text-xs text-foreground">
-                <input
-                  type="checkbox"
-                  checked={acknowledged}
-                  onChange={(e) => setAcknowledged(e.target.checked)}
-                  className="mt-0.5"
-                />
-                فاهم إن العميل ده وعقوده الملغية هيتمسحوا نهائيًا ومفيش رجوع.
-              </label>
-              <label className="block max-w-xs space-y-1">
-                <span className="text-xs font-medium text-foreground">
-                  اكتب كود العميل للتأكيد (<span dir="ltr">{customer.code}</span>)
-                </span>
-                <input
-                  value={confirmCode}
-                  onChange={(e) => setConfirmCode(e.target.value)}
-                  className="form-input"
-                  dir="ltr"
-                  autoComplete="off"
-                />
-              </label>
-              <label className="block space-y-1">
-                <span className="text-xs font-medium text-foreground">سبب الحذف *</span>
-                <input
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="مثلًا: عميل اتسجل بالغلط مرتين"
-                  className="form-input"
-                />
-              </label>
-              <label className="block max-w-xs space-y-1">
-                <span className="text-xs font-medium text-foreground">كلمة سر المالك</span>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="form-input"
-                  dir="ltr"
-                  autoComplete="current-password"
-                />
-              </label>
-              <button
-                onClick={() => void handleDelete()}
-                disabled={!canSubmit}
-                className="rounded-md bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {deleteMutation.isPending ? "جارٍ الحذف..." : "حذف العميل نهائيًا"}
-              </button>
-            </>
           )}
+          <>
+            <label className="flex items-start gap-2 text-xs text-foreground">
+              <input
+                type="checkbox"
+                checked={acknowledged}
+                onChange={(e) => setAcknowledged(e.target.checked)}
+                className="mt-0.5"
+              />
+              فاهم إن العميل ده وكل عقوده وتحصيلاته هيتمسحوا نهائيًا ومفيش رجوع.
+            </label>
+            <label className="block max-w-xs space-y-1">
+              <span className="text-xs font-medium text-foreground">
+                اكتب كود العميل للتأكيد (<span dir="ltr">{customer.code}</span>)
+              </span>
+              <input
+                value={confirmCode}
+                onChange={(e) => setConfirmCode(e.target.value)}
+                className="form-input"
+                dir="ltr"
+                autoComplete="off"
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium text-foreground">سبب الحذف *</span>
+              <input
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="مثلًا: عميل اتسجل بالغلط مرتين"
+                className="form-input"
+              />
+            </label>
+            <label className="block max-w-xs space-y-1">
+              <span className="text-xs font-medium text-foreground">كلمة سر المالك</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="form-input"
+                dir="ltr"
+                autoComplete="current-password"
+              />
+            </label>
+            <button
+              onClick={() => void handleDelete()}
+              disabled={!canSubmit}
+              className="rounded-md bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {deleteMutation.isPending ? "جارٍ الحذف..." : "حذف العميل نهائيًا"}
+            </button>
+          </>
         </div>
       )}
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
