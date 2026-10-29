@@ -33,6 +33,7 @@ import { useEffect } from "react";
 import { useRealtimeSync } from "@/hooks/use-realtime-sync";
 import { installApp, useCanInstall } from "@/lib/pwa";
 import { hydrateFromLocal } from "@/lib/table-sync";
+import { onOutboxSynced, useOutbox, useOutboxRunner } from "@/lib/outbox";
 import { APP_BUILD_TIME, APP_VERSION } from "@/lib/app-version";
 
 interface NavItem {
@@ -122,6 +123,16 @@ export function AppSidebar({ session }: { session: Session }) {
   useEffect(() => {
     void hydrateFromLocal(queryClient, session.tenant_id);
   }, [queryClient, session.tenant_id]);
+  // العمليات اللي اتعملت من غير نت بتتبعت لوحدها، وبعد ما توصل البيانات تتحدّث — بند 80.
+  useOutboxRunner(session.tenant_id);
+  useEffect(
+    () =>
+      onOutboxSynced((tenantId) => {
+        if (tenantId === session.tenant_id) void queryClient.invalidateQueries();
+      }),
+    [queryClient, session.tenant_id],
+  );
+  const outbox = useOutbox(session.tenant_id);
   const canInstall = useCanInstall();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const user = getUsers().find((u) => u.id === session.user_id);
@@ -172,6 +183,14 @@ export function AppSidebar({ session }: { session: Session }) {
         <p className="truncate text-xs font-bold text-sidebar-foreground">{user?.full_name}</p>
         <button
           onClick={() => {
+            if (
+              outbox.length > 0 &&
+              !window.confirm(
+                `فيه ${outbox.length} عملية لسه موصلتش السيرفر. هتفضل محفوظة على الجهاز وهتتبعت أول ما حد من نفس المحل يدخل تاني بالنت. تخرج؟`,
+              )
+            ) {
+              return;
+            }
             signOut();
             void navigate({ to: "/login" });
           }}

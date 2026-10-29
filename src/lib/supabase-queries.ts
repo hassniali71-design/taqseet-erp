@@ -9,6 +9,17 @@ import {
 import type { CustomerRiskAssessment } from "@/lib/data-store";
 import { fetchAll } from "@/lib/fetch-all";
 import { syncTable } from "@/lib/table-sync";
+import {
+  isTransient,
+  newOperationId,
+  outboxAdd,
+  outboxList,
+  outboxUpdate,
+  registerOutboxSender,
+  type OutboxEntry,
+  type QueuedContract,
+  type SendResult,
+} from "@/lib/outbox";
 import { supabase } from "@/lib/supabase-client";
 import type {
   AccountCode,
@@ -1691,22 +1702,436 @@ export interface CreateInstallmentContractInput {
   plan_id: string;
 }
 
+/** تسوية الشركاء على صفقة تقسيط — نفس اللي كانت صفحة البيع بتعمله بعد العقد بالظبط، بقت هنا عشان
+ * تشتغل كمان لما عقد اتعمل من غير نت يوصل السيرفر (بند 80). */
+export interface ContractPartnersSpec {
+  cashSubtotal: number;
+  cartCost: number;
+  singleProductId?: string;
+  partners: Array<{ partnerId: string; splitPct: number; profitSharePct: number }>;
+}
+
+/** عميل جديد اتعمل جوه فاتورة التقسيط والنت فاصل — بيتسجّل مع العقد في نفس العملية. */
+export interface OfflineNewCustomer {
+  id: string;
+  name: string;
+  address: string;
+  phone?: string;
+  notes?: string;
+  ledger_book?: string;
+}
+
+/** خطة مخصصة لصفقة واحدة اتعملت والنت فاصل. */
+export interface OfflineNewPlan {
+  id: string;
+  duration_months: number;
+  rate_pct: number;
+}
+
+export type CreateContractResult =
+  { queued: false; contract: InstallmentContract } | { queued: true; id: string };
+
+type ContractDraft = {
+  saleItems: SaleItem[];
+  soldSerialIds: Set<string>;
+  movementDrafts: Array<{ product_id: string; quantity: number; before: number; after: number }>;
+  cash_subtotal: number;
+  principal: number;
+  financeAmount: number;
+  totalAmount: number;
+  schedule: ReturnType<typeof generateSchedule>;
+  customer: Customer;
+  plan: InstallmentPlan;
+};
+
+/** حساب العقد كله (الأصناف، المخزون، المقدّم، الفايدة، جدول الأقساط) من بيانات معطاة — نفس
+ * الكود اللي كان جوه useCreateInstallmentContract بالحرف، اتفصل عشان يشتغل على بيانات السيرفر
+ * (بالنت) أو نسخة الجهاز (من غير نت) بنفس المعادلة بالظبط. */
+function buildInstallmentContractDraft(
+  input: CreateInstallmentContractInput,
+  customer: Customer,
+  plan: InstallmentPlan,
+  products: Product[],
+  allSerials: ProductSerial[],
+  movements: InventoryMovement[],
+  scheduleStart: Date | undefined,
+): ContractDraft {
+  if (customer.status !== "active") throw new Error("العميل غير نشط");
+  if (!plan.active) throw new Error("خطة التقسيط غير مفعّلة");
+
+  const saleItems: SaleItem[] = [];
+  const soldSerialIds = new Set<string>();
+  const stockTracker = new Map<string, number>();
+  const movementDrafts: ContractDraft["movementDrafts"] = [];
+
+  for (const line of input.items) {
+    const product = products.find((p) => p.id === line.product_id);
+    if (!product) throw new Error("منتج غير موجود");
+    if (!product.active) throw new Error(`المنتج "${product.name}" غير نشط`);
+    const stock = stockTracker.has(product.id)
+      ? (stockTracker.get(product.id) as number)
+      : computeProductStock(product.id, product.serial_required, allSerials, movements);
+
+    if (product.serial_required) {
+      if (line.quantity !== 1) {
+        throw new Error(`المنتج "${product.name}" يُباع سيريال واحد لكل سطر`);
+      }
+      if (!line.serial_id) throw new Error(`اختر سيريال للمنتج "${product.name}"`);
+      if (soldSerialIds.has(line.serial_id)) {
+        throw new Error("لا يمكن بيع نفس السيريال مرتين في نفس العقد");
+      }
+      const serial = allSerials.find((s) => s.id === line.serial_id && s.product_id === product.id);
+      if (!serial) throw new Error("السيريال غير موجود");
+      if (serial.status !== "available") {
+        throw new Error(`السيريال "${serial.serial_number}" غير متاح للبيع`);
+      }
+      soldSerialIds.add(serial.id);
+      const unitPrice = line.unit_price ?? product.cash_price;
+      saleItems.push({
+        product_id: product.id,
+        product_name: product.name,
+        serial_id: serial.id,
+        serial_number: serial.serial_number,
+        quantity: 1,
+        unit_price: unitPrice,
+        line_total: unitPrice,
+      });
+      stockTracker.set(product.id, stock - 1);
+      movementDrafts.push({
+        product_id: product.id,
+        quantity: -1,
+        before: stock,
+        after: stock - 1,
+      });
+    } else {
+      if (line.quantity <= 0) throw new Error(`كمية غير صحيحة للمنتج "${product.name}"`);
+      if (line.quantity > stock) {
+        throw new Error(`المخزون غير كافٍ للمنتج "${product.name}" (متاح ${stock})`);
+      }
+      const unitPrice = line.unit_price ?? product.cash_price;
+      saleItems.push({
+        product_id: product.id,
+        product_name: product.name,
+        quantity: line.quantity,
+        unit_price: unitPrice,
+        line_total: unitPrice * line.quantity,
+      });
+      stockTracker.set(product.id, stock - line.quantity);
+      movementDrafts.push({
+        product_id: product.id,
+        quantity: -line.quantity,
+        before: stock,
+        after: stock - line.quantity,
+      });
+    }
+  }
+
+  const cash_subtotal = saleItems.reduce((sum, i) => sum + i.line_total, 0);
+  // المقدّم اختياري بالكامل — صفر مقبول، ويتمّوَّل كامل قيمة الصفقة على الخطة من غير أي
+  // حد أدنى مفروض. النسبة المقترحة في tenant_settings.min_down_payment_pct بقت للعرض
+  // الاستشاري بس في الواجهة (مش تحقق مُلزِم هنا).
+  if (input.down_payment < 0) throw new Error("المقدّم لا يمكن أن يكون سالبًا");
+  if (input.down_payment >= cash_subtotal) {
+    throw new Error("المقدّم يغطي كامل القيمة — استخدم البيع النقدي بدلاً من التقسيط");
+  }
+
+  const principal = Math.round((cash_subtotal - input.down_payment) * 100) / 100;
+  const { financeAmount, totalAmount } = calculateFinance(principal, plan.rate_pct);
+
+  // جدول الأقساط بيتحسب من تاريخ العقد نفسه (لو اتحدد يدويًا) مش من النهاردة — عقد بتاريخ
+  // مفتوح قديم لازم أول قسط فيه يستحق بعده بشهر من تاريخه الحقيقي، مش من تاريخ التسجيل.
+  // (من غير نت: من وقت العملية على الجهاز، مش وقت وصولها للسيرفر.)
+  const schedule = generateSchedule(totalAmount, plan.duration_months, scheduleStart);
+
+  return {
+    saleItems,
+    soldSerialIds,
+    movementDrafts,
+    cash_subtotal,
+    principal,
+    financeAmount,
+    totalAmount,
+    schedule,
+    customer,
+    plan,
+  };
+}
+
+/** اللي بيحصل بعد ما العقد يتسجّل (بأي طريقة): سطر التدقيق، والخزينة + القيد (best-effort زي ما
+ * كانت)، وتسوية الشركاء. */
+async function afterContract(
+  tenantId: string,
+  contract: InstallmentContract,
+  downPayment: number,
+  actorUserId: string | null,
+  createdAt: string | undefined,
+  partners: ContractPartnersSpec | undefined,
+): Promise<void> {
+  await insertAuditLog({
+    tenant_id: tenantId,
+    user_id: actorUserId,
+    action: "installment_contract.create",
+    entity: "installment_contracts",
+    entity_id: contract.id,
+    new_value: contract,
+  });
+
+  // §75 — Product Profit (cash_subtotal) kept separate from Financing Revenue
+  // (finance_amount): Dr Cash (down payment, if any) + Dr Customers (what's still owed)
+  // balances against Cr Sales Revenue (goods value) + Cr Financing Revenue.
+  try {
+    if (downPayment > 0) {
+      const cashierId = await findAccountIdByKind(tenantId, "cashier");
+      if (cashierId) {
+        await performPostTreasuryMovement(
+          tenantId,
+          cashierId,
+          downPayment,
+          "sale",
+          actorUserId,
+          contract.contract_number,
+          undefined,
+          createdAt,
+        );
+      }
+    }
+    await performPostJournalEntry(
+      tenantId,
+      [
+        ...(downPayment > 0
+          ? [
+              {
+                account_code: "1000" as const,
+                account_name: ACCOUNT_NAMES["1000"],
+                debit: downPayment,
+                credit: 0,
+              },
+            ]
+          : []),
+        {
+          account_code: "1100",
+          account_name: ACCOUNT_NAMES["1100"],
+          debit: contract.total_amount,
+          credit: 0,
+        },
+        {
+          account_code: "3000",
+          account_name: ACCOUNT_NAMES["3000"],
+          debit: 0,
+          credit: contract.cash_subtotal,
+        },
+        {
+          account_code: "3100",
+          account_name: ACCOUNT_NAMES["3100"],
+          debit: 0,
+          credit: contract.finance_amount,
+        },
+      ],
+      `عقد تقسيط ${contract.contract_number}`,
+      "installment_contract",
+      contract.id,
+      createdAt,
+    );
+  } catch (e) {
+    console.warn("فشل ترحيل الحركة المالية:", e instanceof Error ? e.message : e);
+  }
+
+  // الشركاء: زي ما كانت في صفحة البيع — فشلها ميلغيش العقد اللي اتسجّل خلاص.
+  if (partners && partners.partners.length > 0) {
+    try {
+      await settlePartnersForDeal(
+        tenantId,
+        actorUserId,
+        contract.contract_number,
+        undefined,
+        contract.id,
+        partners.partners.map(({ partnerId, splitPct, profitSharePct }) => {
+          const preview = computePartnerDealPreview(
+            partners.cashSubtotal,
+            partners.cartCost,
+            splitPct,
+            profitSharePct,
+            contract.finance_amount,
+          );
+          return {
+            partnerId,
+            ...(partners.singleProductId ? { productId: partners.singleProductId } : {}),
+            costRecovered: preview.costRecovered,
+            profitAmount: preview.profitAmount,
+            dealValue: partners.cashSubtotal,
+            splitPct,
+            profitSharePct,
+          };
+        }),
+      );
+    } catch (e) {
+      console.warn("فشل تسوية الشركاء:", e instanceof Error ? e.message : e);
+    }
+  }
+}
+
+function isMissingFunction(error: { code?: string; message?: string }, name: string) {
+  return (
+    error.code === "PGRST202" || error.code === "42883" || (error.message ?? "").includes(name)
+  );
+}
+
+/** شكل العقد اللي بيتبعت لـcreate_installment_contract_offline (0032). */
+function contractRpcPayload(
+  id: string,
+  input: CreateInstallmentContractInput,
+  draft: ContractDraft,
+  createdAt: string | undefined,
+) {
+  return {
+    id,
+    customer_id: draft.customer.id,
+    items: draft.saleItems,
+    cash_subtotal: draft.cash_subtotal,
+    down_payment: input.down_payment,
+    principal: draft.principal,
+    plan_id: draft.plan.id,
+    plan_duration_months: draft.plan.duration_months,
+    plan_rate_pct: draft.plan.rate_pct,
+    finance_amount: draft.financeAmount,
+    total_amount: draft.totalAmount,
+    installment_amount: draft.schedule[0]?.amount ?? 0,
+    schedule: draft.schedule,
+    ...(createdAt ? { created_at: createdAt } : {}),
+  };
+}
+
+/** إرسال عقد من الطابور (بعد ما النت يرجع). */
+async function sendQueuedContract(entry: OutboxEntry): Promise<SendResult> {
+  if (entry.kind !== "contract") return { ok: false, retry: false, error: "عملية غير معروفة" };
+  const { data, error, status } = await supabase.rpc("create_installment_contract_offline", {
+    p_contract: entry.payload.contract,
+    p_new_customer: entry.payload.newCustomer,
+    p_new_plan: entry.payload.newPlan,
+    p_offline_at: entry.at,
+  });
+  if (error) {
+    if (isMissingFunction(error, "create_installment_contract_offline")) {
+      return { ok: false, retry: true, waitingUpdate: true };
+    }
+    if (isTransient({ ...error, status })) return { ok: false, retry: true };
+    return { ok: false, retry: false, error: error.message };
+  }
+  const result = data as { contract: InstallmentContract; replayed: boolean };
+  // لو السيرفر قال "وصل قبل كده" ومكناش علّمنا إنه وصل، يبقى الرد بس هو اللي ضاع والتدقيق
+  // والقيود ما اتعملتش — نعملها. لو كنا علّمنا، يبقى اتعملت قبل كده — منكرّرهاش.
+  if (!result.replayed || !entry.serverDone) {
+    await outboxUpdate(entry.tenantId, entry.id, { serverDone: true });
+    const createdAt = (entry.payload.contract["created_at"] as string | undefined) ?? entry.at;
+    await afterContract(
+      entry.tenantId,
+      result.contract,
+      Number(entry.payload.contract["down_payment"]) || 0,
+      entry.actorUserId,
+      createdAt,
+      (entry.partners as ContractPartnersSpec | null) ?? undefined,
+    );
+  }
+  return { ok: true };
+}
+registerOutboxSender("contract", sendQueuedContract);
+
 export function useCreateInstallmentContract(tenantId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
+    // العقد ممكن يتحفظ على الجهاز والنت فاصل — React Query لازم ميوقّفش العملية (بند 80).
+    networkMode: "always",
     mutationFn: async ({
       input,
       actorUserId,
       createdAt,
+      partners,
+      newCustomer,
+      newPlan,
     }: {
       input: CreateInstallmentContractInput;
       actorUserId: string | null;
       /** تاريخ مفتوح اختياري — لعقد قديم بيسجّله العميل دلوقتي بأثر رجعي على التقارير. جدول
        * الأقساط نفسه بيتحسب بادئًا من التاريخ ده (مش من النهاردة) — أول قسط يستحق بعده بشهر. */
       createdAt?: string;
-    }) => {
+      partners?: ContractPartnersSpec;
+      /** من غير نت بس: عميل جديد اتعمل جوه الفاتورة (بالنت بيتسجّل لوحده الأول زي دلوقتي). */
+      newCustomer?: OfflineNewCustomer;
+      /** من غير نت بس: خطة مخصصة للصفقة. */
+      newPlan?: OfflineNewPlan;
+    }): Promise<CreateContractResult> => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
       if (input.items.length === 0) throw new Error("لازم تضيف صنف واحد على الأقل");
+
+      const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+      const contractId = newOperationId();
+
+      if (offline) {
+        // من غير نت: نفس الحساب بالظبط على نسخة الجهاز، والعقد يتحفظ في الطابور كـ"عقد مؤقت".
+        const [customers, plans, products, serials, movements] = await Promise.all([
+          syncTable<Customer>("customers", tenantId),
+          syncTable<InstallmentPlan>("installment_plans", tenantId),
+          syncTable<Product>("products", tenantId),
+          syncTable<ProductSerial>("product_serials", tenantId),
+          syncTable<InventoryMovement>("inventory_movements", tenantId),
+        ]);
+        const at = new Date().toISOString();
+        const customer: Customer | undefined = newCustomer
+          ? ({
+              ...newCustomer,
+              tenant_id: tenantId,
+              code: "",
+              status: "active",
+              created_at: at,
+            } as unknown as Customer)
+          : customers.find((c) => c.id === input.customer_id);
+        if (!customer) throw new Error("العميل غير موجود");
+        const plan: InstallmentPlan | undefined = newPlan
+          ? ({ ...newPlan, tenant_id: tenantId, active: true, created_at: at } as InstallmentPlan)
+          : plans.find((p) => p.id === input.plan_id);
+        if (!plan) throw new Error("خطة التقسيط غير موجودة");
+        // العقود اللي لسه في الطابور حجزت سيريالاتها/كمياتها — منبيعهاش تاني على نفس الجهاز.
+        const pending = (await outboxList(tenantId)).filter(
+          (e): e is OutboxEntry & QueuedContract => e.kind === "contract",
+        );
+        const reservedSerials = new Set(
+          pending.flatMap((e) =>
+            ((e.payload.contract["items"] as SaleItem[] | undefined) ?? [])
+              .map((i) => i.serial_id)
+              .filter(Boolean),
+          ),
+        );
+        const reservedMovements = pending.flatMap((e) =>
+          ((e.payload.contract["items"] as SaleItem[] | undefined) ?? [])
+            .filter((i) => !i.serial_id)
+            .map((i) => ({ product_id: i.product_id, quantity: -i.quantity }) as InventoryMovement),
+        );
+        const draft = buildInstallmentContractDraft(
+          { ...input, customer_id: customer.id, plan_id: plan.id },
+          customer,
+          plan,
+          products,
+          serials.map((s) => (reservedSerials.has(s.id) ? { ...s, status: "sold" as const } : s)),
+          [...movements, ...reservedMovements],
+          new Date(createdAt ?? at),
+        );
+        await outboxAdd({
+          kind: "contract",
+          id: contractId,
+          tenantId,
+          at,
+          actorUserId,
+          customerName: customer.name,
+          totalAmount: draft.totalAmount,
+          payload: {
+            contract: contractRpcPayload(contractId, input, draft, createdAt),
+            newCustomer: (newCustomer as unknown as Record<string, unknown>) ?? null,
+            newPlan: (newPlan as unknown as Record<string, unknown>) ?? null,
+          },
+          partners: partners ?? null,
+        });
+        return { queued: true, id: contractId };
+      }
 
       const [
         { data: customerRow, error: customerError },
@@ -1732,110 +2157,63 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
       if (serialsError) throw new Error(serialsError.message);
       if (movementsError) throw new Error(movementsError.message);
 
-      const customer = customerRow as Customer;
-      const plan = planRow as InstallmentPlan;
-      if (customer.status !== "active") throw new Error("العميل غير نشط");
-      if (!plan.active) throw new Error("خطة التقسيط غير مفعّلة");
-
-      const saleItems: SaleItem[] = [];
-      const soldSerialIds = new Set<string>();
-      const stockTracker = new Map<string, number>();
-      const movementDrafts: Array<{
-        product_id: string;
-        quantity: number;
-        before: number;
-        after: number;
-      }> = [];
-
-      for (const line of input.items) {
-        const product = (products ?? []).find((p) => p.id === line.product_id) as
-          Product | undefined;
-        if (!product) throw new Error("منتج غير موجود");
-        if (!product.active) throw new Error(`المنتج "${product.name}" غير نشط`);
-        const stock = stockTracker.has(product.id)
-          ? (stockTracker.get(product.id) as number)
-          : computeProductStock(
-              product.id,
-              product.serial_required,
-              (allSerials ?? []) as ProductSerial[],
-              (movements ?? []) as InventoryMovement[],
-            );
-
-        if (product.serial_required) {
-          if (line.quantity !== 1) {
-            throw new Error(`المنتج "${product.name}" يُباع سيريال واحد لكل سطر`);
-          }
-          if (!line.serial_id) throw new Error(`اختر سيريال للمنتج "${product.name}"`);
-          if (soldSerialIds.has(line.serial_id)) {
-            throw new Error("لا يمكن بيع نفس السيريال مرتين في نفس العقد");
-          }
-          const serial = (allSerials ?? []).find(
-            (s) => s.id === line.serial_id && s.product_id === product.id,
-          );
-          if (!serial) throw new Error("السيريال غير موجود");
-          if (serial.status !== "available") {
-            throw new Error(`السيريال "${serial.serial_number as string}" غير متاح للبيع`);
-          }
-          soldSerialIds.add(serial.id as string);
-          const unitPrice = line.unit_price ?? product.cash_price;
-          saleItems.push({
-            product_id: product.id,
-            product_name: product.name,
-            serial_id: serial.id as string,
-            serial_number: serial.serial_number as string,
-            quantity: 1,
-            unit_price: unitPrice,
-            line_total: unitPrice,
-          });
-          stockTracker.set(product.id, stock - 1);
-          movementDrafts.push({
-            product_id: product.id,
-            quantity: -1,
-            before: stock,
-            after: stock - 1,
-          });
-        } else {
-          if (line.quantity <= 0) throw new Error(`كمية غير صحيحة للمنتج "${product.name}"`);
-          if (line.quantity > stock) {
-            throw new Error(`المخزون غير كافٍ للمنتج "${product.name}" (متاح ${stock})`);
-          }
-          const unitPrice = line.unit_price ?? product.cash_price;
-          saleItems.push({
-            product_id: product.id,
-            product_name: product.name,
-            quantity: line.quantity,
-            unit_price: unitPrice,
-            line_total: unitPrice * line.quantity,
-          });
-          stockTracker.set(product.id, stock - line.quantity);
-          movementDrafts.push({
-            product_id: product.id,
-            quantity: -line.quantity,
-            before: stock,
-            after: stock - line.quantity,
-          });
-        }
-      }
-
-      const cash_subtotal = saleItems.reduce((sum, i) => sum + i.line_total, 0);
-      // المقدّم اختياري بالكامل — صفر مقبول، ويتمّوَّل كامل قيمة الصفقة على الخطة من غير أي
-      // حد أدنى مفروض. النسبة المقترحة في tenant_settings.min_down_payment_pct بقت للعرض
-      // الاستشاري بس في الواجهة (مش تحقق مُلزِم هنا).
-      if (input.down_payment < 0) throw new Error("المقدّم لا يمكن أن يكون سالبًا");
-      if (input.down_payment >= cash_subtotal) {
-        throw new Error("المقدّم يغطي كامل القيمة — استخدم البيع النقدي بدلاً من التقسيط");
-      }
-
-      const principal = Math.round((cash_subtotal - input.down_payment) * 100) / 100;
-      const { financeAmount, totalAmount } = calculateFinance(principal, plan.rate_pct);
-
-      // جدول الأقساط بيتحسب من تاريخ العقد نفسه (لو اتحدد يدويًا) مش من النهاردة — عقد بتاريخ
-      // مفتوح قديم لازم أول قسط فيه يستحق بعد شهر من تاريخه الحقيقي، مش من تاريخ التسجيل.
-      const schedule = generateSchedule(
-        totalAmount,
-        plan.duration_months,
+      const draft = buildInstallmentContractDraft(
+        input,
+        customerRow as Customer,
+        planRow as InstallmentPlan,
+        (products ?? []) as Product[],
+        (allSerials ?? []) as ProductSerial[],
+        (movements ?? []) as InventoryMovement[],
         createdAt ? new Date(createdAt) : undefined,
       );
+      const { customer, plan, saleItems, soldSerialIds, movementDrafts, schedule } = draft;
+      const { cash_subtotal, principal, financeAmount, totalAmount } = draft;
+
+      // الطريق الأساسي (0032): العقد كله في عملية واحدة على السيرفر، ومحمي من التكرار برقمه.
+      const payload = contractRpcPayload(contractId, input, draft, createdAt);
+      const {
+        data: rpcData,
+        error: rpcError,
+        status: rpcStatus,
+      } = await supabase.rpc("create_installment_contract_offline", {
+        p_contract: payload,
+        p_new_customer: null,
+        p_new_plan: null,
+        p_offline_at: null,
+      });
+      if (!rpcError) {
+        const contract = (rpcData as { contract: InstallmentContract }).contract;
+        await afterContract(
+          tenantId,
+          contract,
+          input.down_payment,
+          actorUserId,
+          createdAt,
+          partners,
+        );
+        return { queued: false, contract };
+      }
+      if (!isMissingFunction(rpcError, "create_installment_contract_offline")) {
+        // النت قطع في نص الطلب: العقد يتحفظ في الطابور بنفس رقمه — لو كان اتسجّل فعلًا، السيرفر
+        // هيعرفه ومش هيكرّره.
+        if (isTransient({ ...rpcError, status: rpcStatus })) {
+          await outboxAdd({
+            kind: "contract",
+            id: contractId,
+            tenantId,
+            at: new Date().toISOString(),
+            actorUserId,
+            customerName: customer.name,
+            totalAmount,
+            payload: { contract: payload, newCustomer: null, newPlan: null },
+            partners: partners ?? null,
+          });
+          return { queued: true, id: contractId };
+        }
+        throw new Error(rpcError.message);
+      }
+
+      // الطريقة القديمة بالظبط (لحد ما ملف 0032 يتطبّق).
       const contract_number = await nextInstallmentDocNumber(
         "installment_contracts",
         tenantId,
@@ -1904,76 +2282,15 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
         if (movementsInsertError) throw new Error(movementsInsertError.message);
       }
 
-      await insertAuditLog({
-        tenant_id: tenantId,
-        user_id: actorUserId,
-        action: "installment_contract.create",
-        entity: "installment_contracts",
-        entity_id: contract.id as string,
-        new_value: contract,
-      });
-
-      // §75 — Product Profit (cash_subtotal) kept separate from Financing Revenue
-      // (finance_amount): Dr Cash (down payment, if any) + Dr Customers (what's still owed)
-      // balances against Cr Sales Revenue (goods value) + Cr Financing Revenue.
-      try {
-        if (input.down_payment > 0) {
-          const cashierId = await findAccountIdByKind(tenantId, "cashier");
-          if (cashierId) {
-            await performPostTreasuryMovement(
-              tenantId,
-              cashierId,
-              input.down_payment,
-              "sale",
-              actorUserId,
-              contract_number,
-              undefined,
-              createdAt,
-            );
-          }
-        }
-        await performPostJournalEntry(
-          tenantId,
-          [
-            ...(input.down_payment > 0
-              ? [
-                  {
-                    account_code: "1000" as const,
-                    account_name: ACCOUNT_NAMES["1000"],
-                    debit: input.down_payment,
-                    credit: 0,
-                  },
-                ]
-              : []),
-            {
-              account_code: "1100",
-              account_name: ACCOUNT_NAMES["1100"],
-              debit: totalAmount,
-              credit: 0,
-            },
-            {
-              account_code: "3000",
-              account_name: ACCOUNT_NAMES["3000"],
-              debit: 0,
-              credit: cash_subtotal,
-            },
-            {
-              account_code: "3100",
-              account_name: ACCOUNT_NAMES["3100"],
-              debit: 0,
-              credit: financeAmount,
-            },
-          ],
-          `عقد تقسيط ${contract_number}`,
-          "installment_contract",
-          contract.id as string,
-          createdAt,
-        );
-      } catch (e) {
-        console.warn("فشل ترحيل الحركة المالية:", e instanceof Error ? e.message : e);
-      }
-
-      return contract as InstallmentContract;
+      await afterContract(
+        tenantId,
+        contract as InstallmentContract,
+        input.down_payment,
+        actorUserId,
+        createdAt,
+        partners,
+      );
+      return { queued: false, contract: contract as InstallmentContract };
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["installment_contracts", tenantId] });
@@ -1982,6 +2299,8 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
       void queryClient.invalidateQueries({ queryKey: ["inventory_movements", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["treasury_movements", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["journal_entries", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["partner_transactions", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["customers", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
   });
@@ -1998,6 +2317,8 @@ async function afterCollect(
   amount: number,
   actorUserId: string | null,
   createdAt?: string,
+  /** وقت العملية الحقيقي لو اتعملت من غير نت (بند 80) — الوعد اتحقق لو الدفع كان قبل ميعاده. */
+  operationAt?: string,
 ): Promise<void> {
   const { data: keepablePromises, error: promisesError } = await supabase
     .from("promises_to_pay")
@@ -2005,7 +2326,7 @@ async function afterCollect(
     .eq("contract_id", contractId)
     .eq("status", "pending");
   if (promisesError) throw new Error(promisesError.message);
-  const nowIso = new Date().toISOString();
+  const nowIso = operationAt ?? new Date().toISOString();
   const keepableIds = (keepablePromises ?? [])
     .filter((p) => nowIso <= (p.promise_date as string))
     .map((p) => p.id as string);
@@ -2048,13 +2369,16 @@ async function afterCollect(
  * الإيصال والأقساط وحالة العقد في transaction واحدة، ومحمية من التكرار بـidempotencyKey. بترجّع
  * null لو الدالة لسه مش موجودة على القاعدة (migration متطبّقش) — ساعتها بنكمّل بالطريقة القديمة
  * بالظبط، فمفيش حاجة بتبوظ قبل التطبيق. */
+/** الطلب ماوصلش أو الرد ضاع (نت/مهلة) — التحصيل ممكن يتحفظ في الطابور بنفس مفتاحه (بند 80). */
+class TransientNetworkError extends Error {}
+
 async function tryAtomicCollect(
   contractId: string,
   amount: number,
   createdAt: string | undefined,
   idempotencyKey: string | undefined,
 ): Promise<{ payment: InstallmentPayment; replayed: boolean } | null> {
-  const { data, error } = await supabase.rpc("collect_installment_payment", {
+  const { data, error, status } = await supabase.rpc("collect_installment_payment", {
     p_contract_id: contractId,
     p_amount: amount,
     ...(createdAt ? { p_created_at: createdAt } : {}),
@@ -2066,6 +2390,7 @@ async function tryAtomicCollect(
       error.code === "42883" ||
       (error.message ?? "").includes("collect_installment_payment");
     if (missing) return null;
+    if (isTransient({ ...error, status })) throw new TransientNetworkError(error.message);
     throw new Error(error.message);
   }
   const result = data as { payment: InstallmentPayment; replayed: boolean };
@@ -2199,15 +2524,71 @@ async function performCollectPayment(
   return payment as InstallmentPayment;
 }
 
+export type CollectResult =
+  { queued: false; payment: InstallmentPayment } | { queued: true; id: string };
+
+/** إرسال تحصيل من الطابور (بعد ما النت يرجع): دالة 0032 بوقت العملية الحقيقي، ولو مش موجودة
+ * دالة 0029 مباشرة — الاتنين محميين من التكرار بنفس المفتاح. */
+async function sendQueuedCollect(entry: OutboxEntry): Promise<SendResult> {
+  if (entry.kind !== "collect") return { ok: false, retry: false, error: "عملية غير معروفة" };
+  // تاريخ مفتوح اختاره المستخدم بإيده بيفضل زي ما هو؛ غير كده وقت العملية على الجهاز (ومش في
+  // المستقبل لو ساعة الجهاز قدّام).
+  const at = new Date(Math.min(Date.parse(entry.at), Date.now())).toISOString();
+  let res = entry.createdAt
+    ? null
+    : await supabase.rpc("collect_installment_payment_offline", {
+        p_contract_id: entry.contractId,
+        p_amount: entry.amount,
+        p_offline_at: entry.at,
+        p_idempotency_key: entry.id,
+      });
+  if (!res || (res.error && isMissingFunction(res.error, "collect_installment_payment_offline"))) {
+    res = await supabase.rpc("collect_installment_payment", {
+      p_contract_id: entry.contractId,
+      p_amount: entry.amount,
+      p_created_at: entry.createdAt ?? at,
+      p_idempotency_key: entry.id,
+    });
+  }
+  const { data, error, status } = res;
+  if (error) {
+    if (isMissingFunction(error, "collect_installment_payment")) {
+      return { ok: false, retry: true, waitingUpdate: true };
+    }
+    if (isTransient({ ...error, status })) return { ok: false, retry: true };
+    return { ok: false, retry: false, error: error.message };
+  }
+  const result = data as { payment: InstallmentPayment; replayed: boolean };
+  // نفس منطق العقد: "وصل قبل كده" ومكناش علّمنا = الرد بس اللي ضاع → نعمل الخزينة/القيد/التدقيق.
+  if (!result.replayed || !entry.serverDone) {
+    await outboxUpdate(entry.tenantId, entry.id, { serverDone: true });
+    await afterCollect(
+      entry.tenantId,
+      entry.contractId,
+      result.payment,
+      entry.amount,
+      entry.actorUserId,
+      entry.createdAt ?? result.payment.created_at,
+      entry.at,
+    );
+  }
+  return { ok: true };
+}
+registerOutboxSender("collect", sendQueuedCollect);
+
 export function useCollectPayment(tenantId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
+    // التحصيل ممكن يتحفظ على الجهاز والنت فاصل — React Query لازم ميوقّفش العملية (بند 80).
+    networkMode: "always",
     mutationFn: async ({
       contractId,
       amount,
       actorUserId,
       createdAt,
       idempotencyKey,
+      contractNumber,
+      customerName,
     }: {
       contractId: string;
       amount: number;
@@ -2217,16 +2598,45 @@ export function useCollectPayment(tenantId: string | undefined) {
       /** مفتاح ثابت لنفس عملية التحصيل حتى لو اتبعتت أكتر من مرة (انقطاع نت/ضغطتين) — انظر
        * tryAtomicCollect. الصفحة بتولّده مرة وتعيد استخدامه لحد ما التحصيل ينجح. */
       idempotencyKey?: string;
-    }) => {
+      /** للعرض في شريط العمليات المستنية بس. */
+      contractNumber?: string;
+      customerName?: string;
+    }): Promise<CollectResult> => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
-      return performCollectPayment(
-        tenantId,
-        contractId,
-        amount,
-        actorUserId,
-        createdAt,
-        idempotencyKey,
-      );
+      if (amount <= 0) throw new Error("المبلغ يجب أن يكون أكبر من صفر");
+      const queue = (id: string) =>
+        outboxAdd({
+          kind: "collect",
+          id,
+          tenantId,
+          at: new Date().toISOString(),
+          actorUserId,
+          contractId,
+          contractNumber: contractNumber ?? "",
+          customerName: customerName ?? "",
+          amount,
+          ...(createdAt ? { createdAt } : {}),
+        }).then(() => ({ queued: true as const, id }));
+
+      // من غير نت: التحصيل يتحفظ على الجهاز ويتبعت لوحده لما النت يرجع.
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        return queue(idempotencyKey ?? newOperationId());
+      }
+      try {
+        const payment = await performCollectPayment(
+          tenantId,
+          contractId,
+          amount,
+          actorUserId,
+          createdAt,
+          idempotencyKey,
+        );
+        return { queued: false, payment };
+      } catch (e) {
+        // النت قطع في نص الطلب: نفس المفتاح في الطابور — لو كان اتسجّل فعلًا مش هيتكرر.
+        if (e instanceof TransientNetworkError && idempotencyKey) return queue(idempotencyKey);
+        throw e;
+      }
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["installments", tenantId] });

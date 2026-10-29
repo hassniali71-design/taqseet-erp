@@ -24,6 +24,7 @@ import {
   useRestructureContract,
   useRestructureEvents,
 } from "@/lib/supabase-queries";
+import { pendingCollectedFor, useOutbox } from "@/lib/outbox";
 import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
 import type { InstallmentStatus, PromiseToPay } from "@/types";
@@ -70,7 +71,7 @@ function ContractDetailPage() {
   const [, forceRerender] = useState(0);
   const [payAmount, setPayAmount] = useState("");
   const [payError, setPayError] = useState<string | null>(null);
-  const [paySuccess, setPaySuccess] = useState(false);
+  const [paySuccess, setPaySuccess] = useState<string | null>(null);
   const [showPromiseForm, setShowPromiseForm] = useState(false);
   const [promiseDate, setPromiseDate] = useState("");
   const [promiseAmount, setPromiseAmount] = useState("");
@@ -98,6 +99,7 @@ function ContractDetailPage() {
   const { data: allPromises = [] } = usePromisesToPay(session?.tenant_id);
   const { data: allRestructureEvents = [] } = useRestructureEvents(session?.tenant_id);
   const collectPaymentMutation = useCollectPayment(session?.tenant_id);
+  const outbox = useOutbox(session?.tenant_id);
   // مفتاح واحد لكل عملية تحصيل: لو الطلب اتبعت ومعرفناش النتيجة (نت فصل) وضغط تاني، نفس المفتاح
   // بيرجع نفس الإيصال بدل ما يتسجّل مرتين. بيتصفّر بعد النجاح أو لما المبلغ يتغيّر (بند 78).
   const collectKeyRef = useRef<string | null>(null);
@@ -139,6 +141,10 @@ function ContractDetailPage() {
 
   const totalPaid = installments.reduce((sum, i) => sum + (i.paid_amount ?? 0), 0);
   const remaining = Math.max(0, (contract.total_amount ?? 0) - totalPaid);
+  // تحصيلات اتعملت من غير نت ولسه موصلتش السيرفر (بند 80) — الرصيد اللي فوق "آخر رصيد معروف".
+  const pendingCollected = pendingCollectedFor(outbox, contract.id);
+  const contractNumber = contract.contract_number;
+  const customerName = contract.customer_name;
   const payments = allPayments
     .filter((p) => p.contract_id === contractId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -162,15 +168,28 @@ function ContractDetailPage() {
       setPayError("أدخل مبلغ صحيح");
       return;
     }
+    if (amount > Math.round((remaining - pendingCollected) * 100) / 100) {
+      setPayError("المبلغ أكبر من المتبقي بعد التحصيلات اللي مستنية النت");
+      return;
+    }
     collectKeyRef.current ??= crypto.randomUUID();
     collectPaymentMutation.mutate(
-      { contractId, amount, actorUserId, idempotencyKey: collectKeyRef.current },
       {
-        onSuccess: () => {
+        contractId,
+        amount,
+        actorUserId,
+        idempotencyKey: collectKeyRef.current,
+        contractNumber,
+        customerName,
+      },
+      {
+        onSuccess: (result) => {
           collectKeyRef.current = null;
           setPayAmount("");
-          setPaySuccess(true);
-          setTimeout(() => setPaySuccess(false), 2000);
+          setPaySuccess(
+            result.queued ? "اتحفظ على الجهاز — هيتبعت لوحده أول ما النت يرجع" : "تم التحصيل ✓",
+          );
+          setTimeout(() => setPaySuccess(null), result.queued ? 5000 : 2000);
         },
         onError: (e) => setPayError(e instanceof Error ? e.message : "حدث خطأ"),
       },
@@ -552,8 +571,14 @@ function ContractDetailPage() {
               >
                 {collectPaymentMutation.isPending ? "جارٍ التحصيل..." : "تحصيل"}
               </button>
-              {paySuccess && <span className="text-sm text-success">تم التحصيل ✓</span>}
+              {paySuccess && <span className="text-sm text-success">{paySuccess}</span>}
             </div>
+            {pendingCollected > 0 && (
+              <p className="mt-2 text-sm font-medium text-warning">
+                فيه {pendingCollected.toLocaleString("ar-EG")} ج.م اتحصّلوا من غير نت ولسه مستنيين
+                يتبعتوا. المتبقي المكتوب هو آخر رصيد معروف، والتحصيل هيتأكد لما النت يرجع.
+              </p>
+            )}
             {payError && <p className="mt-2 text-sm text-destructive">{payError}</p>}
           </section>
         )}

@@ -15,6 +15,7 @@ import {
 } from "@/lib/supabase-queries";
 import { getAccessToken } from "@/lib/supabase-client";
 import { matchesSearch } from "@/lib/text-filter";
+import { pendingCollectedFor, useOutbox } from "@/lib/outbox";
 import { sendTenantReminderSweepServer } from "@/lib/twilio-server";
 import { useRequireSession } from "@/hooks/use-session";
 import type { Installment, InstallmentStatus } from "@/types";
@@ -72,6 +73,7 @@ function CollectionsWorkbenchPage() {
   const { data: allInstallments = [] } = useInstallments(session?.tenant_id);
   const { data: allCustomers = [] } = useCustomers(session?.tenant_id);
   const collectPaymentMutation = useCollectPayment(session?.tenant_id);
+  const outbox = useOutbox(session?.tenant_id);
   // مفتاح لكل عقد لعملية التحصيل الجارية — نفس منطق صفحة العقد (بند 78).
   const collectKeys = useRef(new Map<string, string>());
   const sweepMutation = useMutation({
@@ -141,10 +143,18 @@ function CollectionsWorkbenchPage() {
   const dueCount = rows.filter((r) => r.effectiveStatus === "due").length;
   const overdueCount = rows.filter((r) => r.effectiveStatus === "overdue").length;
 
-  function handleCollect(contractId: string, contractNumber: string, outstanding: number) {
+  function handleCollect(
+    contractId: string,
+    contractNumber: string,
+    customerName: string,
+    lastKnownOutstanding: number,
+  ) {
     // ضد الضغط المتكرر: إيصال واحد لكل ضغطة لحد ما الحفظ يخلص (بند 71).
     if (collectPaymentMutation.isPending) return;
     setError(null);
+    // التحصيلات اللي لسه مستنية النت على نفس العقد بتتطرح (بند 80).
+    const outstanding =
+      Math.round((lastKnownOutstanding - pendingCollectedFor(outbox, contractId)) * 100) / 100;
     const raw = amounts[contractId];
     const amount = Number(raw);
     if (!raw || amount <= 0) {
@@ -164,10 +174,12 @@ function CollectionsWorkbenchPage() {
         amount,
         actorUserId,
         idempotencyKey: key,
+        contractNumber,
+        customerName,
         ...(collectDate && { createdAt: dateInputToTimestamp(collectDate) }),
       },
       {
-        onSuccess: (payment) => {
+        onSuccess: (result) => {
           collectKeys.current.delete(contractId);
           setAmounts((prev) => ({ ...prev, [contractId]: "" }));
           setCollectDates((prev) => ({ ...prev, [contractId]: "" }));
@@ -175,7 +187,9 @@ function CollectionsWorkbenchPage() {
           // contract moves out of the current filter tab immediately, which would unmount a
           // per-row "✓" before the user ever sees it.
           setSuccessMessage(
-            `تم تحصيل ${amount.toLocaleString("ar-EG")} ج.م لعقد ${contractNumber} — إيصال ${payment.receipt_number}`,
+            result.queued
+              ? `اتحفظ تحصيل ${amount.toLocaleString("ar-EG")} ج.م لعقد ${contractNumber} على الجهاز — هيتبعت لوحده أول ما النت يرجع`
+              : `تم تحصيل ${amount.toLocaleString("ar-EG")} ج.م لعقد ${contractNumber} — إيصال ${result.payment.receipt_number}`,
           );
           setTimeout(() => setSuccessMessage(null), 4000);
         },
@@ -273,6 +287,12 @@ function CollectionsWorkbenchPage() {
                   </td>
                   <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
                     {row.outstanding.toLocaleString("ar-EG")} ج.م
+                    {pendingCollectedFor(outbox, row.contractId) > 0 && (
+                      <span className="block text-xs font-normal text-warning">
+                        منه {pendingCollectedFor(outbox, row.contractId).toLocaleString("ar-EG")}{" "}
+                        ج.م مستني النت
+                      </span>
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -299,7 +319,12 @@ function CollectionsWorkbenchPage() {
                       />
                       <button
                         onClick={() =>
-                          handleCollect(row.contractId, row.contractNumber, row.outstanding)
+                          handleCollect(
+                            row.contractId,
+                            row.contractNumber,
+                            row.customerName,
+                            row.outstanding,
+                          )
                         }
                         disabled={collectPaymentMutation.isPending}
                         className="rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50"

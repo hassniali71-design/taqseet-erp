@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import { DateInput } from "@/components/ui/DateInput";
@@ -10,10 +10,8 @@ import { subscribeData } from "@/lib/data-store";
 import { calculateFinance, generateSchedule } from "@/lib/finance-engine";
 import {
   computeCustomerExposure,
-  computePartnerDealPreview,
   computeProductStock,
   dateInputToTimestamp,
-  settlePartnersForDeal,
   useCreateCustomer,
   useCreateInstallmentContract,
   useCreateInstallmentPlan,
@@ -31,6 +29,8 @@ import {
   useReceiveStock,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
+import { newOperationId, useOutbox } from "@/lib/outbox";
+import type { OfflineNewCustomer } from "@/lib/supabase-queries";
 
 export const Route = createFileRoute("/sales/new-installment")({
   component: NewInstallmentSalePage,
@@ -48,7 +48,6 @@ type CartLine = {
 
 function NewInstallmentSalePage() {
   const session = useRequireSession();
-  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [, forceRerender] = useState(0);
   const [customerId, setCustomerId] = useState("");
@@ -75,6 +74,8 @@ function NewInstallmentSalePage() {
   const [newCustomerNotes, setNewCustomerNotes] = useState("");
   const [newCustomerLedgerBook, setNewCustomerLedgerBook] = useState("");
   const [newCustomerError, setNewCustomerError] = useState<string | null>(null);
+  // عميل جديد اتعمل والنت فاصل (بند 80): بيتحفظ مع العقد ويتسجّل معاه لما النت يرجع.
+  const [offlineNewCustomer, setOfflineNewCustomer] = useState<OfflineNewCustomer | null>(null);
 
   const [showNewProductForm, setShowNewProductForm] = useState(false);
   const [newProductName, setNewProductName] = useState("");
@@ -96,6 +97,7 @@ function NewInstallmentSalePage() {
   const { data: allPartners = [] } = usePartners(session?.tenant_id);
   const { data: allPurchases = [] } = usePurchases(session?.tenant_id);
   const createContractMutation = useCreateInstallmentContract(session?.tenant_id);
+  const outbox = useOutbox(session?.tenant_id);
   const createPlanMutation = useCreateInstallmentPlan(session?.tenant_id);
   const createCustomerMutation = useCreateCustomer(session?.tenant_id);
   const createProductMutation = useCreateProduct(session?.tenant_id);
@@ -108,7 +110,21 @@ function NewInstallmentSalePage() {
     min_down_payment_pct: 10,
     credit_hold_days: 7,
   };
-  const customers = allCustomers.filter((c) => c.status === "active");
+  const customers = [
+    ...(offlineNewCustomer
+      ? [
+          {
+            ...offlineNewCustomer,
+            tenant_id: session.tenant_id,
+            code: "عميل جديد — مستني النت",
+            status: "active" as const,
+            created_at: new Date().toISOString(),
+          } as unknown as (typeof allCustomers)[number],
+        ]
+      : []),
+    ...allCustomers.filter((c) => c.status === "active"),
+  ];
+  const isOffline = () => typeof navigator !== "undefined" && navigator.onLine === false;
   const products = allProducts.filter((p) => p.active);
   const plans = allPlans.filter((p) => p.active);
   const customer = customers.find((c) => c.id === customerId);
@@ -118,7 +134,19 @@ function NewInstallmentSalePage() {
     ? allSerials.filter((s) => s.product_id === selectedProduct.id && s.status === "available")
     : [];
   const cartedSerialIds = new Set(cart.map((l) => l.serial_id).filter(Boolean));
-  const usableSerials = availableSerials.filter((s) => !cartedSerialIds.has(s.id));
+  // سيريالات اتباعت في عقود مؤقتة لسه مستنية النت (بند 80) — متتعرضش تاني.
+  const queuedSerialIds = new Set(
+    outbox.flatMap((e) =>
+      e.kind === "contract"
+        ? ((e.payload.contract["items"] as Array<{ serial_id?: string }> | undefined) ?? [])
+            .map((i) => i.serial_id)
+            .filter(Boolean)
+        : [],
+    ),
+  );
+  const usableSerials = availableSerials.filter(
+    (s) => !cartedSerialIds.has(s.id) && !queuedSerialIds.has(s.id),
+  );
   const stockForSelected = selectedProduct
     ? computeProductStock(
         selectedProduct.id,
@@ -203,6 +231,25 @@ function NewInstallmentSalePage() {
       setNewCustomerError("عنوان العميل مطلوب");
       return;
     }
+    if (isOffline()) {
+      const pending: OfflineNewCustomer = {
+        id: newOperationId(),
+        name: newCustomerName.trim(),
+        address: newCustomerAddress.trim(),
+        ...(newCustomerPhone.trim() && { phone: newCustomerPhone.trim() }),
+        ...(newCustomerNotes.trim() && { notes: newCustomerNotes.trim() }),
+        ...(newCustomerLedgerBook.trim() && { ledger_book: newCustomerLedgerBook.trim() }),
+      };
+      setOfflineNewCustomer(pending);
+      setCustomerId(pending.id);
+      setShowNewCustomerForm(false);
+      setNewCustomerName("");
+      setNewCustomerAddress("");
+      setNewCustomerPhone("");
+      setNewCustomerNotes("");
+      setNewCustomerLedgerBook("");
+      return;
+    }
     try {
       const customer = await createCustomerMutation.mutateAsync({
         input: {
@@ -242,6 +289,10 @@ function NewInstallmentSalePage() {
     const qty = Number(newProductQty) || 0;
     if (qty <= 0) {
       setNewProductError("أدخل كمية صحيحة");
+      return;
+    }
+    if (isOffline()) {
+      setNewProductError("إضافة جهاز جديد للمخزن محتاجة نت — اختار جهاز موجود أو استنى النت");
       return;
     }
     const cost = Number(newProductCost);
@@ -309,7 +360,11 @@ function NewInstallmentSalePage() {
   const singleProductId = distinctProductIds.size === 1 ? cart[0]?.product_id : undefined;
   const activePartners = allPartners.filter((p) => p.active);
 
-  function submitContract(finalPlanId: string) {
+  function submitContract(
+    finalPlanId: string,
+    newPlan?: { id: string; duration_months: number; rate_pct: number },
+  ) {
+    const usingOfflineCustomer = offlineNewCustomer && offlineNewCustomer.id === customerId;
     createContractMutation.mutate(
       {
         input: {
@@ -325,45 +380,34 @@ function NewInstallmentSalePage() {
         },
         actorUserId,
         ...(contractDate && { createdAt: dateInputToTimestamp(contractDate) }),
+        ...(usingOfflineCustomer && { newCustomer: offlineNewCustomer }),
+        ...(newPlan && { newPlan }),
+        partners: {
+          cashSubtotal,
+          cartCost,
+          ...(singleProductId ? { singleProductId } : {}),
+          partners: selectedPartnerIds.map((partnerId) => {
+            const partner = activePartners.find((p) => p.id === partnerId);
+            return {
+              partnerId,
+              splitPct: Number(partnerSplits[partnerId]) || 0,
+              profitSharePct:
+                Number(partnerProfitShares[partnerId] ?? partner?.profit_share_pct) || 0,
+            };
+          }),
+        },
       },
       {
-        onSuccess: (contract) => {
-          if (selectedPartnerIds.length > 0 && session) {
-            void settlePartnersForDeal(
-              session.tenant_id,
-              actorUserId,
-              contract.contract_number,
-              undefined,
-              contract.id,
-              selectedPartnerIds.map((partnerId) => {
-                const partner = activePartners.find((p) => p.id === partnerId);
-                const splitPct = Number(partnerSplits[partnerId]) || 0;
-                const profitSharePct =
-                  Number(partnerProfitShares[partnerId] ?? partner?.profit_share_pct) || 0;
-                const preview = computePartnerDealPreview(
-                  cashSubtotal,
-                  cartCost,
-                  splitPct,
-                  profitSharePct,
-                  contract.finance_amount,
-                );
-                return {
-                  partnerId,
-                  ...(singleProductId ? { productId: singleProductId } : {}),
-                  costRecovered: preview.costRecovered,
-                  profitAmount: preview.profitAmount,
-                  dealValue: cashSubtotal,
-                  splitPct,
-                  profitSharePct,
-                };
-              }),
-            ).then(() =>
-              queryClient.invalidateQueries({
-                queryKey: ["partner_transactions", session.tenant_id],
-              }),
+        onSuccess: (result) => {
+          if (result.queued) {
+            setOfflineNewCustomer(null);
+            toast.success(
+              "اتحفظ كعقد مؤقت على الجهاز — هيتبعت لوحده وياخد رقمه الحقيقي أول ما النت يرجع",
             );
+            void navigate({ to: "/dashboard" });
+            return;
           }
-          void navigate({ to: "/contracts/$id", params: { id: contract.id } });
+          void navigate({ to: "/contracts/$id", params: { id: result.contract.id } });
         },
         onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
       },
@@ -379,6 +423,15 @@ function NewInstallmentSalePage() {
     if (customPlan) {
       if (!customDuration || Number(customDuration) <= 0) {
         setError("أدخل مدة التقسيط بالشهور");
+        return;
+      }
+      if (isOffline()) {
+        const newPlan = {
+          id: newOperationId(),
+          duration_months: Number(customDuration),
+          rate_pct: Number(customRate) || 0,
+        };
+        submitContract(newPlan.id, newPlan);
         return;
       }
       createPlanMutation.mutate(

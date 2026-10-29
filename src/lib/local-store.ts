@@ -61,7 +61,13 @@ export function localKeys(): Promise<string[]> {
   );
 }
 
-/** تسجيل الخروج: نسخة بيانات المحل بتتمسح من الجهاز بالكامل (قرار المالك). */
-export function localClearAll(): Promise<unknown> {
-  return run("readwrite", (s) => s.clear());
+/** تسجيل الخروج: نسخة بيانات المحل بتتمسح من الجهاز بالكامل (قرار المالك) — ما عدا طابور
+ * العمليات اللي لسه موصلتش السيرفر (`outbox:`)، دي عقود وتحصيلات حقيقية ومينفعش تضيع؛ بتتبعت أول
+ * ما حد من نفس المحل يدخل تاني (بند 80). */
+export async function localClearAll(): Promise<unknown> {
+  const keys = await localKeys();
+  await Promise.all(
+    keys.filter((k) => !k.startsWith("outbox:")).map((k) => run("readwrite", (s) => s.delete(k))),
+  );
+  return null;
 }
