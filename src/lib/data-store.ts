@@ -41,6 +41,7 @@ import type {
   UserRoleAssignment,
 } from "@/types";
 import { calculateFinance, generateSchedule } from "@/lib/finance-engine";
+import { localClearAll } from "@/lib/local-store";
 import { supabase } from "@/lib/supabase-client";
 
 /**
@@ -69,6 +70,8 @@ const KEYS = {
   userRoles: `${STORAGE_PREFIX}.user_roles.v1`,
   auditLogs: `${STORAGE_PREFIX}.audit_logs.v1`,
   session: `${STORAGE_PREFIX}.session.v1`,
+  /** آخر مرة الجلسة اتأكدت مع السيرفر (بند 79 — الشغل من غير نت لحد 14 يوم). */
+  sessionVerifiedAt: `${STORAGE_PREFIX}.session_verified_at.v1`,
   customers: `${STORAGE_PREFIX}.customers.v1`,
   products: `${STORAGE_PREFIX}.products.v1`,
   productCategories: `${STORAGE_PREFIX}.product_categories.v1`,
@@ -3767,6 +3770,7 @@ export async function signIn(email: string, password: string): Promise<SignInRes
   }
   if (typeof window !== "undefined") {
     window.localStorage.setItem(KEYS.session, JSON.stringify(session));
+    window.localStorage.setItem(KEYS.sessionVerifiedAt, String(Date.now()));
   }
   emit();
   return { ok: true, session };
@@ -3779,16 +3783,54 @@ export async function signIn(email: string, password: string): Promise<SignInRes
  * `getUser()` (مش `getSession()` بتاعة supabase-js) عمدًا — بيتحقق من التوكن مع السيرفر فعليًا،
  * مش بس بيقرأ نسخة محلية قد تكون قديمة. `useSession()` (use-session.ts) هي المستخدمة الوحيدة. */
 export async function validateSession(cached: Session): Promise<boolean> {
+  // بند 79 — من غير نت: مينفعش نسأل السيرفر، فالجلسة المحفوظة بتفضل صالحة لحد 14 يوم من آخر مرة
+  // اتأكدت فيها (قرار المالك). بعد كده لازم نت ودخول تاني. قبل كده كان أي فصل نت = خروج إجباري.
+  if (isOffline()) return withinOfflineGrace();
   const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user) return false;
+  if (error || !data.user) {
+    // النت وقع أثناء السؤال (مش رفض حقيقي من السيرفر) → نفس قاعدة الـ14 يوم.
+    if (error && isNetworkError(error)) return withinOfflineGrace();
+    return false;
+  }
   const resolved = await resolveSessionForAuthUser(data.user.id);
   if (!resolved) return false;
-  return resolved.user_id === cached.user_id && resolved.tenant_id === cached.tenant_id;
+  const ok = resolved.user_id === cached.user_id && resolved.tenant_id === cached.tenant_id;
+  if (ok && typeof window !== "undefined") {
+    window.localStorage.setItem(KEYS.sessionVerifiedAt, String(Date.now()));
+  }
+  return ok;
+}
+
+const OFFLINE_GRACE_MS = 14 * 24 * 60 * 60_000;
+
+function isOffline() {
+  return typeof navigator !== "undefined" && navigator.onLine === false;
+}
+
+function isNetworkError(error: {
+  name?: string | undefined;
+  status?: number | undefined;
+  message?: string | undefined;
+}) {
+  return (
+    error.name === "AuthRetryableFetchError" ||
+    error.status === 0 ||
+    /fetch|network/i.test(error.message ?? "")
+  );
+}
+
+function withinOfflineGrace(): boolean {
+  if (typeof window === "undefined") return true;
+  const at = Number(window.localStorage.getItem(KEYS.sessionVerifiedAt) ?? 0);
+  return at > 0 && Date.now() - at < OFFLINE_GRACE_MS;
 }
 
 export function signOut(): void {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(KEYS.session);
+  window.localStorage.removeItem(KEYS.sessionVerifiedAt);
+  // نسخة بيانات المحل اللي على الجهاز بتتمسح مع الخروج (قرار المالك — بند 79).
+  void localClearAll();
   void supabase.auth.signOut();
   emit();
 }

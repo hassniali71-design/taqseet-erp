@@ -7,7 +7,8 @@ import {
   RISK_LEVEL_LABEL_AR,
 } from "@/lib/data-store";
 import type { CustomerRiskAssessment } from "@/lib/data-store";
-import { fetchAll, type PagedQuery } from "@/lib/fetch-all";
+import { fetchAll } from "@/lib/fetch-all";
+import { syncTable } from "@/lib/table-sync";
 import { supabase } from "@/lib/supabase-client";
 import type {
   AccountCode,
@@ -385,27 +386,12 @@ function useTenantList<T>(
 ) {
   return useQuery({
     queryKey: [table, tenantId],
-    queryFn: () => fetchAllTenantRows<T>(table, tenantId as string, opts),
+    // بند 79: نسخة الجهاز + التغييرات بس (src/lib/table-sync.ts). "offlineFirst" = الطلب بيتنفّذ
+    // حتى والجهاز من غير نت، وsyncTable بترجّع نسخة الجهاز ساعتها بدل ما الصفحة تفضل مستنية.
+    queryFn: () => syncTable<T>(table, tenantId as string, opts),
+    networkMode: "offlineFirst",
     enabled: Boolean(tenantId),
   });
-}
-
-/** بند 71 — السبب الجذري لبلاغ "التحصيل مش بينعكس على المتبقي" عند عميل حقيقي: Supabase
- * (PostgREST) بيرجّع أقصى عدد صفوف = Max Rows (1000 افتراضيًا) في الطلب الواحد، والطلب ده كان
- * `select("*")` واحد من غير pagination — محل عدّى 1000 صف أقساط كانت أقساط بعض عقوده مش بتوصل
- * للمتصفح، والمتبقي بيطلع = الإجمالي. دلوقتي كل جدول بيتجاب كامل عن طريق `fetchAll`
- * (src/lib/fetch-all.ts — المكان الوحيد اللي بيتعامل مع حد Max Rows)، بنفس الترتيب المطلوب +
- * `id` كترتيب ثانوي ثابت، و`count: "exact"` عشان نعرف إمتى نقف. */
-async function fetchAllTenantRows<T>(
-  table: string,
-  tenantId: string,
-  opts?: { orderBy?: string; ascending?: boolean },
-): Promise<T[]> {
-  let query = supabase.from(table).select("*", { count: "exact" }).eq("tenant_id", tenantId);
-  if (opts?.orderBy) query = query.order(opts.orderBy, { ascending: opts.ascending ?? true });
-  const { data, error } = await fetchAll<T>(query as unknown as PagedQuery<T>);
-  if (error) throw new Error(error.message);
-  return data;
 }
 
 /** Audit insert failures never block the mutation they describe from succeeding — the write

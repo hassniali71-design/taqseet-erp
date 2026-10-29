@@ -27,7 +27,12 @@ import {
 import { Logo } from "@/components/Logo";
 import { getUsers, signOut, type Session } from "@/lib/data-store";
 import { cn } from "@/lib/utils";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
+
 import { useRealtimeSync } from "@/hooks/use-realtime-sync";
+import { installApp, useCanInstall } from "@/lib/pwa";
+import { hydrateFromLocal } from "@/lib/table-sync";
 import { APP_BUILD_TIME, APP_VERSION } from "@/lib/app-version";
 
 interface NavItem {
@@ -112,6 +117,12 @@ export function AppSidebar({ session }: { session: Session }) {
   const navigate = useNavigate();
   // الشريط الجانبي موجود في كل صفحة جوه النظام — مكان واحد يفضل الاشتراك فيه شغال طول الجلسة.
   useRealtimeSync(session.tenant_id);
+  // نسخة الجهاز تتعرض فورًا (حتى من غير نت) والمزامنة تكمّل في الخلفية — بند 79.
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    void hydrateFromLocal(queryClient, session.tenant_id);
+  }, [queryClient, session.tenant_id]);
+  const canInstall = useCanInstall();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const user = getUsers().find((u) => u.id === session.user_id);
 
@@ -169,6 +180,14 @@ export function AppSidebar({ session }: { session: Session }) {
           <LogOut className="h-3.5 w-3.5" />
           تسجيل خروج
         </button>
+        {canInstall && (
+          <button
+            onClick={() => void installApp()}
+            className="mt-2 flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            تسطيب البرنامج على الجهاز
+          </button>
+        )}
         <p className="mt-2 text-center text-[10px] text-sidebar-foreground/60" dir="rtl">
           {APP_VERSION}
           {APP_BUILD_TIME && ` · ${new Date(APP_BUILD_TIME).toLocaleString("ar-EG")}`}

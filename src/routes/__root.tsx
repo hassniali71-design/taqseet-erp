@@ -11,6 +11,9 @@ import { useState, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { Toaster } from "../components/ui/sonner";
+import { AppStatusBar } from "../components/AppStatusBar";
+// بيتستورد هنا عشان يمسك حدث التسطيب أول ما البرنامج يحمّل، ويسجّل عامل الخدمة (بند 79).
+import "../lib/pwa";
 
 function NotFoundComponent() {
   return (
@@ -79,6 +82,7 @@ export const Route = createRootRoute({
           "حسبة (HESBA): نظام ERP SaaS متعدد المستأجرين لمحلات الأجهزة الكهربائية والمنزلية، يدير البيع النقدي والتقسيط والمخزون والتحصيل والمحاسبة.",
       },
       { property: "og:type", content: "website" },
+      { name: "theme-color", content: "#1B2A41" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
     links: [
@@ -87,6 +91,9 @@ export const Route = createRootRoute({
         href: appCss,
       },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      // التسطيب على الجهاز (بند 79)
+      { rel: "manifest", href: "/manifest.webmanifest" },
+      { rel: "apple-touch-icon", href: "/icons/icon-192.png" },
     ],
   }),
 
@@ -129,6 +136,7 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
+      <AppStatusBar />
       <Toaster richColors position="top-center" dir="rtl" />
     </QueryClientProvider>
   );
