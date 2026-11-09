@@ -25,6 +25,8 @@ import {
   useReceiveStock,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
+import { useErrorSound } from "@/hooks/use-error-sound";
+import { playSound } from "@/lib/sounds";
 
 export const Route = createFileRoute("/sales/new")({
   component: NewSalePage,
@@ -73,6 +75,7 @@ function NewSalePage() {
   const [newProductPrice, setNewProductPrice] = useState("");
   const [newProductQty, setNewProductQty] = useState("1");
   const [newProductError, setNewProductError] = useState<string | null>(null);
+  useErrorSound(error, newCustomerError, newProductError);
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
 
@@ -163,6 +166,7 @@ function NewSalePage() {
       ]);
       setQuantity("1");
     }
+    playSound("tap");
     setSelectedProductId("");
     setUnitPriceOverride("");
   }
@@ -300,6 +304,7 @@ function NewSalePage() {
       },
       {
         onSuccess: (sale) => {
+          playSound("success");
           if (selectedPartnerIds.length > 0 && session) {
             void settlePartnersForDeal(
               session.tenant_id,

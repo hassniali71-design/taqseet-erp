@@ -10,6 +10,8 @@ import {
   useProductSerials,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
+import { useErrorSound } from "@/hooks/use-error-sound";
+import { playSound } from "@/lib/sounds";
 
 export const Route = createFileRoute("/stock-count")({
   component: StockCountPage,
@@ -21,6 +23,7 @@ function StockCountPage() {
   const [actuals, setActuals] = useState<Record<string, string>>({});
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  useErrorSound(error);
   const [savedId, setSavedId] = useState<string | null>(null);
 
   const { data: allProducts = [] } = useProducts(session?.tenant_id);
@@ -66,6 +69,7 @@ function StockCountPage() {
       },
       {
         onSuccess: () => {
+          playSound("done");
           setActuals((prev) => ({ ...prev, [productId]: "" }));
           setReasons((prev) => ({ ...prev, [productId]: "" }));
           setSavedId(productId);

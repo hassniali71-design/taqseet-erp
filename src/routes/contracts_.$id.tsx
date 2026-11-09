@@ -27,6 +27,8 @@ import {
 import { pendingCollectedFor, useOutbox } from "@/lib/outbox";
 import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
+import { useErrorSound } from "@/hooks/use-error-sound";
+import { playSound } from "@/lib/sounds";
 import type { InstallmentStatus, PromiseToPay } from "@/types";
 
 export const Route = createFileRoute("/contracts_/$id")({
@@ -100,6 +102,7 @@ function ContractDetailPage() {
   const { data: allRestructureEvents = [] } = useRestructureEvents(session?.tenant_id);
   const collectPaymentMutation = useCollectPayment(session?.tenant_id);
   const outbox = useOutbox(session?.tenant_id);
+  useErrorSound(payError);
   // مفتاح واحد لكل عملية تحصيل: لو الطلب اتبعت ومعرفناش النتيجة (نت فصل) وضغط تاني، نفس المفتاح
   // بيرجع نفس الإيصال بدل ما يتسجّل مرتين. بيتصفّر بعد النجاح أو لما المبلغ يتغيّر (بند 78).
   const collectKeyRef = useRef<string | null>(null);
@@ -184,6 +187,7 @@ function ContractDetailPage() {
       },
       {
         onSuccess: (result) => {
+          playSound(result.queued ? "done" : "success");
           collectKeyRef.current = null;
           setPayAmount("");
           setPaySuccess(

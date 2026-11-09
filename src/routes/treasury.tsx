@@ -23,6 +23,8 @@ import {
   useTreasuryMovements,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
+import { useErrorSound } from "@/hooks/use-error-sound";
+import { playSound } from "@/lib/sounds";
 import type { TreasuryAccount, TreasuryMovement } from "@/types";
 
 export const Route = createFileRoute("/treasury")({
@@ -74,6 +76,7 @@ function TreasuryPage() {
   const [closeReasonOther, setCloseReasonOther] = useState("");
   const [destinationAccountId, setDestinationAccountId] = useState("");
   const [error, setError] = useState<string | null>(null);
+  useErrorSound(error);
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [newAccountName, setNewAccountName] = useState("");
   const [newAccountKind, setNewAccountKind] = useState<TreasuryAccount["kind"]>("cashier");
@@ -179,6 +182,7 @@ function TreasuryPage() {
       },
       {
         onSuccess: () => {
+          playSound("done");
           setCountedAmount("");
           setCloseReasonPreset(DISCREPANCY_REASON_PRESETS[0]);
           setCloseReasonOther("");

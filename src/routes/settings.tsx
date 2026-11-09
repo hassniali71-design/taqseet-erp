@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import { CustomerPermanentDelete } from "@/components/CustomerPermanentDelete";
+import { SoundSettingsCard } from "@/components/SoundSettings";
 import { subscribeData } from "@/lib/data-store";
 import {
   useCreateInstallmentPlan,
@@ -189,6 +190,11 @@ function SettingsPage() {
           هذه الإعدادات تُستخدم عبر المراحل القادمة (تقسيط، مرتجعات، ائتمان). أي تعديل هنا مستقبلًا
           لا يغيّر عقودًا أو عمليات قديمة استخدمت القيمة السابقة (Snapshot).
         </p>
+
+        {/* إعداد للجهاز ده بس (بند 82) — مش بيتحفظ في القاعدة ومش محتاج زرار حفظ. */}
+        <div className="mt-6">
+          <SoundSettingsCard />
+        </div>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-6">
           <section className="rounded-xl border border-border bg-card p-5 shadow-sm">

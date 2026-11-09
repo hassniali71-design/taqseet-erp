@@ -13,6 +13,8 @@ import {
 } from "@/lib/supabase-queries";
 import { matchesSearch } from "@/lib/text-filter";
 import { useRequireSession } from "@/hooks/use-session";
+import { useErrorSound } from "@/hooks/use-error-sound";
+import { playSound } from "@/lib/sounds";
 
 export const Route = createFileRoute("/expenses")({
   component: ExpensesPage,
@@ -27,6 +29,7 @@ function ExpensesPage() {
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
+  useErrorSound(error);
   const [search, setSearch] = useState("");
 
   const { data: settingsData } = useCurrentTenantSettings(session?.tenant_id);
@@ -80,6 +83,7 @@ function ExpensesPage() {
       },
       {
         onSuccess: () => {
+          playSound("done");
           setCategory("");
           setAmount("");
           setReason("");

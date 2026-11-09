@@ -8,7 +8,29 @@ import { useEffect, useState } from "react";
  * • لما نسخة جديدة تنزل، مش بنعمل إعادة تحميل غصب عن المستخدم (ممكن يكون في نص تحصيل) — بنظهر
  *   رسالة "فيه تحديث" وهو اللي يدوس. */
 
-type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<unknown> };
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
+
+/** علامة "البرنامج اتسطّب على الجهاز ده" (بند 81 — منقولة من دكانة/سفرة). بتتسجّل مع حدث
+ * `appinstalled`، وبتتشال لو المتصفح رجع عرض التسطيب (يعني البرنامج اتمسح من الجهاز). */
+const INSTALLED_KEY = "app-installed";
+function setInstalledFlag(on: boolean) {
+  try {
+    if (on) window.localStorage.setItem(INSTALLED_KEY, String(Date.now()));
+    else window.localStorage.removeItem(INSTALLED_KEY);
+  } catch {
+    /* التخزين مقفول: خطوات التسطيب بتظهر برضه */
+  }
+}
+function installedHere() {
+  try {
+    return Boolean(window.localStorage.getItem(INSTALLED_KEY));
+  } catch {
+    return false;
+  }
+}
 
 let installEvent: InstallPromptEvent | null = null;
 let waitingWorker: ServiceWorker | null = null;
@@ -19,10 +41,13 @@ if (typeof window !== "undefined") {
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
     installEvent = e as InstallPromptEvent;
+    // المتصفح بيعرض التسطيب بس لما البرنامج مش متسطّب هنا (أو اتمسح).
+    setInstalledFlag(false);
     notify();
   });
   window.addEventListener("appinstalled", () => {
     installEvent = null;
+    setInstalledFlag(true);
     notify();
   });
   if ("serviceWorker" in navigator && import.meta.env.PROD) {
@@ -72,19 +97,53 @@ function useStore<T>(read: () => T): T {
   return value;
 }
 
-const readInstall = () => installEvent !== null;
+/** البرنامج مفتوح كتطبيق متسطّب (شباكه لوحده / أيقونة الشاشة الرئيسية)، مش في تاب متصفح. */
+export function isStandalone(): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    window.matchMedia?.("(display-mode: standalone)").matches ||
+    window.matchMedia?.("(display-mode: window-controls-overlay)").matches ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true
+  );
+}
+
+/** زرار "تسطيب البرنامج" بيعمل إيه على الجهاز ده:
+ *  - "standalone": إحنا جوه البرنامج المتسطّب نفسه — الزرار بيفضل ظاهر ويقول "متسطّب بالفعل"؛
+ *  - "prompt":     شباك التسطيب بتاع المتصفح جاهز؛
+ *  - "installed":  متسطّب على الجهاز ده واتفتح من المتصفح — نقول فين يلاقيه؛
+ *  - "manual":     مفيش شباك تسطيب (آيفون، أو اتداس إلغاء، أو متصفح تاني) — نعرض الخطوات. */
+export type InstallState = "standalone" | "prompt" | "installed" | "manual";
+
+const readInstall = (): InstallState =>
+  isStandalone()
+    ? "standalone"
+    : installEvent
+      ? "prompt"
+      : typeof window !== "undefined" && installedHere()
+        ? "installed"
+        : "manual";
 const readUpdate = () => waitingWorker !== null;
 
-/** زرار "تسطيب البرنامج" بيظهر بس لما المتصفح يسمح بالتسطيب. */
-export function useCanInstall() {
+export function useInstallState(): InstallState {
   return useStore(readInstall);
 }
 
-export async function installApp() {
-  if (!installEvent) return;
-  await installEvent.prompt();
+/** بيفتح شباك التسطيب بتاع المتصفح؛ true = اتسطّب. الإلغاء بيسيب الزرار، والضغطة الجاية بتعرض
+ * الخطوات (المتصفح بيعرض الشباك مرة واحدة لكل تحميل صفحة). */
+export async function installApp(): Promise<boolean> {
+  const evt = installEvent;
+  if (!evt) return false;
   installEvent = null;
-  notify();
+  try {
+    await evt.prompt();
+    const { outcome } = await evt.userChoice;
+    if (outcome === "accepted") setInstalledFlag(true);
+    return outcome === "accepted";
+  } catch {
+    return false;
+  } finally {
+    notify();
+  }
 }
 
 export function useUpdateAvailable() {

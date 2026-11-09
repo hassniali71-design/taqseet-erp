@@ -18,6 +18,8 @@ import { matchesSearch } from "@/lib/text-filter";
 import { pendingCollectedFor, useOutbox } from "@/lib/outbox";
 import { sendTenantReminderSweepServer } from "@/lib/twilio-server";
 import { useRequireSession } from "@/hooks/use-session";
+import { useErrorSound } from "@/hooks/use-error-sound";
+import { playSound } from "@/lib/sounds";
 import type { Installment, InstallmentStatus } from "@/types";
 
 export const Route = createFileRoute("/collections")({
@@ -74,6 +76,7 @@ function CollectionsWorkbenchPage() {
   const { data: allCustomers = [] } = useCustomers(session?.tenant_id);
   const collectPaymentMutation = useCollectPayment(session?.tenant_id);
   const outbox = useOutbox(session?.tenant_id);
+  useErrorSound(error);
   // مفتاح لكل عقد لعملية التحصيل الجارية — نفس منطق صفحة العقد (بند 78).
   const collectKeys = useRef(new Map<string, string>());
   const sweepMutation = useMutation({
@@ -180,6 +183,7 @@ function CollectionsWorkbenchPage() {
       },
       {
         onSuccess: (result) => {
+          playSound(result.queued ? "done" : "success");
           collectKeys.current.delete(contractId);
           setAmounts((prev) => ({ ...prev, [contractId]: "" }));
           setCollectDates((prev) => ({ ...prev, [contractId]: "" }));

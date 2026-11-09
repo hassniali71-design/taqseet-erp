@@ -29,6 +29,8 @@ import {
   useReceiveStock,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
+import { useErrorSound } from "@/hooks/use-error-sound";
+import { playSound } from "@/lib/sounds";
 import { newOperationId, useOutbox } from "@/lib/outbox";
 import type { OfflineNewCustomer } from "@/lib/supabase-queries";
 
@@ -98,6 +100,7 @@ function NewInstallmentSalePage() {
   const { data: allPurchases = [] } = usePurchases(session?.tenant_id);
   const createContractMutation = useCreateInstallmentContract(session?.tenant_id);
   const outbox = useOutbox(session?.tenant_id);
+  useErrorSound(error, newCustomerError, newProductError);
   const createPlanMutation = useCreateInstallmentPlan(session?.tenant_id);
   const createCustomerMutation = useCreateCustomer(session?.tenant_id);
   const createProductMutation = useCreateProduct(session?.tenant_id);
@@ -210,6 +213,7 @@ function NewInstallmentSalePage() {
       ]);
       setQuantity("1");
     }
+    playSound("tap");
     setSelectedProductId("");
     setUnitPriceOverride("");
   }
@@ -400,6 +404,7 @@ function NewInstallmentSalePage() {
       {
         onSuccess: (result) => {
           if (result.queued) {
+            playSound("done");
             setOfflineNewCustomer(null);
             toast.success(
               "اتحفظ كعقد مؤقت على الجهاز — هيتبعت لوحده وياخد رقمه الحقيقي أول ما النت يرجع",
@@ -407,6 +412,7 @@ function NewInstallmentSalePage() {
             void navigate({ to: "/dashboard" });
             return;
           }
+          playSound("success");
           void navigate({ to: "/contracts/$id", params: { id: result.contract.id } });
         },
         onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),

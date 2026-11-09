@@ -7,13 +7,15 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { Toaster } from "../components/ui/sonner";
 import { AppStatusBar } from "../components/AppStatusBar";
 // بيتستورد هنا عشان يمسك حدث التسطيب أول ما البرنامج يحمّل، ويسجّل عامل الخدمة (بند 79).
 import "../lib/pwa";
+import { startTableCards } from "../lib/table-cards";
+import { installSoundUnlock } from "../lib/sounds";
 
 function NotFoundComponent() {
   return (
@@ -131,6 +133,13 @@ function RootComponent() {
   const [queryClient] = useState(
     () => new QueryClient({ defaultOptions: { queries: { staleTime: 5 * 60_000 } } }),
   );
+
+  // التليفون: الجداول بتبقى كروت (بند 81).
+  // + الأصوات بتتجهّز مع أول لمسة، وصوت الضغطة والكتابة لكل الصفحات من مكان واحد (بند 82).
+  useEffect(() => {
+    startTableCards();
+    installSoundUnlock();
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>

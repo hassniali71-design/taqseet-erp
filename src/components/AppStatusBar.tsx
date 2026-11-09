@@ -37,7 +37,7 @@ export function AppStatusBar() {
   if (online && !updateReady && outbox.length === 0) return null;
 
   return (
-    <div className="no-print fixed inset-x-0 bottom-0 z-[90] flex flex-col items-center gap-2 p-3">
+    <div className="app-status-bar no-print fixed inset-x-0 bottom-0 z-[90] flex flex-col items-center gap-2 p-3">
       {rejected.map((e) => (
         <div
           key={e.id}

@@ -12,6 +12,8 @@ import {
   useSuppliers,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
+import { useErrorSound } from "@/hooks/use-error-sound";
+import { playSound } from "@/lib/sounds";
 
 export const Route = createFileRoute("/purchases/new")({
   component: NewPurchasePage,
@@ -35,6 +37,7 @@ function NewPurchasePage() {
   const [unitCost, setUnitCost] = useState("");
   const [serialInputs, setSerialInputs] = useState<string[]>([""]);
   const [error, setError] = useState<string | null>(null);
+  useErrorSound(error);
   const [issueDate, setIssueDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [returnPeriodDays, setReturnPeriodDays] = useState("");
   const [immediatePayment, setImmediatePayment] = useState("");
@@ -187,8 +190,10 @@ function NewPurchasePage() {
         costingMethod: settings?.costing_method ?? "average",
       },
       {
-        onSuccess: (purchase) =>
-          void navigate({ to: "/purchases/$id", params: { id: purchase.id } }),
+        onSuccess: (purchase) => {
+          playSound("done");
+          void navigate({ to: "/purchases/$id", params: { id: purchase.id } });
+        },
         onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
       },
     );

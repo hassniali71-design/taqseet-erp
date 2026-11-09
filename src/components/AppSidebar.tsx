@@ -6,9 +6,11 @@ import {
   ClipboardList,
   Handshake,
   History,
+  Keyboard,
   LayoutDashboard,
   LogOut,
   MapPin,
+  Menu,
   Package,
   PackagePlus,
   Percent,
@@ -28,10 +30,13 @@ import { Logo } from "@/components/Logo";
 import { getUsers, signOut, type Session } from "@/lib/data-store";
 import { cn } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { useRealtimeSync } from "@/hooks/use-realtime-sync";
-import { installApp, useCanInstall } from "@/lib/pwa";
+import { InstallAppButton } from "@/components/InstallAppButton";
+import { SoundToggleButton } from "@/components/SoundSettings";
+import { Kbd, KeyboardShortcuts, type ShortcutItem } from "@/components/KeyboardShortcuts";
+import { HELP_SHORTCUT, assignShortcuts, openShortcutsHelp } from "@/lib/shortcuts";
 import { hydrateFromLocal } from "@/lib/table-sync";
 import { onOutboxSynced, useOutbox, useOutboxRunner } from "@/lib/outbox";
 import { APP_BUILD_TIME, APP_VERSION } from "@/lib/app-version";
@@ -114,6 +119,36 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+/** اختصارات الكيبورد بالأهمية (بند 83 — الترتيب اللي وافق عليه المالك): F1 لوحة التحكم، F2 بيع تقسيط،
+ * F3 التحصيل… لحد F12، وبعدين Alt+1… (src/lib/shortcuts.ts). الإشعارات من غير اختصار. */
+const SHORTCUT_ORDER = [
+  "/dashboard",
+  "/sales/new-installment",
+  "/collections",
+  "/sales/new",
+  "/customers",
+  "/products",
+  "/stock-count",
+  "/purchases/new",
+  "/treasury",
+  "/expenses",
+  "/deliveries",
+  "/reports",
+  "/suppliers",
+  "/partners",
+  "/accounting",
+  "/exchanges/new",
+  "/warranty",
+  "/audit",
+  "/users",
+  "/settings",
+];
+const SHORTCUTS = assignShortcuts(SHORTCUT_ORDER);
+const SHORTCUT_ITEMS: ShortcutItem[] = NAV_GROUPS.flatMap((g) => g.items)
+  .filter((it) => SHORTCUTS.has(it.to))
+  .map((it) => ({ url: it.to, title: it.label, key: SHORTCUTS.get(it.to) as string }))
+  .sort((a, b) => SHORTCUT_ORDER.indexOf(a.url) - SHORTCUT_ORDER.indexOf(b.url));
+
 export function AppSidebar({ session }: { session: Session }) {
   const navigate = useNavigate();
   // الشريط الجانبي موجود في كل صفحة جوه النظام — مكان واحد يفضل الاشتراك فيه شغال طول الجلسة.
@@ -133,12 +168,19 @@ export function AppSidebar({ session }: { session: Session }) {
     [queryClient, session.tenant_id],
   );
   const outbox = useOutbox(session.tenant_id);
-  const canInstall = useCanInstall();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const user = getUsers().find((u) => u.id === session.user_id);
+  // التليفون (بند 81): القايمة كلها بتفتح من "المزيد" وبتتقفل لوحدها مع أي انتقال.
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => setMenuOpen(false), [pathname]);
+  // مساحة للشريط اللي فوق واللي تحت على التليفون (styles.css — has-app-chrome).
+  useEffect(() => {
+    document.body.classList.add("has-app-chrome");
+    return () => document.body.classList.remove("has-app-chrome");
+  }, []);
 
-  return (
-    <aside className="flex w-64 shrink-0 flex-col border-l border-sidebar-border bg-sidebar text-sidebar-foreground">
+  const content = (
+    <>
       <div className="border-b border-sidebar-border px-4 py-4">
         <Logo className="text-sidebar-foreground" />
       </div>
@@ -171,16 +213,37 @@ export function AppSidebar({ session }: { session: Session }) {
                       )}
                     />
                     {item.label}
+                    {SHORTCUTS.has(item.to) && (
+                      <Kbd
+                        k={SHORTCUTS.get(item.to) as string}
+                        className="ms-auto hidden md:inline-flex"
+                      />
+                    )}
                   </Link>
                 );
               })}
             </div>
           </div>
         ))}
+        <button
+          type="button"
+          onClick={() => {
+            setMenuOpen(false);
+            openShortcutsHelp();
+          }}
+          className="hidden w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-bold text-sidebar-foreground/85 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:flex"
+        >
+          <Keyboard className="h-4 w-4 shrink-0" />
+          الاختصارات
+          <Kbd k={HELP_SHORTCUT} className="ms-auto" />
+        </button>
       </nav>
 
       <div className="border-t border-sidebar-border px-4 py-3">
-        <p className="truncate text-xs font-bold text-sidebar-foreground">{user?.full_name}</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="truncate text-xs font-bold text-sidebar-foreground">{user?.full_name}</p>
+          <SoundToggleButton className="h-8 w-8 shrink-0 hover:bg-sidebar-accent" />
+        </div>
         <button
           onClick={() => {
             if (
@@ -199,19 +262,102 @@ export function AppSidebar({ session }: { session: Session }) {
           <LogOut className="h-3.5 w-3.5" />
           تسجيل خروج
         </button>
-        {canInstall && (
-          <button
-            onClick={() => void installApp()}
-            className="mt-2 flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            تسطيب البرنامج على الجهاز
-          </button>
-        )}
+        {/* زرار التسطيب موجود دايمًا (بند 81) — حتى جوه البرنامج المتسطّب بيقول "متسطّب بالفعل". */}
+        <InstallAppButton className="mt-2" />
         <p className="mt-2 text-center text-[10px] text-sidebar-foreground/60" dir="rtl">
           {APP_VERSION}
           {APP_BUILD_TIME && ` · ${new Date(APP_BUILD_TIME).toLocaleString("ar-EG")}`}
         </p>
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      <KeyboardShortcuts items={SHORTCUT_ITEMS} />
+      {/* الكمبيوتر والتابلت العريض: القايمة الجانبية زي ما هي. */}
+      <aside className="hidden w-64 shrink-0 flex-col border-l border-sidebar-border bg-sidebar text-sidebar-foreground md:flex">
+        {content}
+      </aside>
+
+      {/* التليفون: شريط صغير فوق (لوجو + تسطيب + القايمة). */}
+      <header className="no-print safe-top fixed inset-x-0 top-0 z-40 flex h-[calc(3rem+env(safe-area-inset-top))] items-center justify-between gap-2 bg-sidebar px-3 text-sidebar-foreground shadow md:hidden">
+        <Logo
+          className="gap-1.5 text-sidebar-foreground"
+          iconClassName="h-7 w-7"
+          showTagline={false}
+        />
+        <div className="flex items-center gap-1">
+          <SoundToggleButton className="hover:bg-white/10" />
+          <InstallAppButton compact />
+          <button
+            type="button"
+            onClick={() => setMenuOpen(true)}
+            aria-label="القايمة"
+            className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-white/10"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+        </div>
+      </header>
+
+      {/* التليفون: القايمة كلها كدُرج من الجنب. */}
+      {menuOpen && (
+        <div
+          className="no-print fixed inset-0 z-[100] md:hidden"
+          onClick={() => setMenuOpen(false)}
+        >
+          <div className="absolute inset-0 bg-black/50" />
+          <aside
+            className="safe-top safe-bottom absolute inset-y-0 right-0 flex w-72 max-w-[85vw] flex-col bg-sidebar text-sidebar-foreground shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {content}
+          </aside>
+        </div>
+      )}
+
+      {/* التليفون: أهم الصفحات تحت الصباع (قرار المالك) + "المزيد". */}
+      <nav
+        className="no-print safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 shadow-[0_-2px_10px_rgba(0,0,0,0.06)] backdrop-blur md:hidden"
+        aria-label="التنقل السريع"
+      >
+        <div className="flex items-stretch gap-1 px-2 py-1">
+          {MOBILE_TABS.map((t) => {
+            const active = pathname === t.to || pathname.startsWith(`${t.to}/`);
+            const Icon = t.icon;
+            return (
+              <Link
+                key={t.to}
+                to={t.to}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg py-1.5 text-[0.72rem] font-bold transition-colors",
+                  active ? "bg-primary/15 text-foreground" : "text-muted-foreground",
+                )}
+              >
+                <Icon className="h-[1.35rem] w-[1.35rem]" />
+                <span className="truncate">{t.label}</span>
+              </Link>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setMenuOpen(true)}
+            className="flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg py-1.5 text-[0.72rem] font-bold text-muted-foreground"
+          >
+            <Menu className="h-[1.35rem] w-[1.35rem]" />
+            <span>المزيد</span>
+          </button>
+        </div>
+      </nav>
+    </>
   );
 }
+
+const MOBILE_TABS: NavItem[] = [
+  { to: "/dashboard", label: "الرئيسية", icon: LayoutDashboard },
+  { to: "/collections", label: "التحصيل", icon: Wallet },
+  { to: "/sales/new-installment", label: "بيع تقسيط", icon: Percent },
+  { to: "/customers", label: "العملاء", icon: Users },
+];
