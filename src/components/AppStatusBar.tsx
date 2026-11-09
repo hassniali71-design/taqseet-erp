@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { getSession } from "@/lib/data-store";
+import { PushBanner } from "@/components/PushNotifications";
 import { outboxRemove, useOutbox, type OutboxEntry } from "@/lib/outbox";
 import { applyUpdate, useOnline, useUpdateAvailable } from "@/lib/pwa";
 import { lastLocalSave } from "@/lib/table-sync";
@@ -34,10 +35,13 @@ export function AppStatusBar() {
   const rejected = outbox.filter((e) => e.status === "rejected");
   const waitingUpdate = waiting.some((e) => e.status === "waiting_update");
 
-  if (online && !updateReady && outbox.length === 0) return null;
+  if (online && !updateReady && outbox.length === 0 && !tenantId) return null;
 
   return (
-    <div className="app-status-bar no-print fixed inset-x-0 bottom-0 z-[90] flex flex-col items-center gap-2 p-3">
+    // الحاوية نفسها مبتمسكش الضغط (عشان متغطّيش أسفل الصفحة)، العناصر اللي جواها بس.
+    <div className="app-status-bar no-print pointer-events-none fixed inset-x-0 bottom-0 z-[90] flex flex-col items-center gap-2 p-3 [&>*]:pointer-events-auto">
+      {/* شريط «فعّل الإشعارات» (بند 84) — بيظهر لوحده بس للي داخل ولسه مفعّلش. */}
+      {tenantId && <PushBanner />}
       {rejected.map((e) => (
         <div
           key={e.id}

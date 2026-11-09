@@ -34,7 +34,9 @@ import { useEffect, useState } from "react";
 
 import { useRealtimeSync } from "@/hooks/use-realtime-sync";
 import { InstallAppButton } from "@/components/InstallAppButton";
+import { NotificationsBell } from "@/components/NotificationsBell";
 import { SoundToggleButton } from "@/components/SoundSettings";
+import { forgetPushOnSignOut } from "@/lib/push";
 import { Kbd, KeyboardShortcuts, type ShortcutItem } from "@/components/KeyboardShortcuts";
 import { HELP_SHORTCUT, assignShortcuts, openShortcutsHelp } from "@/lib/shortcuts";
 import { hydrateFromLocal } from "@/lib/table-sync";
@@ -242,10 +244,16 @@ export function AppSidebar({ session }: { session: Session }) {
       <div className="border-t border-sidebar-border px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <p className="truncate text-xs font-bold text-sidebar-foreground">{user?.full_name}</p>
-          <SoundToggleButton className="h-8 w-8 shrink-0 hover:bg-sidebar-accent" />
+          <div className="flex shrink-0 items-center">
+            <NotificationsBell
+              tenantId={session.tenant_id}
+              className="h-8 w-8 hover:bg-sidebar-accent"
+            />
+            <SoundToggleButton className="h-8 w-8 hover:bg-sidebar-accent" />
+          </div>
         </div>
         <button
-          onClick={() => {
+          onClick={async () => {
             if (
               outbox.length > 0 &&
               !window.confirm(
@@ -254,6 +262,8 @@ export function AppSidebar({ session }: { session: Session }) {
             ) {
               return;
             }
+            // التليفون ده مايوصلوش إشعارات الحساب ده تاني (بند 84) — قبل الخروج والجلسة لسه شغالة.
+            await forgetPushOnSignOut();
             signOut();
             void navigate({ to: "/login" });
           }}
@@ -288,6 +298,7 @@ export function AppSidebar({ session }: { session: Session }) {
           showTagline={false}
         />
         <div className="flex items-center gap-1">
+          <NotificationsBell tenantId={session.tenant_id} className="hover:bg-white/10" />
           <SoundToggleButton className="hover:bg-white/10" />
           <InstallAppButton compact />
           <button

@@ -91,3 +91,73 @@ self.addEventListener("fetch", (event) => {
     );
   }
 });
+
+// ---- إشعارات الستارة (Web Push) — بند 84، منقول زي ما هو من دكانة/سفرة. Phone notifications (Web Push): the server sends {title, body, url, tag}
+// (src/lib/push-dispatch.ts). Shown in the phone's notification shade even when the
+// app is closed; a tap opens the app straight on that page.
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { title: event.data ? event.data.text() : "" };
+  }
+  const title = data.title || "إشعار جديد";
+  event.waitUntil(
+    (async () => {
+      // the app is open on screen: it rings itself too (src/components/push-notifications.tsx).
+      // The shade's own sound is the phone's: an iPhone plays its system sound only when
+      // Sounds is on for the installed app (Settings → Notifications → app) and Focus/silent is off;
+      // the web gives no way to pick a sound or vibrate there (vibrate is Android only).
+      try {
+        const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+        for (const w of wins)
+          if (w.visibilityState === "visible") w.postMessage({ type: "PUSH_RING", title });
+      } catch {
+        /* the shade notification below still shows */
+      }
+      await self.registration.showNotification(title, {
+        body: data.body || "",
+        icon: "/icons/icon-192.png",
+        badge: "/notification-badge.png",
+        dir: "rtl",
+        lang: "ar",
+        tag: data.tag || undefined,
+        // a newer one with the same tag rings again instead of replacing silently
+        renotify: !!data.tag,
+        vibrate: [200, 100, 200],
+        timestamp: data.ts || Date.now(),
+        data: { url: data.url || "/" },
+      });
+    })(),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = new URL(
+    (event.notification.data && event.notification.data.url) || "/",
+    self.location.origin,
+  );
+  if (target.origin !== self.location.origin) return;
+  event.waitUntil(
+    (async () => {
+      const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      // the app is already open: bring it forward on that page
+      for (const w of wins) {
+        if (new URL(w.url).origin === self.location.origin) {
+          await w.focus();
+          if ("navigate" in w) {
+            try {
+              await w.navigate(target.href);
+            } catch {
+              w.postMessage({ type: "OPEN_URL", url: target.pathname + target.search });
+            }
+          }
+          return;
+        }
+      }
+      await self.clients.openWindow(target.href);
+    })(),
+  );
+});

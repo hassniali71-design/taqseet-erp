@@ -2,6 +2,7 @@ import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
+import { handlePushDispatch, isPushDispatchRequest } from "./lib/push-dispatch";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -65,6 +66,8 @@ function withNoCacheForHtml(response: Response): Response {
 
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
+    // القاعدة بتطلب إشعار ستارة لتليفون (src/lib/push-dispatch.ts — بند 84) — قبل تحميل البرنامج كله
+    if (isPushDispatchRequest(request)) return handlePushDispatch(request);
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);

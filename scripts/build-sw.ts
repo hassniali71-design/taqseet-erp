@@ -30,7 +30,11 @@ function walk(dir: string, out: string[] = []): string[] {
 const assets = walk(publicDir)
   .map((f) => "/" + relative(publicDir, f).split("\\").join("/"))
   .filter(
-    (p) => p.startsWith("/assets/") || p.startsWith("/icons/") || p === "/manifest.webmanifest",
+    (p) =>
+      p.startsWith("/assets/") ||
+      p.startsWith("/icons/") ||
+      p === "/manifest.webmanifest" ||
+      p === "/notification-badge.png",
   )
   .sort();
 

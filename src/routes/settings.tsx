@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import { CustomerPermanentDelete } from "@/components/CustomerPermanentDelete";
+import { PushSettingsCard } from "@/components/PushNotifications";
 import { SoundSettingsCard } from "@/components/SoundSettings";
 import { subscribeData } from "@/lib/data-store";
 import {
@@ -192,7 +193,8 @@ function SettingsPage() {
         </p>
 
         {/* إعداد للجهاز ده بس (بند 82) — مش بيتحفظ في القاعدة ومش محتاج زرار حفظ. */}
-        <div className="mt-6">
+        <div className="mt-6 space-y-6">
+          <PushSettingsCard />
           <SoundSettingsCard />
         </div>
 
