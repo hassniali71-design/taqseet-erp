@@ -43,6 +43,7 @@ import type {
   ProductCategory,
   ProductSerial,
   ProductUnit,
+  UserPermissions,
   PromiseToPay,
   Purchase,
   PurchaseItem,
@@ -338,6 +339,49 @@ export function useSetUserRole(tenantId: string | undefined) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["user_roles", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
+/** بند 87 — المالك بيغيّر صلاحيات موظف (`null` = صلاحيات كاملة). القاعدة نفسها (ملف 0036) بترفض لو
+ * اللي بيغيّر مش صاحب صلاحيات كاملة، أو لو بيقلّل صلاحيات نفسه. */
+export function useSetUserPermissions(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      userId,
+      permissions,
+      actorUserId,
+    }: {
+      userId: string;
+      permissions: UserPermissions | null;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data, error } = await supabase
+        .from("users")
+        .update({ permissions })
+        .eq("id", userId)
+        .select("id");
+      if (error) {
+        if (error.code === "PGRST204" || /column .*permissions/.test(error.message)) {
+          throw new Error("الصلاحيات لسه مش جاهزة على القاعدة (ملف 0036)");
+        }
+        throw new Error(error.message);
+      }
+      if (!data || data.length === 0) throw new Error("المستخدم غير موجود");
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: "user.permissions_change",
+        entity: "users",
+        entity_id: userId,
+        new_value: { permissions },
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["users", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
     },
   });

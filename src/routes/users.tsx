@@ -4,11 +4,14 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { PermissionsEditor } from "@/components/PermissionsEditor";
+import { EMPTY_PERMISSIONS, parsePermissions } from "@/lib/permissions";
 import {
   useCreateUserRecord,
   useRoles,
   useSeedSystemRoles,
   useSetUserActive,
+  useSetUserPermissions,
   useUserRoles,
   useUsers,
 } from "@/lib/supabase-queries";
@@ -16,7 +19,7 @@ import { getAccessToken } from "@/lib/supabase-client";
 import { createTenantUserWithAuth } from "@/lib/user-provisioning-server";
 import { sendCredentialsServer } from "@/lib/twilio-server";
 import { useRequireSession } from "@/hooks/use-session";
-import type { User } from "@/types";
+import type { User, UserPermissions } from "@/types";
 
 export const Route = createFileRoute("/users")({
   component: UsersPage,
@@ -47,6 +50,11 @@ function UsersPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [error, setError] = useState<string | null>(null);
   const [justCreatedUser, setJustCreatedUser] = useState<JustCreatedUser | null>(null);
+  // بند 87 — الموظف الجديد بيبدأ من غير ولا صفحة لحد ما المالك يعلّم.
+  const [newPerms, setNewPerms] = useState<UserPermissions | null>(EMPTY_PERMISSIONS);
+  const [editingPermsFor, setEditingPermsFor] = useState<string | null>(null);
+  const [editPerms, setEditPerms] = useState<UserPermissions | null>(null);
+  const setUserPermissionsMutation = useSetUserPermissions(session?.tenant_id);
 
   const { data: roles = [], isLoading: rolesLoading } = useRoles(session?.tenant_id);
   const { data: users = [] } = useUsers(session?.tenant_id);
@@ -69,6 +77,7 @@ function UsersPage() {
       password: string;
       phone?: string;
       roleId?: string;
+      permissions: UserPermissions | null;
     }) => createTenantUserWithAuth({ data: { ...vars, accessToken: await getAccessToken() } }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["users", session?.tenant_id] });
@@ -106,14 +115,25 @@ function UsersPage() {
     return names.length > 0 ? names.join("، ") : "بلا دور";
   }
 
+  function permsLabel(user: User): string {
+    const p = parsePermissions(user.permissions);
+    if (!p) return "كاملة";
+    return `${p.pages.length} صفحة${p.edit_delete ? " + حذف/تعديل" : ""}`;
+  }
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
     if (!session) return;
     const resetForm = () => {
       setForm({ full_name: "", email: "", password: "", phone: "", role_id: roles[0]?.id ?? "" });
+      setNewPerms(EMPTY_PERMISSIONS);
       setShowForm(false);
     };
+    if (newPerms && newPerms.pages.length === 0) {
+      setError("علّم على صفحة واحدة على الأقل الموظف يفتحها");
+      return;
+    }
     try {
       const created = await createUserWithAuthMutation.mutateAsync({
         fullName: form.full_name.trim(),
@@ -121,6 +141,7 @@ function UsersPage() {
         password: form.password,
         ...(form.phone.trim() && { phone: form.phone.trim() }),
         ...(form.role_id && { roleId: form.role_id }),
+        permissions: newPerms,
       });
       if (form.phone.trim()) {
         setJustCreatedUser({
@@ -132,7 +153,12 @@ function UsersPage() {
         });
       }
       resetForm();
-    } catch {
+    } catch (e) {
+      // موظف بصلاحيات محددة لازم يتعمل صح من السيرفر — مفيش طريقة بديلة ممكن تديله صلاحيات كاملة.
+      if (newPerms) {
+        setError(e instanceof Error ? e.message : "تعذّر إضافة الموظف");
+        return;
+      }
       createUserRecordFallback.mutate(
         {
           input: {
@@ -165,6 +191,7 @@ function UsersPage() {
             <button
               onClick={() => {
                 setForm({ ...EMPTY_FORM, role_id: roles[0]?.id ?? "" });
+                setNewPerms(EMPTY_PERMISSIONS);
                 setShowForm(true);
               }}
               className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
@@ -232,7 +259,7 @@ function UsersPage() {
             <h2 className="text-sm font-bold text-foreground">مستخدم جديد</h2>
             <p className="text-xs text-muted-foreground">
               بيتم إنشاء حساب دخول حقيقي فورًا بالبريد وكلمة السر دول — الموظف يقدر يدخل من صفحة
-              تسجيل الدخول مباشرة بصلاحيات دوره المحدد تحت.
+              تسجيل الدخول مباشرة، ويشوف بس الصفحات اللي هتعلّم عليها تحت.
             </p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="الاسم *">
@@ -265,7 +292,7 @@ function UsersPage() {
                   placeholder="6 أحرف على الأقل"
                 />
               </Field>
-              <Field label="الدور">
+              <Field label="الوظيفة (اسم بس — الصلاحيات تحت)">
                 <select
                   value={form.role_id}
                   onChange={(e) => setForm({ ...form, role_id: e.target.value })}
@@ -287,6 +314,7 @@ function UsersPage() {
                 />
               </Field>
             </div>
+            <PermissionsEditor value={newPerms} onChange={setNewPerms} />
             <div className="flex gap-2">
               <button
                 type="submit"
@@ -306,13 +334,55 @@ function UsersPage() {
           </form>
         )}
 
+        {editingPermsFor && (
+          <div className="mt-4 space-y-3 rounded-xl border-2 border-primary/50 bg-card p-5 shadow-sm">
+            <h2 className="text-sm font-bold text-foreground">
+              صلاحيات: {users.find((u) => u.id === editingPermsFor)?.full_name}
+            </h2>
+            <PermissionsEditor value={editPerms} onChange={setEditPerms} />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={setUserPermissionsMutation.isPending}
+                onClick={() => {
+                  if (editPerms && editPerms.pages.length === 0) {
+                    toast.error("علّم على صفحة واحدة على الأقل");
+                    return;
+                  }
+                  setUserPermissionsMutation.mutate(
+                    { userId: editingPermsFor, permissions: editPerms, actorUserId },
+                    {
+                      onSuccess: () => {
+                        toast.success("اتحفظت الصلاحيات");
+                        setEditingPermsFor(null);
+                      },
+                      onError: (e) => toast.error(e instanceof Error ? e.message : "حدث خطأ"),
+                    },
+                  );
+                }}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                {setUserPermissionsMutation.isPending ? "جارٍ الحفظ..." : "احفظ الصلاحيات"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingPermsFor(null)}
+                className="rounded-md border border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="mt-6 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-right text-sm">
             <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">الاسم</th>
                 <th className="px-4 py-3 font-medium">البريد</th>
-                <th className="px-4 py-3 font-medium">الدور</th>
+                <th className="px-4 py-3 font-medium">الوظيفة</th>
+                <th className="px-4 py-3 font-medium">الصلاحيات</th>
                 <th className="px-4 py-3 font-medium">الحالة</th>
                 <th className="px-4 py-3 font-medium"></th>
               </tr>
@@ -330,6 +400,7 @@ function UsersPage() {
                     {user.email}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{roleLabel(user.id)}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{permsLabel(user)}</td>
                   <td className="px-4 py-3">
                     <span
                       className={
@@ -342,6 +413,17 @@ function UsersPage() {
                     </span>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-left">
+                    {user.id !== actorUserId && (
+                      <button
+                        onClick={() => {
+                          setEditingPermsFor(user.id);
+                          setEditPerms(parsePermissions(user.permissions));
+                        }}
+                        className="ml-3 text-xs font-bold text-primary hover:underline"
+                      >
+                        الصلاحيات
+                      </button>
+                    )}
                     {user.id !== actorUserId && (
                       <button
                         onClick={() => toggleActive(user)}

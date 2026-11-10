@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { usePermissions } from "@/hooks/use-permissions";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
@@ -35,6 +36,7 @@ const EMPTY_FORM: FormState = {
 
 function SuppliersPage() {
   const session = useRequireSession();
+  const { canEditDelete } = usePermissions(session); // بند 87
   const [, forceRerender] = useState(0);
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -247,18 +249,22 @@ function SuppliersPage() {
                     </span>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-left">
-                    <button
-                      onClick={() => startEdit(supplier)}
-                      className="ml-2 text-xs font-medium text-primary hover:underline"
-                    >
-                      تعديل
-                    </button>
-                    <button
-                      onClick={() => toggleActive(supplier)}
-                      className="text-xs font-medium text-muted-foreground hover:underline"
-                    >
-                      {supplier.active ? "إيقاف" : "تفعيل"}
-                    </button>
+                    {canEditDelete && (
+                      <button
+                        onClick={() => startEdit(supplier)}
+                        className="ml-2 text-xs font-medium text-primary hover:underline"
+                      >
+                        تعديل
+                      </button>
+                    )}
+                    {canEditDelete && (
+                      <button
+                        onClick={() => toggleActive(supplier)}
+                        className="text-xs font-medium text-muted-foreground hover:underline"
+                      >
+                        {supplier.active ? "إيقاف" : "تفعيل"}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

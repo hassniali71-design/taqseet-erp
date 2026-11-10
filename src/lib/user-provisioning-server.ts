@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 
 import { getSupabaseAdmin, resolveServerCaller } from "@/lib/supabase-admin";
+import { parsePermissions } from "@/lib/permissions";
+import type { UserPermissions } from "@/types";
 
 /** Creates a REAL Supabase Auth login (not just a `users` table row) for a new employee of the
  * signed-in owner's own tenant — the piece `useCreateUserRecord` (supabase-queries.ts)
@@ -22,6 +24,8 @@ export const createTenantUserWithAuth = createServerFn({ method: "POST" })
       password: string;
       phone?: string;
       roleId?: string;
+      /** بند 87 — `null` = صلاحيات كاملة؛ غير كده موظف بالصفحات دي بس. */
+      permissions?: UserPermissions | null;
       accessToken: string;
     }) => input,
   )
@@ -36,6 +40,25 @@ export const createTenantUserWithAuth = createServerFn({ method: "POST" })
     if (data.password.length < 6) throw new Error("كلمة السر لازم تكون 6 أحرف على الأقل");
 
     const supabaseAdmin = getSupabaseAdmin();
+
+    // بند 87 — إضافة الموظفين للمالك بس (اللي صلاحياته كاملة). لو ملف 0036 لسه متطبّقش العمود مش
+    // موجود، فالكل صلاحياته كاملة زي الأول — بس ساعتها مينفعش نعمل موظف بصلاحيات محددة.
+    const { data: callerRow, error: callerError } = await supabaseAdmin
+      .from("users")
+      .select("permissions")
+      .eq("id", caller.userId)
+      .single();
+    const permissionsReady = !callerError;
+    if (permissionsReady && callerRow?.["permissions"] != null && !caller.isPlatformOwner) {
+      throw new Error("إضافة الموظفين للمالك بس");
+    }
+    const permissions =
+      data.permissions === undefined || data.permissions === null
+        ? null
+        : parsePermissions(data.permissions);
+    if (permissions && !permissionsReady) {
+      throw new Error("الصلاحيات لسه مش جاهزة على القاعدة (ملف 0036) — طبّقه الأول");
+    }
 
     const { data: created, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
@@ -56,6 +79,7 @@ export const createTenantUserWithAuth = createServerFn({ method: "POST" })
         full_name: fullName,
         email,
         ...(phone && { phone }),
+        ...(permissions && { permissions }),
         active: true,
       })
       .select()
@@ -94,7 +118,7 @@ export const createTenantUserWithAuth = createServerFn({ method: "POST" })
       action: "user.create_with_login",
       entity: "users",
       entity_id: userRow.id as string,
-      new_value: { full_name: fullName, email },
+      new_value: { full_name: fullName, email, permissions },
     });
 
     return userRow;

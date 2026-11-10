@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { usePermissions } from "@/hooks/use-permissions";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
@@ -46,6 +47,7 @@ const EMPTY_FORM: FormState = {
 
 function PartnersPage() {
   const session = useRequireSession();
+  const { canEditDelete } = usePermissions(session); // بند 87
   const [, forceRerender] = useState(0);
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -377,24 +379,30 @@ function PartnersPage() {
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-wrap justify-end gap-2">
-                    <button
-                      onClick={() => startEdit(partner)}
-                      className="whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
-                    >
-                      تعديل
-                    </button>
-                    <button
-                      onClick={() => toggleActive(partner)}
-                      className="whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
-                    >
-                      {partner.active ? "إيقاف" : "تفعيل"}
-                    </button>
-                    <button
-                      onClick={() => void handleDelete(partner)}
-                      className="whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-xs font-medium text-destructive hover:bg-accent"
-                    >
-                      حذف
-                    </button>
+                    {canEditDelete && (
+                      <button
+                        onClick={() => startEdit(partner)}
+                        className="whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
+                      >
+                        تعديل
+                      </button>
+                    )}
+                    {canEditDelete && (
+                      <button
+                        onClick={() => toggleActive(partner)}
+                        className="whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
+                      >
+                        {partner.active ? "إيقاف" : "تفعيل"}
+                      </button>
+                    )}
+                    {canEditDelete && (
+                      <button
+                        onClick={() => void handleDelete(partner)}
+                        className="whitespace-nowrap rounded-md border border-input px-3 py-1.5 text-xs font-medium text-destructive hover:bg-accent"
+                      >
+                        حذف
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         setActionForId(actionForId === partner.id ? null : partner.id);

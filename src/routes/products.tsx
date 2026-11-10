@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { usePermissions } from "@/hooks/use-permissions";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
@@ -67,6 +68,7 @@ const UNIT_OPTIONS = ["قطعة", "دستة", "كرتونة", "طقم", "زوج"
 
 function ProductsPage() {
   const session = useRequireSession();
+  const { canEditDelete } = usePermissions(session); // بند 87
   const [, forceRerender] = useState(0);
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -673,24 +675,30 @@ function ProductsPage() {
                     </span>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-left">
-                    <button
-                      onClick={() => startEdit(product)}
-                      className="ml-2 text-xs font-medium text-primary hover:underline"
-                    >
-                      تعديل
-                    </button>
-                    <button
-                      onClick={() => toggleActive(product)}
-                      className="ml-2 text-xs font-medium text-muted-foreground hover:underline"
-                    >
-                      {product.active ? "إيقاف" : "تفعيل"}
-                    </button>
-                    <button
-                      onClick={() => void handleDelete(product)}
-                      className="text-xs font-medium text-destructive hover:underline"
-                    >
-                      حذف
-                    </button>
+                    {canEditDelete && (
+                      <button
+                        onClick={() => startEdit(product)}
+                        className="ml-2 text-xs font-medium text-primary hover:underline"
+                      >
+                        تعديل
+                      </button>
+                    )}
+                    {canEditDelete && (
+                      <button
+                        onClick={() => toggleActive(product)}
+                        className="ml-2 text-xs font-medium text-muted-foreground hover:underline"
+                      >
+                        {product.active ? "إيقاف" : "تفعيل"}
+                      </button>
+                    )}
+                    {canEditDelete && (
+                      <button
+                        onClick={() => void handleDelete(product)}
+                        className="text-xs font-medium text-destructive hover:underline"
+                      >
+                        حذف
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

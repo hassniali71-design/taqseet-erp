@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { usePermissions } from "@/hooks/use-permissions";
 import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
@@ -65,6 +66,7 @@ const ACTION_LABELS: Record<string, string> = {
 
 function AuditPage() {
   const session = useRequireSession();
+  const { canEditDelete } = usePermissions(session); // بند 87
   const { data: logs = [], isLoading, error } = useAuditLogs(session?.tenant_id);
   const { data: users = [] } = useUsers(session?.tenant_id);
   const deleteLogMutation = useDeleteAuditLog(session?.tenant_id);
@@ -182,12 +184,14 @@ function AuditPage() {
                     <td className="px-4 py-3 text-muted-foreground">{userName(log.user_id)}</td>
                     <td className="px-4 py-3 text-muted-foreground">{log.reason ?? "—"}</td>
                     <td className="px-4 py-3 text-left">
-                      <button
-                        onClick={() => void handleDeleteOne(log.id)}
-                        className="text-xs font-medium text-destructive hover:underline"
-                      >
-                        حذف
-                      </button>
+                      {canEditDelete && (
+                        <button
+                          onClick={() => void handleDeleteOne(log.id)}
+                          className="text-xs font-medium text-destructive hover:underline"
+                        >
+                          حذف
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

@@ -33,6 +33,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { useRealtimeSync } from "@/hooks/use-realtime-sync";
+import { usePermissions } from "@/hooks/use-permissions";
+import { firstAllowedPath } from "@/lib/permissions";
 import { InstallAppButton } from "@/components/InstallAppButton";
 import { NotificationsBell } from "@/components/NotificationsBell";
 import { SoundToggleButton } from "@/components/SoundSettings";
@@ -172,6 +174,26 @@ export function AppSidebar({ session }: { session: Session }) {
   const outbox = useOutbox(session.tenant_id);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const user = getUsers().find((u) => u.id === session.user_id);
+  // بند 87 — الموظف بيشوف بس الصفحات اللي المالك علّم عليها. صلاحيات كاملة = زي النهارده بالحرف.
+  const access = usePermissions(session);
+  const navGroups = access.full
+    ? NAV_GROUPS
+    : NAV_GROUPS.map((g) => ({
+        ...g,
+        items: g.items.filter((it) => access.canOpen(it.to)),
+      })).filter((g) => g.items.length > 0);
+  const shortcutItems = access.full
+    ? SHORTCUT_ITEMS
+    : SHORTCUT_ITEMS.filter((it) => access.canOpen(it.url));
+  const mobileTabs = access.full ? MOBILE_TABS : MOBILE_TABS.filter((t) => access.canOpen(t.to));
+  const blocked = access.loaded && !access.canOpen(pathname);
+  // بعد الدخول البرنامج بيفتح على لوحة التحكم — لو مش مسموحة، يروح لأول صفحة مسموحة على طول.
+  useEffect(() => {
+    if (blocked && pathname === "/dashboard") {
+      const target = firstAllowedPath(access.perms);
+      if (target !== "/dashboard") void navigate({ to: target, replace: true });
+    }
+  }, [blocked, pathname, access.perms, navigate]);
   // التليفون (بند 81): القايمة كلها بتفتح من "المزيد" وبتتقفل لوحدها مع أي انتقال.
   const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => setMenuOpen(false), [pathname]);
@@ -188,7 +210,7 @@ export function AppSidebar({ session }: { session: Session }) {
       </div>
 
       <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-4">
-        {NAV_GROUPS.map((group) => (
+        {navGroups.map((group) => (
           <div key={group.label}>
             <p className="px-2 pb-1.5 text-[11px] font-extrabold tracking-wide text-sidebar-foreground/50">
               {group.label}
@@ -215,7 +237,7 @@ export function AppSidebar({ session }: { session: Session }) {
                       )}
                     />
                     {item.label}
-                    {SHORTCUTS.has(item.to) && (
+                    {SHORTCUTS.has(item.to) && shortcutItems.some((it) => it.url === item.to) && (
                       <Kbd
                         k={SHORTCUTS.get(item.to) as string}
                         className="ms-auto hidden md:inline-flex"
@@ -284,7 +306,24 @@ export function AppSidebar({ session }: { session: Session }) {
 
   return (
     <>
-      <KeyboardShortcuts items={SHORTCUT_ITEMS} />
+      <KeyboardShortcuts items={shortcutItems} />
+      {blocked && (
+        <div className="fixed inset-x-0 bottom-16 top-12 z-[90] flex items-center justify-center bg-background p-6 md:bottom-0 md:right-64 md:top-0">
+          <div className="max-w-sm rounded-2xl border border-border bg-card p-6 text-center shadow">
+            <p className="text-lg font-extrabold text-foreground">الصفحة دي مش مسموحة ليك</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              لو محتاجها اطلب من صاحب المحل يفتحهالك من صفحة المستخدمين.
+            </p>
+            <button
+              type="button"
+              onClick={() => void navigate({ to: firstAllowedPath(access.perms) })}
+              className="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-bold text-primary-foreground hover:bg-primary/90"
+            >
+              ارجع لصفحاتي
+            </button>
+          </div>
+        </div>
+      )}
       {/* الكمبيوتر والتابلت العريض: القايمة الجانبية زي ما هي. */}
       <aside className="hidden w-64 shrink-0 flex-col border-l border-sidebar-border bg-sidebar text-sidebar-foreground md:flex">
         {content}
@@ -334,7 +373,7 @@ export function AppSidebar({ session }: { session: Session }) {
         aria-label="التنقل السريع"
       >
         <div className="flex items-stretch gap-1 px-2 py-1">
-          {MOBILE_TABS.map((t) => {
+          {mobileTabs.map((t) => {
             const active = pathname === t.to || pathname.startsWith(`${t.to}/`);
             const Icon = t.icon;
             return (

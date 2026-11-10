@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { usePermissions } from "@/hooks/use-permissions";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
@@ -69,6 +70,7 @@ const PROMISE_STATUS_CLASS: Record<PromiseToPay["status"], string> = {
 
 function ContractDetailPage() {
   const session = useRequireSession();
+  const { canEditDelete } = usePermissions(session); // بند 87
   const { id } = Route.useParams();
   const [, forceRerender] = useState(0);
   const [payAmount, setPayAmount] = useState("");
@@ -348,7 +350,7 @@ function ContractDetailPage() {
                 </button>
               </>
             )}
-            {canCancel && (
+            {canCancel && canEditDelete && (
               <button
                 onClick={() => setShowCancelForm((v) => !v)}
                 className="rounded-md border border-destructive/40 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10"

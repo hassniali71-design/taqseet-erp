@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { usePermissions } from "@/hooks/use-permissions";
 import { DateInput } from "@/components/ui/DateInput";
 import { StatCard } from "@/components/ui/StatCard";
 import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
@@ -28,6 +29,8 @@ export function CustomerStatement({
   actorUserId: string | null;
 }) {
   const { data: allSales = [] } = useSales(tenantId);
+  // بند 87 — تعديل/حذف التحصيل لصاحب الصلاحية بس
+  const { canEditDelete } = usePermissions({ tenant_id: tenantId, user_id: actorUserId ?? "" });
   const { data: allContracts = [] } = useInstallmentContracts(tenantId);
   const { data: allInstallments = [] } = useInstallments(tenantId);
   const { data: allPayments = [] } = useInstallmentPayments(tenantId);
@@ -257,7 +260,7 @@ export function CustomerStatement({
                     {new Date(r.date).toLocaleDateString("ar-EG")}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-left">
-                    {p && (
+                    {p && canEditDelete && (
                       <>
                         <button
                           onClick={() => startEdit(p)}

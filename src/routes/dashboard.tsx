@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { usePermissions } from "@/hooks/use-permissions";
 import { useState } from "react";
 import {
   AlertTriangle,
@@ -67,6 +68,8 @@ const MONTH_LABELS_AR = [
 
 function DashboardPage() {
   const session = useRequireSession();
+  // بند 87 — كل كارت بيظهر بس لو صفحته مسموحة (رصيد الخزينة والتقارير لصاحب الصلاحية بس)
+  const access = usePermissions(session);
   // اللوحة سرية افتراضيًا — الأرقام المالية مخفية لحد ما الأونر يدخل الباسورد يظهرها، مش
   // العكس (ظاهرة افتراضيًا وتقدر تخفيها).
   const [hideMoney, setHideMoney] = useState(true);
@@ -182,93 +185,111 @@ function DashboardPage() {
         </div>
 
         <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
-          <Link to="/reports">
-            <LinkCard
-              label="مبيعات اليوم"
-              value={money(todaySalesTotal)}
-              cta="عرض تقرير المبيعات ←"
-              icon={Wallet}
-              tone="navy"
-              valueDir="ltr"
-            />
-          </Link>
-          <Link to="/collections">
-            <LinkCard
-              label="مستحق اليوم (تقسيط)"
-              value={money(dueTodayAmount)}
-              cta="فتح التحصيل ←"
-              icon={Clock}
-              tone="teal"
-              valueDir="ltr"
-            />
-          </Link>
-          <Link to="/collections">
-            <LinkCard
-              label="متأخرات (تقسيط)"
-              value={money(overdueAmount)}
-              cta="فتح التحصيل ←"
-              icon={AlertTriangle}
-              tone={overdueCount > 0 ? "danger" : "navy"}
-              valueDir="ltr"
-              {...(overdueCount > 0 && { sub: `${overdueCount} قسط متأخر` })}
-            />
-          </Link>
-          <Link to="/treasury">
-            <LinkCard
-              label="رصيد خزينة الكاشير"
-              value={money(cashierBalance)}
-              cta="فتح الخزينة ←"
-              icon={Landmark}
-              tone="teal"
-              valueDir="ltr"
-            />
-          </Link>
-          <Link to="/reports">
-            <LinkCard
-              label="فواتير كاش / عقود تقسيط"
-              value={`${sales.length} كاش`}
-              sub={`${contractsAll.length} عقد تقسيط`}
-              cta="عرض تقرير المبيعات ←"
-              icon={ReceiptText}
-              tone="navy"
-            />
-          </Link>
-          <Link to="/customers">
-            <LinkCard
-              label="عملاء"
-              value={String(customers.length)}
-              cta="إدارة العملاء ←"
-              icon={Users}
-              tone="teal"
-            />
-          </Link>
-          <Link to="/collections">
-            <LinkCard
-              label="عقود تقسيط مفتوحة"
-              value={String(contracts.length)}
-              cta="فتح التحصيل ←"
-              icon={Percent}
-              tone="navy"
-            />
-          </Link>
-          <Link to="/products">
-            <LinkCard
-              label="أجهزة تحت الحد الأدنى"
-              value={String(lowStockProducts.length)}
-              cta="إدارة الأجهزة ←"
-              icon={PackageX}
-              tone={lowStockProducts.length > 0 ? "danger" : "teal"}
-            />
-          </Link>
-          <Link to="/deliveries">
-            <LinkCard
-              label="توصيلات جارية"
-              value={String(pendingDeliveries)}
-              cta="فتح التوصيل ←"
-              icon={Truck}
-              tone="navy"
-            />
-          </Link>
+          {access.canOpen("/reports") && (
+            <Link to="/reports">
+              <LinkCard
+                label="مبيعات اليوم"
+                value={money(todaySalesTotal)}
+                cta="عرض تقرير المبيعات ←"
+                icon={Wallet}
+                tone="navy"
+                valueDir="ltr"
+              />
+            </Link>
+          )}
+          {access.canOpen("/collections") && (
+            <Link to="/collections">
+              <LinkCard
+                label="مستحق اليوم (تقسيط)"
+                value={money(dueTodayAmount)}
+                cta="فتح التحصيل ←"
+                icon={Clock}
+                tone="teal"
+                valueDir="ltr"
+              />
+            </Link>
+          )}
+          {access.canOpen("/collections") && (
+            <Link to="/collections">
+              <LinkCard
+                label="متأخرات (تقسيط)"
+                value={money(overdueAmount)}
+                cta="فتح التحصيل ←"
+                icon={AlertTriangle}
+                tone={overdueCount > 0 ? "danger" : "navy"}
+                valueDir="ltr"
+                {...(overdueCount > 0 && { sub: `${overdueCount} قسط متأخر` })}
+              />
+            </Link>
+          )}
+          {access.canOpen("/treasury") && (
+            <Link to="/treasury">
+              <LinkCard
+                label="رصيد خزينة الكاشير"
+                value={money(cashierBalance)}
+                cta="فتح الخزينة ←"
+                icon={Landmark}
+                tone="teal"
+                valueDir="ltr"
+              />
+            </Link>
+          )}
+          {access.canOpen("/reports") && (
+            <Link to="/reports">
+              <LinkCard
+                label="فواتير كاش / عقود تقسيط"
+                value={`${sales.length} كاش`}
+                sub={`${contractsAll.length} عقد تقسيط`}
+                cta="عرض تقرير المبيعات ←"
+                icon={ReceiptText}
+                tone="navy"
+              />
+            </Link>
+          )}
+          {access.canOpen("/customers") && (
+            <Link to="/customers">
+              <LinkCard
+                label="عملاء"
+                value={String(customers.length)}
+                cta="إدارة العملاء ←"
+                icon={Users}
+                tone="teal"
+              />
+            </Link>
+          )}
+          {access.canOpen("/collections") && (
+            <Link to="/collections">
+              <LinkCard
+                label="عقود تقسيط مفتوحة"
+                value={String(contracts.length)}
+                cta="فتح التحصيل ←"
+                icon={Percent}
+                tone="navy"
+              />
+            </Link>
+          )}
+          {access.canOpen("/products") && (
+            <Link to="/products">
+              <LinkCard
+                label="أجهزة تحت الحد الأدنى"
+                value={String(lowStockProducts.length)}
+                cta="إدارة الأجهزة ←"
+                icon={PackageX}
+                tone={lowStockProducts.length > 0 ? "danger" : "teal"}
+              />
+            </Link>
+          )}
+          {access.canOpen("/deliveries") && (
+            <Link to="/deliveries">
+              <LinkCard
+                label="توصيلات جارية"
+                value={String(pendingDeliveries)}
+                cta="فتح التوصيل ←"
+                icon={Truck}
+                tone="navy"
+              />
+            </Link>
+          )}
         </div>
 
         <div className="mt-6">

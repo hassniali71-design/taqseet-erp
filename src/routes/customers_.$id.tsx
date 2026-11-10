@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { usePermissions } from "@/hooks/use-permissions";
 import { useState, type FormEvent } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
@@ -27,6 +28,7 @@ export const Route = createFileRoute("/customers_/$id")({
 
 function CustomerDetailPage() {
   const session = useRequireSession();
+  const { canEditDelete } = usePermissions(session); // بند 87
   const { id } = Route.useParams();
   const [showGuarantorForm, setShowGuarantorForm] = useState(false);
   const [name, setName] = useState("");
@@ -272,12 +274,14 @@ function CustomerDetailPage() {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{g.relationship ?? "—"}</td>
                     <td className="px-4 py-3 text-left">
-                      <button
-                        onClick={() => handleDeleteGuarantor(g.id)}
-                        className="text-xs font-medium text-destructive hover:underline"
-                      >
-                        حذف
-                      </button>
+                      {canEditDelete && (
+                        <button
+                          onClick={() => handleDeleteGuarantor(g.id)}
+                          className="text-xs font-medium text-destructive hover:underline"
+                        >
+                          حذف
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

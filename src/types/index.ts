@@ -103,6 +103,12 @@ export interface RolePermission {
   permission_id: string;
 }
 
+/** بند 87 (ملف 0036) — صلاحيات موظف محددة؛ `null` على المستخدم = صلاحيات كاملة. */
+export interface UserPermissions {
+  pages: string[];
+  edit_delete: boolean;
+}
+
 export interface User {
   id: string;
   tenant_id: string;
@@ -115,6 +121,8 @@ export interface User {
   /** Phase 9 — marks the platform-operator account (tenant_id = the reserved platform tenant).
    * Not a `role`; this is orthogonal to the tenant's own role system. */
   is_platform_owner?: boolean;
+  /** بند 87 — مش موجود/`null` = صلاحيات كاملة (src/lib/permissions.ts). */
+  permissions?: UserPermissions | null;
   /** Links this business user row to the real Supabase Auth identity (auth.users.id) that
    * `signIn()` in data-store.ts authenticates against — set once per account directly in
    * Supabase, never written by any Mock mutation function. Undefined for a Mock-only user
