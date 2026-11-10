@@ -2,10 +2,15 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
+import { GoodsProductForm } from "@/components/GoodsProductForm";
+import { useTenantFeatures } from "@/hooks/use-tenant-features";
+import { playSound } from "@/lib/sounds";
 import { subscribeData } from "@/lib/data-store";
 import {
   computeProductStock,
+  useCreateGoodsProducts,
   useCreateProduct,
+  useCurrentTenantSettings,
   useDeleteProduct,
   useInventoryMovements,
   useProductBrands,
@@ -86,6 +91,12 @@ function ProductsPage() {
   const registerCategoryMutation = useRegisterProductCategory(session?.tenant_id);
   const receiveStockMutation = useReceiveStock(session?.tenant_id);
   const deleteProductMutation = useDeleteProduct(session?.tenant_id);
+  // بند 86 — الأدوات المنزلية: كله ورا مفتاح المحل؛ مقفول = الصفحة زي ما هي بالحرف.
+  const { goods_enabled: goodsEnabled } = useTenantFeatures(session?.tenant_id);
+  const { data: tenantSettings } = useCurrentTenantSettings(session?.tenant_id);
+  const createGoodsMutation = useCreateGoodsProducts(session?.tenant_id);
+  const [goodsFormOpen, setGoodsFormOpen] = useState(false);
+  const [kindFilter, setKindFilter] = useState<"all" | "device" | "goods">("all");
 
   if (!session) return null;
   // Extracted so nested closures below see a plain `string`, not the `Session | null` union
@@ -94,6 +105,10 @@ function ProductsPage() {
 
   const categories = allCategories.filter((c) => c.active);
   const brands = allBrands.filter((b) => b.active);
+  const shownProducts =
+    goodsEnabled && kindFilter !== "all"
+      ? products.filter((p) => (p.kind ?? "device") === kindFilter)
+      : products;
 
   function startCreate() {
     setForm(EMPTY_FORM);
@@ -231,8 +246,10 @@ function ProductsPage() {
       <AppSidebar session={session} />
       <main className="flex-1 mx-auto max-w-5xl px-4 py-8">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-foreground">الأجهزة (المنتجات)</h1>
-          {editingId === null && (
+          <h1 className="text-2xl font-bold text-foreground">
+            {goodsEnabled ? "الأصناف" : "الأجهزة (المنتجات)"}
+          </h1>
+          {editingId === null && !goodsFormOpen && !goodsEnabled && (
             <button
               onClick={startCreate}
               className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
@@ -241,6 +258,50 @@ function ProductsPage() {
             </button>
           )}
         </div>
+
+        {goodsEnabled && editingId === null && !goodsFormOpen && (
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={startCreate}
+              className="rounded-xl border-2 border-border bg-card p-4 text-center text-base font-bold text-foreground hover:border-primary"
+            >
+              📱 جهاز جديد
+            </button>
+            <button
+              type="button"
+              onClick={() => setGoodsFormOpen(true)}
+              className="rounded-xl border-2 border-primary bg-primary/10 p-4 text-center text-base font-bold text-foreground hover:bg-primary/20"
+            >
+              🍽️ أدوات منزلية
+            </button>
+          </div>
+        )}
+
+        {goodsEnabled && goodsFormOpen && (
+          <GoodsProductForm
+            categories={categories.map((c) => c.name)}
+            existingNames={products.map((p) => p.name)}
+            markupPct={Number(tenantSettings?.goods_cash_markup_pct ?? 0)}
+            saving={createGoodsMutation.isPending}
+            onCancel={() => setGoodsFormOpen(false)}
+            onSave={(items) =>
+              createGoodsMutation.mutate(items, {
+                onSuccess: () => {
+                  playSound("done");
+                  setGoodsFormOpen(false);
+                  setKindFilter("goods");
+                },
+                onError: () => playSound("error"),
+              })
+            }
+          />
+        )}
+        {goodsEnabled && goodsFormOpen && createGoodsMutation.error && (
+          <p className="mt-2 text-sm font-bold text-destructive">
+            {createGoodsMutation.error.message}
+          </p>
+        )}
 
         {editingId !== null && (
           <form
@@ -533,6 +594,31 @@ function ProductsPage() {
           </form>
         )}
 
+        {goodsEnabled && (
+          <div className="mt-6 flex gap-2">
+            {(
+              [
+                ["all", "الكل"],
+                ["device", "أجهزة"],
+                ["goods", "أدوات"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setKindFilter(value)}
+                className={
+                  kindFilter === value
+                    ? "rounded-md bg-primary px-3 py-1.5 text-sm font-bold text-primary-foreground"
+                    : "rounded-md border border-input px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent"
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="mt-6 max-h-[26rem] overflow-y-auto overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-right text-sm">
             <thead className="sticky top-0 z-10 border-b border-border bg-card text-xs text-muted-foreground">
@@ -547,7 +633,7 @@ function ProductsPage() {
               </tr>
             </thead>
             <tbody>
-              {products.map((product) => (
+              {shownProducts.map((product) => (
                 <tr key={product.id} className="border-b border-border last:border-0">
                   <td className="px-4 py-3 text-muted-foreground" dir="ltr">
                     {product.code}
@@ -608,7 +694,7 @@ function ProductsPage() {
                   </td>
                 </tr>
               ))}
-              {products.length === 0 && (
+              {shownProducts.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">
                     {isLoading ? "جارٍ التحميل..." : "لا يوجد أجهزة بعد."}

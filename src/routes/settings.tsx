@@ -33,7 +33,10 @@ export const Route = createFileRoute("/settings")({
 });
 
 // مفاتيح مميزات المحل (بند 85) مش في الفورم ده — بيفتحها صاحب المنصة بس من /platform.
-type FormState = Record<keyof Omit<TenantSettings, "tenant_id" | keyof TenantFeatures>, string>;
+type FormState = Record<
+  keyof Omit<TenantSettings, "tenant_id" | "goods_cash_markup_pct" | keyof TenantFeatures>,
+  string
+>;
 
 function toFormState(settings: TenantSettings): FormState {
   return {

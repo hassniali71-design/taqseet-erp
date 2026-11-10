@@ -59,6 +59,8 @@ export interface TenantSettings {
   partners_mode?: PartnersMode;
   customer_accounts_enabled?: boolean;
   deferred_cash_enabled?: boolean;
+  /** بند 86: نسبة الربح المقترحة للأدوات (سعر الكاش = الشراء + النسبة). 0/ناقص = مفيش اقتراح. */
+  goods_cash_markup_pct?: number;
 }
 
 /** الشركاء: صفقة صفقة (زي النهارده) أو رأس مال واحد للمشروع (TASK-0005 المرحلة 2). */
@@ -236,6 +238,24 @@ export interface Product {
   serial_required: boolean;
   active: boolean;
   created_at: string;
+  /** بند 86 (migration 0035): 'device' جهاز (كل القديم) أو 'goods' أدوات منزلية. ناقص = جهاز. */
+  kind?: ProductKind;
+  /** اختياري (قرار المالك). */
+  barcode?: string | null;
+}
+
+export type ProductKind = "device" | "goods";
+
+/** وحدة أكبر للصنف (الدستة = 12 قطعة). المخزون دايمًا بالوحدة الأساسية (`Product.unit`). */
+export interface ProductUnit {
+  id: string;
+  tenant_id: string;
+  product_id: string;
+  name: string;
+  factor: number;
+  barcode?: string | null;
+  cost_price?: number | null;
+  cash_price?: number | null;
 }
 
 /** §21 Serial Number lifecycle. `customer_id`/`sale_id` are added by Phase 3 (sale) and

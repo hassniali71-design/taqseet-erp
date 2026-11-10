@@ -42,6 +42,7 @@ import type {
   ProductBrand,
   ProductCategory,
   ProductSerial,
+  ProductUnit,
   PromiseToPay,
   Purchase,
   PurchaseItem,
@@ -681,6 +682,51 @@ export function useDeleteGuarantor(tenantId: string | undefined) {
 
 export function useProducts(tenantId: string | undefined) {
   return useTenantList<Product>("products", tenantId, { orderBy: "created_at", ascending: false });
+}
+
+/** بند 86 — وحدات الأصناف الأكبر (الدستة/الكرتونة) — بتتقري بس في محل مفتاح الأدوات عنده مفتوح. */
+export function useProductUnits(tenantId: string | undefined, enabled = true) {
+  return useTenantList<ProductUnit>("product_units", enabled ? tenantId : undefined);
+}
+
+/** صنف أدوات جديد زي ما بيتبعت لـ create_goods_products (ملف 0035): الأسعار والكميات بالوحدة
+ * الأساسية، والوحدات الأكبر في `units`. */
+export interface NewGoodsItem {
+  name: string;
+  category?: string;
+  unit: string;
+  barcode?: string;
+  cost_price: number;
+  cash_price: number;
+  min_stock?: number;
+  opening_qty?: number;
+  units?: Array<{ name: string; factor: number; cost_price?: number; cash_price?: number }>;
+}
+
+/** بيعمل صنف أدوات واحد أو مجموعة (أحجام، أو إدخال سريع) + الرصيد الافتتاحي — في عملية واحدة على
+ * السيرفر: يا كلهم يتسجّلوا يا ولا واحد. */
+export function useCreateGoodsProducts(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (items: NewGoodsItem[]) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (items.length === 0) throw new Error("مفيش أصناف");
+      const { data, error } = await supabase.rpc("create_goods_products", { p_items: items });
+      if (error) {
+        if (error.code === "PGRST202" || (error.message ?? "").includes("create_goods_products")) {
+          throw new Error("الأدوات المنزلية لسه مش جاهزة على القاعدة (ملف 0035)");
+        }
+        throw new Error(error.message);
+      }
+      return data as Product[];
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["products", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["product_units", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["inventory_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
 }
 
 export function useCreateProduct(tenantId: string | undefined) {
