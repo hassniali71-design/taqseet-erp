@@ -448,7 +448,14 @@ function NewInstallmentSalePage() {
           active: false,
         },
         {
-          onSuccess: (newPlan) => submitContract(newPlan.id),
+          // بنبعت الخطة نفسها مع العقد: هي active = false عشان متظهرش في قايمة الخطط، فلازم
+          // الحساب والسيرفر يعرفوا إنها خطة الصفقة دي بالذات ويقبلوها.
+          onSuccess: (newPlan) =>
+            submitContract(newPlan.id, {
+              id: newPlan.id,
+              duration_months: newPlan.duration_months,
+              rate_pct: newPlan.rate_pct,
+            }),
           onError: (e) => setError(e instanceof Error ? e.message : "تعذّر إنشاء الخطة المخصصة"),
         },
       );

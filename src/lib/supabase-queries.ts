@@ -1845,9 +1845,12 @@ function buildInstallmentContractDraft(
   allSerials: ProductSerial[],
   movements: InventoryMovement[],
   scheduleStart: Date | undefined,
+  /** رقم الخطة المخصصة اللي اتعملت للصفقة دي بالذات (active = false عشان متظهرش في قايمة
+   * الخطط) — هي بس اللي مسموح تعدّي وهي مش مفعّلة. أي خطة تانية متوقفة تترفض زي ما هي. */
+  customPlanId?: string,
 ): ContractDraft {
   if (customer.status !== "active") throw new Error("العميل غير نشط");
-  if (!plan.active) throw new Error("خطة التقسيط غير مفعّلة");
+  if (!plan.active && plan.id !== customPlanId) throw new Error("خطة التقسيط غير مفعّلة");
 
   const saleItems: SaleItem[] = [];
   const soldSerialIds = new Set<string>();
@@ -2147,7 +2150,8 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
       partners?: ContractPartnersSpec;
       /** من غير نت بس: عميل جديد اتعمل جوه الفاتورة (بالنت بيتسجّل لوحده الأول زي دلوقتي). */
       newCustomer?: OfflineNewCustomer;
-      /** من غير نت بس: خطة مخصصة للصفقة. */
+      /** خطة مخصصة للصفقة دي بس (active = false). من غير نت بتتسجّل مع العقد على السيرفر؛ بالنت
+       * بتكون اتسجّلت قبلها، وبتتبعت هنا عشان الحساب والسيرفر يقبلوها وهي مش مفعّلة. */
       newPlan?: OfflineNewPlan;
     }): Promise<CreateContractResult> => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
@@ -2177,7 +2181,7 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
           : customers.find((c) => c.id === input.customer_id);
         if (!customer) throw new Error("العميل غير موجود");
         const plan: InstallmentPlan | undefined = newPlan
-          ? ({ ...newPlan, tenant_id: tenantId, active: true, created_at: at } as InstallmentPlan)
+          ? ({ ...newPlan, tenant_id: tenantId, active: false, created_at: at } as InstallmentPlan)
           : plans.find((p) => p.id === input.plan_id);
         if (!plan) throw new Error("خطة التقسيط غير موجودة");
         // العقود اللي لسه في الطابور حجزت سيريالاتها/كمياتها — منبيعهاش تاني على نفس الجهاز.
@@ -2204,6 +2208,7 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
           serials.map((s) => (reservedSerials.has(s.id) ? { ...s, status: "sold" as const } : s)),
           [...movements, ...reservedMovements],
           new Date(createdAt ?? at),
+          newPlan?.id,
         );
         await outboxAdd({
           kind: "contract",
@@ -2255,6 +2260,7 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
         (allSerials ?? []) as ProductSerial[],
         (movements ?? []) as InventoryMovement[],
         createdAt ? new Date(createdAt) : undefined,
+        newPlan?.id,
       );
       const { customer, plan, saleItems, soldSerialIds, movementDrafts, schedule } = draft;
       const { cash_subtotal, principal, financeAmount, totalAmount } = draft;
@@ -2268,7 +2274,9 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
       } = await supabase.rpc("create_installment_contract_offline", {
         p_contract: payload,
         p_new_customer: null,
-        p_new_plan: null,
+        // الخطة المخصصة موجودة فعلًا (اتسجّلت قبل العقد) — السيرفر مش هيعيد إنشاءها، بس محتاج
+        // يعرف إنها خطة الصفقة دي عشان يقبلها وهي مش مفعّلة (0032).
+        p_new_plan: newPlan ?? null,
         p_offline_at: null,
       });
       if (!rpcError) {
@@ -2295,7 +2303,11 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
             actorUserId,
             customerName: customer.name,
             totalAmount,
-            payload: { contract: payload, newCustomer: null, newPlan: null },
+            payload: {
+              contract: payload,
+              newCustomer: null,
+              newPlan: (newPlan as unknown as Record<string, unknown>) ?? null,
+            },
             partners: partners ?? null,
           });
           return { queued: true, id: contractId };
