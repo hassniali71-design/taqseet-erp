@@ -17,6 +17,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
 import { Logo } from "@/components/Logo";
+import { TenantFeaturesPanel } from "@/components/TenantFeaturesPanel";
 import { Panel } from "@/components/ui/StatCard";
 import { useSession } from "@/hooks/use-session";
 import { getUsers, signOut, subscribeData } from "@/lib/data-store";
@@ -64,6 +65,8 @@ function PlatformControlRoom() {
   const [justCreated, setJustCreated] = useState<ProvisionTenantResult | null>(null);
   const [form, setForm] = useState({ name: "", owner_name: "", phone: "", owner_email: "" });
   const [supportTarget, setSupportTarget] = useState<Tenant | null>(null);
+  // بند 85: مفاتيح مميزات المحل (صاحب المنصة بس)
+  const [featuresTarget, setFeaturesTarget] = useState<Tenant | null>(null);
   const [supportReason, setSupportReason] = useState("");
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
@@ -338,6 +341,14 @@ function PlatformControlRoom() {
           </div>
         )}
 
+        {featuresTarget && (
+          <TenantFeaturesPanel
+            key={featuresTarget.id}
+            tenant={featuresTarget}
+            onClose={() => setFeaturesTarget(null)}
+          />
+        )}
+
         {supportTarget && (
           <div className="mt-6 rounded-2xl border-2 border-warning/50 bg-warning/10 p-5">
             <h2 className="text-sm font-extrabold text-sidebar-foreground">
@@ -536,6 +547,12 @@ function PlatformControlRoom() {
                           >
                             <Eye className="h-3 w-3" />
                             دعم فني
+                          </button>
+                          <button
+                            onClick={() => setFeaturesTarget(tenant)}
+                            className="flex items-center gap-1 rounded-md border border-sidebar-border px-2 py-1 text-xs font-bold text-sidebar-foreground hover:bg-sidebar-accent/40"
+                          >
+                            مميزات المحل
                           </button>
                         </div>
                       </td>

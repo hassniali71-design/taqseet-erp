@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 
 import { getSupabaseAdmin, resolveServerCaller } from "@/lib/supabase-admin";
-import type { AuditLogEntry, Tenant, TenantStatus } from "@/types";
+import { DEFAULT_TENANT_FEATURES, tenantFeatures } from "@/lib/tenant-features";
+import type { AuditLogEntry, Tenant, TenantFeatures, TenantStatus } from "@/types";
 
 /** Phase 9 Platform Control Room — the Platform Owner needs to read/write every tenant's
  * `tenants` row, which the anon-key RLS policies (tenants_isolation, current_tenant_id())
@@ -471,4 +472,56 @@ export const fetchTenantStorageUsage = createServerFn({ method: "GET" })
       const bytes = Number(row.bytes ?? 0);
       return { tenantId: row.tenant_id, bytes, formatted: formatStorageBytes(bytes) };
     });
+  });
+
+/** بند 85 — مفاتيح مميزات المحل (الأدوات، والشركاء كرأس مال، والحساب الجاري، والآجل بميعاد).
+ * صاحب المنصة بس (قرار المالك)، والتغيير بيتسجّل في سجل تدقيق المحل نفسه. لو ملف 0034 لسه
+ * متطبّقش: `available: false` والقيم الافتراضية (السلوك القديم). */
+export const fetchTenantFeaturesServer = createServerFn({ method: "GET" })
+  .validator((input: { tenantId: string; accessToken: string }) => input)
+  .handler(async ({ data }): Promise<{ available: boolean; features: TenantFeatures }> => {
+    await assertPlatformOwner(data.accessToken);
+    const { data: row, error } = await getSupabaseAdmin()
+      .from("tenant_settings")
+      .select("goods_enabled, partners_mode, customer_accounts_enabled, deferred_cash_enabled")
+      .eq("tenant_id", data.tenantId)
+      .maybeSingle();
+    if (error) return { available: false, features: DEFAULT_TENANT_FEATURES };
+    return { available: true, features: tenantFeatures(row ?? undefined) };
+  });
+
+export const setTenantFeaturesServer = createServerFn({ method: "POST" })
+  .validator(
+    (input: { tenantId: string; features: TenantFeatures; accessToken: string; reason: string }) =>
+      input,
+  )
+  .handler(async ({ data }) => {
+    const caller = await assertPlatformOwner(data.accessToken);
+    if (!data.reason.trim()) throw new Error("اكتب سبب التغيير");
+    const next = tenantFeatures(data.features);
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data: before, error: fetchError } = await supabaseAdmin
+      .from("tenant_settings")
+      .select("goods_enabled, partners_mode, customer_accounts_enabled, deferred_cash_enabled")
+      .eq("tenant_id", data.tenantId)
+      .single();
+    if (fetchError || !before) {
+      throw new Error("المفاتيح مش جاهزة على القاعدة لسه (ملف 0034) أو المحل مالوش إعدادات");
+    }
+    const { error: updateError } = await supabaseAdmin
+      .from("tenant_settings")
+      .update(next)
+      .eq("tenant_id", data.tenantId);
+    if (updateError) throw new Error(updateError.message);
+    await supabaseAdmin.from("audit_logs").insert({
+      tenant_id: data.tenantId,
+      user_id: caller.userId,
+      action: "tenant.features_change",
+      entity: "tenant_settings",
+      entity_id: data.tenantId,
+      old_value: before,
+      new_value: next,
+      reason: data.reason,
+    });
+    return next;
   });

@@ -53,6 +53,22 @@ export interface TenantSettings {
   /** Real Twilio SMS sending (src/lib/twilio-server.ts) — same reminder events as
    * whatsapp_notifications_enabled above, sent via plain SMS instead. */
   sms_notifications_enabled: boolean;
+  /** بند 85 (migration 0034) — مفاتيح مميزات المحل، بيفتحها صاحب المنصة بس. اختيارية هنا لأنها مش
+   * موجودة قبل تطبيق 0034؛ اقراها دايمًا من `tenantFeatures()` (لو ناقصة = السلوك القديم). */
+  goods_enabled?: boolean;
+  partners_mode?: PartnersMode;
+  customer_accounts_enabled?: boolean;
+  deferred_cash_enabled?: boolean;
+}
+
+/** الشركاء: صفقة صفقة (زي النهارده) أو رأس مال واحد للمشروع (TASK-0005 المرحلة 2). */
+export type PartnersMode = "per_deal" | "capital_pool";
+
+export interface TenantFeatures {
+  goods_enabled: boolean;
+  partners_mode: PartnersMode;
+  customer_accounts_enabled: boolean;
+  deferred_cash_enabled: boolean;
 }
 
 /** §9 — the 8 baseline roles named in the spec; tenants may add more (`is_system: false`). */

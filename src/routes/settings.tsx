@@ -26,13 +26,14 @@ import { getAccessToken } from "@/lib/supabase-client";
 import { resetTenantDataServer } from "@/lib/reset-tenant-data-server";
 import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
-import type { TenantSettings } from "@/types";
+import type { TenantFeatures, TenantSettings } from "@/types";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
 });
 
-type FormState = Record<keyof Omit<TenantSettings, "tenant_id">, string>;
+// مفاتيح مميزات المحل (بند 85) مش في الفورم ده — بيفتحها صاحب المنصة بس من /platform.
+type FormState = Record<keyof Omit<TenantSettings, "tenant_id" | keyof TenantFeatures>, string>;
 
 function toFormState(settings: TenantSettings): FormState {
   return {
