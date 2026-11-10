@@ -1,17 +1,21 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import { DateInput } from "@/components/ui/DateInput";
 import { SearchPicker } from "@/components/ui/SearchPicker";
 import {
+  useCreateGoodsProducts,
   useCreateProduct,
   useCreatePurchase,
   useCurrentTenantSettings,
   useProducts,
+  useProductUnits,
   useSuppliers,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
+import { useTenantFeatures } from "@/hooks/use-tenant-features";
+import { unitOptionsFor, unitQtyLabel } from "@/lib/units";
 import { useErrorSound } from "@/hooks/use-error-sound";
 import { playSound } from "@/lib/sounds";
 
@@ -25,6 +29,9 @@ type CartLine = {
   quantity: number;
   unit_cost: number;
   serial_numbers: string[];
+  /** بند 89 — اتشرى بالدستة: «5 دستة»، و`quantity` بالقطعة. */
+  unit_name?: string;
+  unit_qty?: number;
 };
 
 function NewPurchasePage() {
@@ -34,6 +41,7 @@ function NewPurchasePage() {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [selectedProductId, setSelectedProductId] = useState("");
   const [quantity, setQuantity] = useState("1");
+  const [selectedUnitId, setSelectedUnitId] = useState(""); // بند 89 — "" = القطعة
   const [unitCost, setUnitCost] = useState("");
   const [serialInputs, setSerialInputs] = useState<string[]>([""]);
   const [error, setError] = useState<string | null>(null);
@@ -47,12 +55,32 @@ function NewPurchasePage() {
   const [newProductBrand, setNewProductBrand] = useState("");
   const [newProductWarrantyMonths, setNewProductWarrantyMonths] = useState("");
   const [newProductError, setNewProductError] = useState<string | null>(null);
+  // بند 90 — في محل الأدوات: الصنف الجديد من جوه الفاتورة بيتعمل «أدوات» (من غير سيريال ولا ضمان).
+  const [newProductIsGoods, setNewProductIsGoods] = useState(true);
+  const [newProductUnit, setNewProductUnit] = useState("قطعة");
+  const [newProductFactor, setNewProductFactor] = useState("12");
+  const [pendingUnit, setPendingUnit] = useState<{ productId: string; name: string } | null>(null);
 
   const { data: allSuppliers = [] } = useSuppliers(session?.tenant_id);
   const { data: allProducts = [] } = useProducts(session?.tenant_id);
   const { data: settings } = useCurrentTenantSettings(session?.tenant_id);
   const createPurchaseMutation = useCreatePurchase(session?.tenant_id);
   const createProductMutation = useCreateProduct(session?.tenant_id);
+  const { goods_enabled: goodsEnabled } = useTenantFeatures(session?.tenant_id);
+  const { data: allUnits = [] } = useProductUnits(session?.tenant_id, goodsEnabled);
+  const createGoodsMutation = useCreateGoodsProducts(session?.tenant_id);
+  // صنف أدوات جديد بالدستة: أول ما وحدته توصل من السيرفر تتختار لوحدها جنب الكمية.
+  useEffect(() => {
+    if (!pendingUnit) return;
+    const unit = allUnits.find(
+      (u) => u.product_id === pendingUnit.productId && u.name === pendingUnit.name,
+    );
+    if (unit) {
+      setSelectedUnitId(unit.id);
+      if (unit.cost_price != null) setUnitCost(String(unit.cost_price));
+      setPendingUnit(null);
+    }
+  }, [pendingUnit, allUnits]);
 
   if (!session) return null;
   const actorUserId = session.user_id;
@@ -60,6 +88,8 @@ function NewPurchasePage() {
   const suppliers = allSuppliers.filter((s) => s.active);
   const products = allProducts.filter((p) => p.active);
   const selectedProduct = products.find((p) => p.id === selectedProductId);
+  const unitOptions = goodsEnabled ? unitOptionsFor(selectedProduct, allUnits) : [];
+  const selectedUnit = unitOptions.find((u) => u.id === selectedUnitId);
 
   function onQuantityChange(value: string) {
     setQuantity(value);
@@ -96,17 +126,24 @@ function NewPurchasePage() {
       setError(`أدخل ${qty} سيريال بالظبط`);
       return;
     }
+    const factor = selectedProduct.serial_required ? 1 : (selectedUnit?.factor ?? 1);
+    if (!Number.isInteger(qty * factor)) {
+      setError("كمية غير صحيحة");
+      return;
+    }
     setCart((prev) => [
       ...prev,
       {
         product_id: selectedProduct.id,
         product_name: selectedProduct.name,
-        quantity: qty,
-        unit_cost: cost,
+        quantity: qty * factor,
+        unit_cost: factor > 1 ? cost / factor : cost,
         serial_numbers: serials,
+        ...(factor > 1 && selectedUnit && { unit_name: selectedUnit.name, unit_qty: qty }),
       },
     ]);
     setSelectedProductId("");
+    setSelectedUnitId("");
     setQuantity("1");
     setUnitCost("");
     setSerialInputs([""]);
@@ -125,6 +162,50 @@ function NewPurchasePage() {
     const cash = Number(newProductCash);
     if (!newProductCash || cash < 0) {
       setNewProductError("أدخل سعر نقدي صحيح");
+      return;
+    }
+    if (goodsEnabled && newProductIsGoods) {
+      if (cash <= 0) {
+        setNewProductError("سعر البيع لازم يكون أكبر من صفر");
+        return;
+      }
+      const isPack = newProductUnit === "دستة" || newProductUnit === "كرتونة";
+      const f = Math.floor(Number(newProductFactor) || 0);
+      if (isPack && f < 2) {
+        setNewProductError(`ال${newProductUnit} فيها كام قطعة؟`);
+        return;
+      }
+      try {
+        const created = (await createGoodsMutation.mutateAsync([
+          isPack
+            ? {
+                name: newProductName.trim(),
+                unit: "قطعة",
+                cost_price: 0,
+                cash_price: Math.round((cash / f) * 100) / 100,
+                units: [{ name: newProductUnit, factor: f, cash_price: cash }],
+              }
+            : {
+                name: newProductName.trim(),
+                unit: newProductUnit,
+                cost_price: 0,
+                cash_price: cash,
+              },
+        ])) as Array<{ id: string }>;
+        const product = created[0];
+        if (!product) throw new Error("تعذّر إنشاء الصنف");
+        setSelectedProductId(product.id);
+        setSelectedUnitId("");
+        if (isPack) setPendingUnit({ productId: product.id, name: newProductUnit });
+        setSerialInputs([""]);
+        setShowNewProductForm(false);
+        setNewProductName("");
+        setNewProductCash("");
+        setNewProductUnit("قطعة");
+        playSound("success");
+      } catch (e) {
+        setNewProductError(e instanceof Error ? e.message : "حدث خطأ");
+      }
       return;
     }
     try {
@@ -159,7 +240,11 @@ function NewPurchasePage() {
     }
   }
 
-  const total = cart.reduce((sum, l) => sum + l.unit_cost * l.quantity, 0);
+  // بنفس تقريب السيرفر لكل سطر (بند 89: تكلفة القطعة من الدستة ممكن تبقى كسر)
+  const total =
+    Math.round(
+      cart.reduce((sum, l) => sum + Math.round(l.unit_cost * l.quantity * 100) / 100, 0) * 100,
+    ) / 100;
 
   function handleConfirm() {
     setError(null);
@@ -181,6 +266,7 @@ function NewPurchasePage() {
             quantity: l.quantity,
             unit_cost: l.unit_cost,
             ...(l.serial_numbers.length > 0 && { serial_numbers: l.serial_numbers }),
+            ...(l.unit_name && l.unit_qty && { unit_name: l.unit_name, unit_qty: l.unit_qty }),
           })),
           ...(issueDate && { issue_date: issueDate }),
           ...(returnPeriodDays && { return_period_days: Number(returnPeriodDays) }),
@@ -247,6 +333,7 @@ function NewPurchasePage() {
                 onChange={(id) => {
                   setSelectedProductId(id);
                   setSerialInputs([""]);
+                  setSelectedUnitId("");
                 }}
                 placeholder="بحث باسم الجهاز..."
                 extraAction={{
@@ -260,14 +347,35 @@ function NewPurchasePage() {
             </label>
             <label className="block space-y-1">
               <span className="text-xs font-medium text-foreground">الكمية</span>
-              <input
-                type="number"
-                min="1"
-                value={quantity}
-                onChange={(e) => onQuantityChange(e.target.value)}
-                className="form-input"
-                dir="ltr"
-              />
+              <div className="flex gap-1">
+                <input
+                  type="number"
+                  min="1"
+                  value={quantity}
+                  onChange={(e) => onQuantityChange(e.target.value)}
+                  className="form-input"
+                  dir="ltr"
+                />
+                {unitOptions.length > 1 && !selectedProduct?.serial_required && (
+                  <select
+                    value={selectedUnitId}
+                    onChange={(e) => {
+                      setSelectedUnitId(e.target.value);
+                      const u = unitOptions.find((o) => o.id === e.target.value);
+                      if (u && u.costPrice > 0) setUnitCost(String(u.costPrice));
+                    }}
+                    className="form-input w-auto"
+                    aria-label="الوحدة"
+                  >
+                    {unitOptions.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                        {u.factor > 1 ? ` (${u.factor})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
             </label>
             <label className="block space-y-1">
               <span className="text-xs font-medium text-foreground">سعر تكلفة الوحدة</span>
@@ -287,6 +395,29 @@ function NewPurchasePage() {
               <p className="text-xs font-bold text-foreground">
                 جهاز جديد — هيتضاف لقائمة الأجهزة ويتسجل عليه هذه الكمية فورًا
               </p>
+              {goodsEnabled && (
+                <div className="flex gap-2">
+                  {(
+                    [
+                      [true, "🍽️ صنف أدوات منزلية"],
+                      [false, "📱 جهاز"],
+                    ] as const
+                  ).map(([v, label]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => setNewProductIsGoods(v)}
+                      className={
+                        newProductIsGoods === v
+                          ? "rounded-md bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground"
+                          : "rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <label className="block space-y-1">
                   <span className="text-xs font-medium text-foreground">الاسم *</span>
@@ -311,27 +442,60 @@ function NewPurchasePage() {
                     هنا.
                   </span>
                 </label>
-                <label className="block space-y-1">
-                  <span className="text-xs font-medium text-foreground">الماركة (اختياري)</span>
-                  <input
-                    value={newProductBrand}
-                    onChange={(e) => setNewProductBrand(e.target.value)}
-                    className="form-input"
-                  />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-xs font-medium text-foreground">
-                    الضمان بالشهور (اختياري)
-                  </span>
-                  <input
-                    type="number"
-                    min="0"
-                    value={newProductWarrantyMonths}
-                    onChange={(e) => setNewProductWarrantyMonths(e.target.value)}
-                    className="form-input"
-                    dir="ltr"
-                  />
-                </label>
+                {goodsEnabled && newProductIsGoods ? (
+                  <label className="block space-y-1">
+                    <span className="text-xs font-medium text-foreground">الوحدة</span>
+                    <div className="flex gap-1">
+                      <select
+                        value={newProductUnit}
+                        onChange={(e) => setNewProductUnit(e.target.value)}
+                        className="form-input"
+                      >
+                        {["قطعة", "دستة", "طقم", "كرتونة", "علبة"].map((u) => (
+                          <option key={u} value={u}>
+                            {u}
+                          </option>
+                        ))}
+                      </select>
+                      {(newProductUnit === "دستة" || newProductUnit === "كرتونة") && (
+                        <input
+                          type="number"
+                          min="2"
+                          value={newProductFactor}
+                          onChange={(e) => setNewProductFactor(e.target.value)}
+                          className="form-input w-20"
+                          dir="ltr"
+                          aria-label="فيها كام قطعة"
+                          placeholder="قطع"
+                        />
+                      )}
+                    </div>
+                  </label>
+                ) : (
+                  <>
+                    <label className="block space-y-1">
+                      <span className="text-xs font-medium text-foreground">الماركة (اختياري)</span>
+                      <input
+                        value={newProductBrand}
+                        onChange={(e) => setNewProductBrand(e.target.value)}
+                        className="form-input"
+                      />
+                    </label>
+                    <label className="block space-y-1">
+                      <span className="text-xs font-medium text-foreground">
+                        الضمان بالشهور (اختياري)
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={newProductWarrantyMonths}
+                        onChange={(e) => setNewProductWarrantyMonths(e.target.value)}
+                        className="form-input"
+                        dir="ltr"
+                      />
+                    </label>
+                  </>
+                )}
               </div>
               <p className="text-[11px] text-muted-foreground">
                 الجهاز الجديد ده هيتسجل بالكمية بس (بدون سيريال) — لو حابب تتبعه بالسيريال، سجّله من
@@ -342,7 +506,7 @@ function NewPurchasePage() {
                 <button
                   type="button"
                   onClick={() => void handleCreateNewProduct()}
-                  disabled={createProductMutation.isPending}
+                  disabled={createProductMutation.isPending || createGoodsMutation.isPending}
                   className="rounded-md bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {createProductMutation.isPending ? "جارٍ الإنشاء..." : "إنشاء واستخدام"}
@@ -411,14 +575,17 @@ function NewPurchasePage() {
               {cart.map((line, i) => (
                 <tr key={i} className="border-b border-border last:border-0">
                   <td className="px-4 py-3 font-medium text-foreground">{line.product_name}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{unitQtyLabel(line)}</td>
                   <td className="px-4 py-3 text-muted-foreground" dir="ltr">
-                    {line.quantity}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground" dir="ltr">
-                    {line.unit_cost.toLocaleString("ar-EG")}
+                    {(line.unit_qty
+                      ? Math.round(((line.unit_cost * line.quantity) / line.unit_qty) * 100) / 100
+                      : line.unit_cost
+                    ).toLocaleString("ar-EG")}
                   </td>
                   <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
-                    {(line.unit_cost * line.quantity).toLocaleString("ar-EG")}
+                    {(Math.round(line.unit_cost * line.quantity * 100) / 100).toLocaleString(
+                      "ar-EG",
+                    )}
                   </td>
                   <td className="px-4 py-3 text-left">
                     <button

@@ -1,4 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useTenantFeatures } from "@/hooks/use-tenant-features";
+import { CustomerAccountPanel } from "@/components/CustomerAccountPanel";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useState, type FormEvent } from "react";
 
@@ -29,6 +31,8 @@ export const Route = createFileRoute("/customers_/$id")({
 function CustomerDetailPage() {
   const session = useRequireSession();
   const { canEditDelete } = usePermissions(session); // بند 87
+  // بند 93 — تبويب الحساب الجاري بيظهر بس في المحل اللي مفتاحه مفتوح.
+  const customerAccountsOn = useTenantFeatures(session?.tenant_id).customer_accounts_enabled;
   const { id } = Route.useParams();
   const [showGuarantorForm, setShowGuarantorForm] = useState(false);
   const [name, setName] = useState("");
@@ -175,6 +179,19 @@ function CustomerDetailPage() {
             </p>
           </div>
         </div>
+
+        {customerAccountsOn && (
+          <section className="mt-8">
+            <h2 className="text-lg font-bold text-foreground">الحساب الجاري / الجهاز</h2>
+            <div className="mt-3">
+              <CustomerAccountPanel
+                tenantId={session.tenant_id}
+                customer={customer}
+                actorUserId={actorUserId}
+              />
+            </div>
+          </section>
+        )}
 
         <section className="mt-8">
           <h2 className="text-lg font-bold text-foreground">كشف حساب العميل</h2>

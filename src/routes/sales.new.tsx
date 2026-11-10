@@ -1,10 +1,13 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { reservedQty } from "@/lib/customer-account";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import { DateInput } from "@/components/ui/DateInput";
 import { PartnerDealPicker } from "@/components/ui/PartnerDealPicker";
+import { DeferredPaymentPanel } from "@/components/DeferredPaymentPanel";
+import { saveInstallmentHandoff } from "@/lib/sale-handoff";
 import { SearchPicker } from "@/components/ui/SearchPicker";
 import { subscribeData } from "@/lib/data-store";
 import {
@@ -23,8 +26,15 @@ import {
   useProducts,
   usePurchases,
   useReceiveStock,
+  useProductUnits,
+  useInstallmentPlans,
+  useCreateInstallmentPlan,
+  useCreateInstallmentContract,
+  useReservations,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
+import { useTenantFeatures } from "@/hooks/use-tenant-features";
+import { unitOptionsFor, unitQtyLabel } from "@/lib/units";
 import { useErrorSound } from "@/hooks/use-error-sound";
 import { playSound } from "@/lib/sounds";
 
@@ -40,6 +50,9 @@ type CartLine = {
   product_name: string;
   serial_number?: string;
   unit_price: number;
+  /** بند 89 — اتباع بالدستة: «5 دستة»، و`quantity` بالقطعة. */
+  unit_name?: string;
+  unit_qty?: number;
 };
 
 function NewSalePage() {
@@ -52,6 +65,7 @@ function NewSalePage() {
   const [selectedProductId, setSelectedProductId] = useState("");
   const [selectedSerialId, setSelectedSerialId] = useState("");
   const [quantity, setQuantity] = useState("1");
+  const [selectedUnitId, setSelectedUnitId] = useState(""); // بند 89 — "" = القطعة
   const [unitPriceOverride, setUnitPriceOverride] = useState("");
   const [discountPct, setDiscountPct] = useState("0");
   const [returnWindowDays, setReturnWindowDays] = useState("");
@@ -90,6 +104,19 @@ function NewSalePage() {
   const createCustomerMutation = useCreateCustomer(session?.tenant_id);
   const createProductMutation = useCreateProduct(session?.tenant_id);
   const receiveStockMutation = useReceiveStock(session?.tenant_id);
+  const features = useTenantFeatures(session?.tenant_id);
+  // بند 93 — المحجوز للعرايس مش متاح للبيع (في محل الحساب الجاري بس).
+  const reservationsOn = useTenantFeatures(session?.tenant_id).customer_accounts_enabled;
+  const { data: allReservations = [] } = useReservations(session?.tenant_id, reservationsOn);
+  const goodsEnabled = features.goods_enabled;
+  // بند 91 — نص دلوقتي والباقي في ميعاد؛ بند 92 — رأس مال واحد = البيع من غير اختيار شريك.
+  const deferredEnabled = features.deferred_cash_enabled;
+  const capitalPool = features.partners_mode === "capital_pool";
+  const [paidNow, setPaidNow] = useState("");
+  const { data: allPlans = [] } = useInstallmentPlans(session?.tenant_id);
+  const createPlanMutation = useCreateInstallmentPlan(session?.tenant_id);
+  const createContractMutation = useCreateInstallmentContract(session?.tenant_id);
+  const { data: allUnits = [] } = useProductUnits(session?.tenant_id, goodsEnabled);
 
   if (!session) return null;
   const actorUserId = session.user_id;
@@ -114,7 +141,13 @@ function NewSalePage() {
   const alreadyCartedQty = cart
     .filter((l) => l.product_id === selectedProductId)
     .reduce((sum, l) => sum + l.quantity, 0);
-  const remainingStock = stockForSelected - alreadyCartedQty;
+  const remainingStock =
+    stockForSelected -
+    alreadyCartedQty -
+    (reservationsOn && selectedProductId ? reservedQty(selectedProductId, allReservations) : 0);
+  // بند 89 — وحدات الصنف (قطعة + دستة...)؛ صنف من غير وحدات = وحدة واحدة ومفيش اختيار.
+  const unitOptions = goodsEnabled ? unitOptionsFor(selectedProduct, allUnits) : [];
+  const selectedUnit = unitOptions.find((u) => u.id === selectedUnitId);
 
   function addLine() {
     setError(null);
@@ -151,8 +184,10 @@ function NewSalePage() {
       setSelectedSerialId("");
     } else {
       const qty = Number(quantity) || 0;
-      if (qty <= 0 || qty > remainingStock) {
-        setError(`كمية غير صحيحة (متاح ${remainingStock})`);
+      const factor = selectedUnit?.factor ?? 1;
+      const pieces = qty * factor;
+      if (qty <= 0 || !Number.isInteger(pieces) || pieces > remainingStock) {
+        setError(`كمية غير صحيحة (متاح ${remainingStock}${factor > 1 ? " قطعة" : ""})`);
         return;
       }
       setCart((prev) => [
@@ -160,11 +195,13 @@ function NewSalePage() {
         {
           product_id: selectedProduct.id,
           product_name: selectedProduct.name,
-          quantity: qty,
-          unit_price: unitPrice,
+          quantity: pieces,
+          unit_price: factor > 1 ? unitPrice / factor : unitPrice,
+          ...(factor > 1 && selectedUnit && { unit_name: selectedUnit.name, unit_qty: qty }),
         },
       ]);
       setQuantity("1");
+      setSelectedUnitId("");
     }
     playSound("tap");
     setSelectedProductId("");
@@ -272,7 +309,13 @@ function NewSalePage() {
     }
   }
 
-  const subtotal = cart.reduce((sum, l) => sum + l.unit_price * l.quantity, 0);
+  // بنفس حساب السيرفر: سطر بالدستة بيتقرّب لقرش (بند 89)، والباقي زي ما هو
+  const subtotal = cart.reduce(
+    (sum, l) =>
+      sum +
+      (l.unit_name ? Math.round(l.unit_price * l.quantity * 100) / 100 : l.unit_price * l.quantity),
+    0,
+  );
   const discount = Math.round(subtotal * ((Number(discountPct) || 0) / 100) * 100) / 100;
   const total = subtotal - discount;
   const cartCost = cart.reduce((sum, l) => {
@@ -283,8 +326,77 @@ function NewSalePage() {
   const singleProductId = distinctProductIds.size === 1 ? cart[0]?.product_id : undefined;
   const activePartners = allPartners.filter((p) => p.active);
 
+  const paidNum = paidNow.trim() === "" ? null : Number(paidNow);
+  const isPartial = deferredEnabled && paidNum !== null && paidNum < total;
+  const overpaid = deferredEnabled && paidNum !== null && paidNum > total;
+
+  function cartItemsForContract() {
+    return cart.map((l) => ({
+      product_id: l.product_id,
+      quantity: l.quantity,
+      unit_price: l.unit_price,
+      ...(l.serial_id && { serial_id: l.serial_id }),
+    }));
+  }
+
+  // «قسّط الباقي»: نفس السلة والعميل، والمدفوع بيبقى المقدّم في شاشة التقسيط.
+  function handleInstallRest() {
+    if (!customerId || paidNum === null) return;
+    saveInstallmentHandoff({
+      customerId,
+      downPayment: paidNum,
+      items: cart.map((l) => ({
+        product_id: l.product_id,
+        product_name: l.product_name,
+        quantity: l.quantity,
+        unit_price: l.unit_price,
+        ...(l.serial_id && { serial_id: l.serial_id }),
+        ...(l.serial_number && { serial_number: l.serial_number }),
+      })),
+    });
+    void navigate({ to: "/sales/new-installment" });
+  }
+
+  // «الباقي يوم …»: عقد بقسط واحد 0% في اليوم ده — من غير فايدة ولا معادلة جديدة.
+  async function handlePayOnDate(date: string) {
+    setError(null);
+    if (!customerId || paidNum === null) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      setError("الباقي بميعاد محتاج نت دلوقتي — أو قسّط الباقي");
+      return;
+    }
+    try {
+      const existing = allPlans.find(
+        (p) => p.active && p.duration_months === 1 && Number(p.rate_pct) === 0,
+      );
+      const plan =
+        existing ??
+        (await createPlanMutation.mutateAsync({ durationMonths: 1, ratePct: 0, actorUserId }));
+      const result = await createContractMutation.mutateAsync({
+        input: {
+          customer_id: customerId,
+          items: cartItemsForContract(),
+          down_payment: paidNum,
+          plan_id: plan.id,
+          first_due_date: dateInputToTimestamp(date),
+        },
+        actorUserId,
+        ...(saleDate && { createdAt: dateInputToTimestamp(saleDate) }),
+      });
+      playSound("success");
+      if (result.queued) {
+        void navigate({ to: "/dashboard" });
+        return;
+      }
+      void navigate({ to: "/contracts/$id", params: { id: result.contract.id } });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "حدث خطأ");
+    }
+  }
+
   function handleConfirm() {
     setError(null);
+    if (isPartial || overpaid) return;
     createSaleMutation.mutate(
       {
         input: {
@@ -294,6 +406,7 @@ function NewSalePage() {
             quantity: l.quantity,
             unit_price: l.unit_price,
             ...(l.serial_id && { serial_id: l.serial_id }),
+            ...(l.unit_name && l.unit_qty && { unit_name: l.unit_name, unit_qty: l.unit_qty }),
           })),
           discount_pct: Number(discountPct) || 0,
           ...(returnWindowDays && { return_window_days: Number(returnWindowDays) }),
@@ -456,6 +569,7 @@ function NewSalePage() {
                 onChange={(id) => {
                   setSelectedProductId(id);
                   setSelectedSerialId("");
+                  setSelectedUnitId("");
                   const product = products.find((p) => p.id === id);
                   setUnitPriceOverride(product ? String(product.cash_price) : "");
                 }}
@@ -489,14 +603,35 @@ function NewSalePage() {
             ) : (
               <label className="block space-y-1">
                 <span className="text-xs font-medium text-foreground">الكمية</span>
-                <input
-                  type="number"
-                  min="1"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  className="form-input"
-                  dir="ltr"
-                />
+                <div className="flex gap-1">
+                  <input
+                    type="number"
+                    min="1"
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    className="form-input"
+                    dir="ltr"
+                  />
+                  {unitOptions.length > 1 && (
+                    <select
+                      value={selectedUnitId}
+                      onChange={(e) => {
+                        setSelectedUnitId(e.target.value);
+                        const u = unitOptions.find((o) => o.id === e.target.value);
+                        if (u) setUnitPriceOverride(String(u.cashPrice));
+                      }}
+                      className="form-input w-auto"
+                      aria-label="الوحدة"
+                    >
+                      {unitOptions.map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.name}
+                          {u.factor > 1 ? ` (${u.factor})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
               </label>
             )}
 
@@ -626,14 +761,17 @@ function NewSalePage() {
                   <td className="px-4 py-3 text-muted-foreground" dir="ltr">
                     {line.serial_number ?? "—"}
                   </td>
+                  <td className="px-4 py-3 text-muted-foreground">{unitQtyLabel(line)}</td>
                   <td className="px-4 py-3 text-muted-foreground" dir="ltr">
-                    {line.quantity}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground" dir="ltr">
-                    {line.unit_price.toLocaleString("ar-EG")}
+                    {(line.unit_qty
+                      ? Math.round(((line.unit_price * line.quantity) / line.unit_qty) * 100) / 100
+                      : line.unit_price
+                    ).toLocaleString("ar-EG")}
                   </td>
                   <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
-                    {(line.unit_price * line.quantity).toLocaleString("ar-EG")}
+                    {(Math.round(line.unit_price * line.quantity * 100) / 100).toLocaleString(
+                      "ar-EG",
+                    )}
                   </td>
                   <td className="px-4 py-3 text-left">
                     <button
@@ -707,7 +845,20 @@ function NewSalePage() {
           </div>
         </div>
 
-        {cart.length > 0 && activePartners.length > 0 && (
+        {cart.length > 0 && deferredEnabled && (
+          <DeferredPaymentPanel
+            total={total}
+            paidNow={paidNow}
+            onPaidNowChange={setPaidNow}
+            hasCustomer={Boolean(customerId)}
+            hasDiscount={(Number(discountPct) || 0) > 0}
+            saving={createContractMutation.isPending || createPlanMutation.isPending}
+            onInstallRest={handleInstallRest}
+            onPayOnDate={(d) => void handlePayOnDate(d)}
+          />
+        )}
+
+        {cart.length > 0 && activePartners.length > 0 && !capitalPool && (
           <PartnerDealPicker
             partners={activePartners}
             purchases={allPurchases}
@@ -725,7 +876,7 @@ function NewSalePage() {
 
         <button
           onClick={handleConfirm}
-          disabled={cart.length === 0 || createSaleMutation.isPending}
+          disabled={cart.length === 0 || createSaleMutation.isPending || isPartial || overpaid}
           className="mt-4 rounded-md bg-primary px-6 py-3 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {createSaleMutation.isPending ? "جارٍ الحفظ..." : "تأكيد البيع"}

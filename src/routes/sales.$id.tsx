@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { unitQtyLabel } from "@/lib/units";
 import { useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
@@ -249,11 +250,12 @@ function SaleReceiptPage() {
                     <td className="px-2 py-2 text-muted-foreground" dir="ltr">
                       {item.serial_number ?? "—"}
                     </td>
+                    <td className="px-2 py-2 text-muted-foreground">{unitQtyLabel(item)}</td>
                     <td className="px-2 py-2 text-muted-foreground" dir="ltr">
-                      {item.quantity}
-                    </td>
-                    <td className="px-2 py-2 text-muted-foreground" dir="ltr">
-                      {item.unit_price.toLocaleString("ar-EG")}
+                      {(item.unit_qty
+                        ? Math.round((item.line_total / item.unit_qty) * 100) / 100
+                        : item.unit_price
+                      ).toLocaleString("ar-EG")}
                     </td>
                     <td className="px-2 py-2 font-medium text-foreground" dir="ltr">
                       {item.line_total.toLocaleString("ar-EG")}

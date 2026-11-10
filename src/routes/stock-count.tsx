@@ -10,6 +10,7 @@ import {
   useProductSerials,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
+import { useTenantFeatures } from "@/hooks/use-tenant-features";
 import { useErrorSound } from "@/hooks/use-error-sound";
 import { playSound } from "@/lib/sounds";
 
@@ -25,6 +26,9 @@ function StockCountPage() {
   const [error, setError] = useState<string | null>(null);
   useErrorSound(error);
   const [savedId, setSavedId] = useState<string | null>(null);
+  // بند 90 — فلتر أجهزة/أدوات في محل الأدوات بس؛ مقفول = القايمة زي ما هي.
+  const { goods_enabled: goodsEnabled } = useTenantFeatures(session?.tenant_id);
+  const [kindFilter, setKindFilter] = useState<"all" | "device" | "goods">("all");
 
   const { data: allProducts = [] } = useProducts(session?.tenant_id);
   const { data: allSerials = [] } = useProductSerials(session?.tenant_id);
@@ -41,10 +45,14 @@ function StockCountPage() {
   // مستقلة). بحث بالاسم عشان الجرد يبقى عملي حتى لو الكتالوج كبير.
   const searchLower = search.trim().toLowerCase();
   const allActiveProducts = allProducts.filter((p) => p.active);
+  const kindProducts =
+    goodsEnabled && kindFilter !== "all"
+      ? allActiveProducts.filter((p) => (p.kind ?? "device") === kindFilter)
+      : allActiveProducts;
   const filteredProducts = (
     searchLower
-      ? allActiveProducts.filter((p) => p.name.toLowerCase().includes(searchLower))
-      : allActiveProducts
+      ? kindProducts.filter((p) => p.name.toLowerCase().includes(searchLower))
+      : kindProducts
   ).sort((a, b) => a.name.localeCompare(b.name, "ar"));
 
   function submitRow(productId: string) {
@@ -100,6 +108,31 @@ function StockCountPage() {
             placeholder="اكتب اسم الجهاز..."
           />
         </label>
+
+        {goodsEnabled && (
+          <div className="mt-3 flex gap-2">
+            {(
+              [
+                ["all", "الكل"],
+                ["device", "أجهزة"],
+                ["goods", "أدوات"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setKindFilter(value)}
+                className={
+                  kindFilter === value
+                    ? "rounded-md bg-primary px-3 py-1.5 text-sm font-bold text-primary-foreground"
+                    : "rounded-md border border-input px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent"
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
 

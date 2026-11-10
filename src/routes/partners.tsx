@@ -23,6 +23,8 @@ import {
 } from "@/lib/supabase-queries";
 import { useOwnerPasswordConfirm } from "@/hooks/use-owner-password-confirm";
 import { useRequireSession } from "@/hooks/use-session";
+import { useTenantFeatures } from "@/hooks/use-tenant-features";
+import { CapitalPoolPanel } from "@/components/CapitalPoolPanel";
 import type { Partner } from "@/types";
 
 export const Route = createFileRoute("/partners")({
@@ -47,7 +49,9 @@ const EMPTY_FORM: FormState = {
 
 function PartnersPage() {
   const session = useRequireSession();
-  const { canEditDelete } = usePermissions(session); // بند 87
+  const { canEditDelete, full: fullAccess } = usePermissions(session); // بند 87
+  // بند 92 — رأس مال واحد: كارت «فلوسنا فين؟» + توزيع الأرباح. مقفول = الصفحة زي ما هي بالحرف.
+  const capitalPool = useTenantFeatures(session?.tenant_id).partners_mode === "capital_pool";
   const [, forceRerender] = useState(0);
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -204,9 +208,18 @@ function PartnersPage() {
           )}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          شركاء تمويل بيموّلوا شراء بضاعة — لما تتباع، النظام بيسجّل نصيبهم من كل صفقة (كام اتخصم من
-          تمويلهم، وكام ربحهم) تلقائيًا.
+          {capitalPool
+            ? "فلوس الشركاء كلها رأس مال واحد للمشروع — منها بنشتري ونبيع، والأرباح بتتوزّع بنسبة رأس مال كل واحد."
+            : "شركاء تمويل بيموّلوا شراء بضاعة — لما تتباع، النظام بيسجّل نصيبهم من كل صفقة (كام اتخصم من تمويلهم، وكام ربحهم) تلقائيًا."}
         </p>
+
+        {capitalPool && (
+          <CapitalPoolPanel
+            tenantId={session.tenant_id}
+            actorUserId={actorUserId}
+            canDistribute={fullAccess}
+          />
+        )}
 
         {partners.length > 0 && (
           <section className="mt-6">

@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 
+import { unitQtyLabel } from "@/lib/units";
 import { AppSidebar } from "@/components/AppSidebar";
 import { useCurrentTenant, usePurchases } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
@@ -108,9 +109,7 @@ function PurchaseReceiptPage() {
                     <td className="py-2 text-muted-foreground" dir="ltr">
                       {item.serial_numbers.length > 0 ? item.serial_numbers.join(", ") : "—"}
                     </td>
-                    <td className="py-2 text-muted-foreground" dir="ltr">
-                      {item.quantity}
-                    </td>
+                    <td className="py-2 text-muted-foreground">{unitQtyLabel(item)}</td>
                     <td className="py-2 text-muted-foreground" dir="ltr">
                       {item.unit_cost.toLocaleString("ar-EG")}
                     </td>

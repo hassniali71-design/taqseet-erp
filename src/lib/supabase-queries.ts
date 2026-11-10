@@ -44,6 +44,10 @@ import type {
   ProductSerial,
   ProductUnit,
   UserPermissions,
+  CustomerAccount,
+  CustomerAccountEntry,
+  Reservation,
+  SalePickup,
   PromiseToPay,
   Purchase,
   PurchaseItem,
@@ -1301,9 +1305,62 @@ export interface CreateSaleInput {
   customer_id: string | null;
   /** unit_price اختياري — البائع يقدر يغيّر سعر بيع الصنف وقت البيع نفسه (بيتجاهل السعر
    * المسجّل على المنتج)، بدل ما يفضل مقفول على السعر اللي اتسجل وقت إضافة المنتج. */
-  items: Array<{ product_id: string; serial_id?: string; quantity: number; unit_price?: number }>;
+  items: Array<{
+    product_id: string;
+    serial_id?: string;
+    quantity: number;
+    unit_price?: number;
+    /** بند 89 — للعرض بس («5 دستة»)؛ `quantity` بالقطعة. */
+    unit_name?: string;
+    unit_qty?: number;
+  }>;
   discount_pct: number;
   return_window_days?: number;
+}
+
+/** بند 93 — لو الفاتورة اتعملت والخصم من رصيد العميل اترفض في آخر لحظة: الفاتورة بتتلغي والمخزون
+ * والسيريالات بترجع، عشان مايبقاش فيه بيع من غير فلوس. */
+async function performCancelSaleAfterFailedAccountUse(
+  tenantId: string,
+  sale: Sale,
+  movementDrafts: Array<{ product_id: string; quantity: number; before: number; after: number }>,
+  soldSerialIds: Set<string>,
+  actorUserId: string | null,
+) {
+  try {
+    await supabase.from("sales").update({ status: "cancelled" }).eq("id", sale.id);
+    if (movementDrafts.length > 0) {
+      await supabase.from("inventory_movements").insert(
+        movementDrafts.map((m) => ({
+          tenant_id: tenantId,
+          product_id: m.product_id,
+          type: "return",
+          quantity: -m.quantity,
+          before: m.after,
+          after: m.before,
+          user_id: actorUserId,
+          reference: sale.invoice_number,
+          reason: "إلغاء — رصيد العميل مش كفاية",
+        })),
+      );
+    }
+    if (soldSerialIds.size > 0) {
+      await supabase
+        .from("product_serials")
+        .update({ status: "available" })
+        .in("id", Array.from(soldSerialIds));
+    }
+    await insertAuditLog({
+      tenant_id: tenantId,
+      user_id: actorUserId,
+      action: "sale.cancel_failed_account_use",
+      entity: "sales",
+      entity_id: sale.id,
+      new_value: { invoice_number: sale.invoice_number },
+    });
+  } catch (e) {
+    console.warn("تعذّر إلغاء الفاتورة بعد رفض الخصم من الرصيد:", e);
+  }
 }
 
 export function useCreateSale(tenantId: string | undefined) {
@@ -1314,15 +1371,30 @@ export function useCreateSale(tenantId: string | undefined) {
       actorUserId,
       employeeDiscountLimitPct,
       createdAt,
+      fromCustomerAccount,
     }: {
       input: CreateSaleInput;
       actorUserId: string | null;
       employeeDiscountLimitPct: number;
       /** تاريخ مفتوح اختياري — لبيع قديم بيسجّله العميل دلوقتي بأثر رجعي على التقارير. */
       createdAt?: string;
+      /** بند 93 — الدفع من رصيد العميل (الحساب الجاري): الخزينة متتحركش، والقيد 2100 ← 3000.
+       * `held` = الحاجة اتسابت في المحل لحد ما تتسلّم. من غيره = البيع الكاش زي ما هو بالحرف. */
+      fromCustomerAccount?: { accountId: string; held: boolean; reservationIds?: string[] };
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
       if (input.items.length === 0) throw new Error("لازم تضيف صنف واحد على الأقل");
+      if (fromCustomerAccount && !input.customer_id) {
+        throw new Error("البيع من الرصيد لازم يكون باسم العميل");
+      }
+      let accountBalance: number | null = null;
+      if (fromCustomerAccount) {
+        const { data: bal, error: balError } = await supabase.rpc("customer_account_balance", {
+          p_account: fromCustomerAccount.accountId,
+        });
+        if (balError) throw new Error(balError.message);
+        accountBalance = Number(bal ?? 0);
+      }
       if (input.discount_pct < 0 || input.discount_pct > employeeDiscountLimitPct) {
         throw new Error(`أقصى خصم مسموح بدون اعتماد مدير هو ${employeeDiscountLimitPct}%`);
       }
@@ -1427,7 +1499,15 @@ export function useCreateSale(tenantId: string | undefined) {
             product_name: product.name,
             quantity: line.quantity,
             unit_price: unitPrice,
-            line_total: unitPrice * line.quantity,
+            // بند 89: سعر القطعة من الدستة ممكن يبقى كسر (200 ÷ 24)، فالسطر بيتقرّب لقرش.
+            line_total: line.unit_name
+              ? Math.round(unitPrice * line.quantity * 100) / 100
+              : unitPrice * line.quantity,
+            ...(line.unit_name &&
+              line.unit_qty && {
+                unit_name: line.unit_name,
+                unit_qty: line.unit_qty,
+              }),
           });
           stockTracker.set(product.id, stock - line.quantity);
           movementDrafts.push({
@@ -1442,6 +1522,9 @@ export function useCreateSale(tenantId: string | undefined) {
       const subtotal = saleItems.reduce((sum, i) => sum + i.line_total, 0);
       const discount_amount = Math.round(subtotal * (input.discount_pct / 100) * 100) / 100;
       const total = Math.round((subtotal - discount_amount) * 100) / 100;
+      if (accountBalance !== null && total > accountBalance) {
+        throw new Error(`رصيدها مش كفاية (${accountBalance} ج.م) — الفاتورة ${total} ج.م`);
+      }
       const invoice_number = await nextInvoiceNumber(tenantId);
 
       const { data: sale, error: saleError } = await supabase
@@ -1499,6 +1582,59 @@ export function useCreateSale(tenantId: string | undefined) {
         new_value: sale,
       });
 
+      if (fromCustomerAccount) {
+        // الخصم من رصيدها بقفل الحساب (ملف 0037)؛ لو الرصيد مش كفاية الفاتورة بتتلغي فورًا.
+        const { error: useError } = await supabase.rpc("customer_account_use", {
+          p_account: fromCustomerAccount.accountId,
+          p_sale: sale.id as string,
+          p_amount: total,
+          p_held: fromCustomerAccount.held,
+        });
+        if (useError) {
+          await performCancelSaleAfterFailedAccountUse(
+            tenantId,
+            sale as Sale,
+            movementDrafts,
+            soldSerialIds,
+            actorUserId,
+          );
+          throw new Error(useError.message);
+        }
+        if (fromCustomerAccount.reservationIds?.length) {
+          await supabase
+            .from("reservations")
+            .update({ status: "converted", sale_id: sale.id as string })
+            .in("id", fromCustomerAccount.reservationIds)
+            .eq("status", "active");
+        }
+        try {
+          await performPostJournalEntry(
+            tenantId,
+            [
+              {
+                account_code: "2100",
+                account_name: ACCOUNT_NAMES["2100"],
+                debit: total,
+                credit: 0,
+              },
+              {
+                account_code: "3000",
+                account_name: ACCOUNT_NAMES["3000"],
+                debit: 0,
+                credit: total,
+              },
+            ],
+            `بيع من رصيد العميل ${invoice_number}`,
+            "sale",
+            sale.id as string,
+            createdAt,
+          );
+        } catch (e) {
+          console.warn("فشل قيد البيع من الرصيد:", e instanceof Error ? e.message : e);
+        }
+        return sale as Sale;
+      }
+
       await postFinancials(
         tenantId,
         "cashier",
@@ -1525,6 +1661,8 @@ export function useCreateSale(tenantId: string | undefined) {
       void queryClient.invalidateQueries({ queryKey: ["treasury_movements", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["journal_entries", tenantId] });
       void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["customer_account_entries", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["reservations", tenantId] });
     },
   });
 }
@@ -1790,6 +1928,9 @@ export interface CreateInstallmentContractInput {
   items: Array<{ product_id: string; serial_id?: string; quantity: number; unit_price?: number }>;
   down_payment: number;
   plan_id: string;
+  /** بند 91 — «الباقي يوم …»: لخطة بقسط واحد بس، القسط يستحق في اليوم ده بدل «بعد شهر».
+   * مبيغيّرش أي مبلغ — التاريخ بس. */
+  first_due_date?: string;
 }
 
 /** تسوية الشركاء على صفقة تقسيط — نفس اللي كانت صفحة البيع بتعمله بعد العقد بالظبط، بقت هنا عشان
@@ -1932,6 +2073,12 @@ function buildInstallmentContractDraft(
   // مفتوح قديم لازم أول قسط فيه يستحق بعده بشهر من تاريخه الحقيقي، مش من تاريخ التسجيل.
   // (من غير نت: من وقت العملية على الجهاز، مش وقت وصولها للسيرفر.)
   const schedule = generateSchedule(totalAmount, plan.duration_months, scheduleStart);
+  const onlyLine = schedule[0];
+  if (input.first_due_date && schedule.length === 1 && onlyLine) {
+    const due = new Date(input.first_due_date);
+    if (Number.isNaN(due.getTime())) throw new Error("ميعاد الدفع مش صحيح");
+    onlyLine.due_date = due.toISOString();
+  }
 
   return {
     saleItems,
@@ -3613,6 +3760,9 @@ export interface CreatePurchaseInput {
     quantity: number;
     unit_cost: number;
     serial_numbers?: string[];
+    /** بند 89 — للعرض بس («5 دستة»)؛ `quantity` بالقطعة و`unit_cost` تكلفة القطعة. */
+    unit_name?: string;
+    unit_qty?: number;
   }>;
   issue_date?: string;
   return_period_days?: number;
@@ -3693,6 +3843,11 @@ export function useCreatePurchase(tenantId: string | undefined) {
           quantity: line.quantity,
           unit_cost: line.unit_cost,
           line_total: Math.round(line.unit_cost * line.quantity * 100) / 100,
+          ...(line.unit_name &&
+            line.unit_qty && {
+              unit_name: line.unit_name,
+              unit_qty: line.unit_qty,
+            }),
         });
       }
 
@@ -4451,6 +4606,104 @@ export function usePayPartnerProfit(tenantId: string | undefined) {
   });
 }
 
+/** بند 92 — «توزيع أرباح» في وضع رأس المال الواحد. لكل شريك: صف `adjustment` بمبلغه كربح
+ * (`profit_amount`) فيزوّد رصيده وأرباحه المتاحة؛ ولو «صرف»: كمان حركة خزينة `partner_profit_payout`
+ * + صف `profit_payout` (نفس اللي usePayPartnerProfit بيعمله بالظبط، الاتنين من 0019). مفيش نوع
+ * حركة ولا جدول جديد. */
+export function useDistributePartnerProfit(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      shares,
+      periodLabel,
+      payoutAccountId,
+      actorUserId,
+    }: {
+      shares: Array<{ partnerId: string; amount: number }>;
+      periodLabel: string;
+      /** خزينة الصرف — من غيرها = ترحيل لرصيدهم بس من غير كاش. */
+      payoutAccountId?: string;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const valid = shares
+        .map((s) => ({ ...s, amount: Math.round(s.amount * 100) / 100 }))
+        .filter((s) => s.amount > 0);
+      if (valid.length === 0) throw new Error("مفيش مبلغ للتوزيع");
+      const reason = `توزيع أرباح ${periodLabel}`;
+      if (payoutAccountId) {
+        const total = Math.round(valid.reduce((sum, s) => sum + s.amount, 0) * 100) / 100;
+        const { data: movements, error: mErr } = await fetchAll(
+          supabase
+            .from("treasury_movements")
+            .select("amount")
+            .eq("tenant_id", tenantId)
+            .eq("account_id", payoutAccountId),
+        );
+        if (mErr) throw new Error(mErr.message);
+        const balance = (movements ?? []).reduce((sum, m) => sum + (m.amount as number), 0);
+        if (total > Math.round(balance * 100) / 100) {
+          throw new Error(`رصيد الخزينة مش كفاية للصرف (${Math.round(balance * 100) / 100} ج.م)`);
+        }
+      }
+      for (const share of valid) {
+        const { error } = await supabase.from("partner_transactions").insert({
+          tenant_id: tenantId,
+          partner_id: share.partnerId,
+          type: "adjustment",
+          amount: share.amount,
+          profit_amount: share.amount,
+          cost_recovered: 0,
+          user_id: actorUserId,
+          reference: "توزيع أرباح",
+          reason,
+        });
+        if (error) throw new Error(error.message);
+        if (payoutAccountId) {
+          await performPostTreasuryMovement(
+            tenantId,
+            payoutAccountId,
+            -share.amount,
+            "partner_profit_payout",
+            actorUserId,
+            "صرف أرباح لشريك",
+            reason,
+          );
+          const { error: payErr } = await supabase.from("partner_transactions").insert({
+            tenant_id: tenantId,
+            partner_id: share.partnerId,
+            type: "profit_payout",
+            amount: -share.amount,
+            user_id: actorUserId,
+            reason,
+          });
+          if (payErr) throw new Error(payErr.message);
+        }
+      }
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: actorUserId,
+        action: payoutAccountId
+          ? "partner.profit_distribution_paid"
+          : "partner.profit_distribution_credited",
+        entity: "partner_transactions",
+        entity_id: null,
+        new_value: {
+          period: periodLabel,
+          shares: valid,
+          payout_account_id: payoutAccountId ?? null,
+        },
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["partner_transactions", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["treasury_accounts", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["treasury_movements", tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["audit-logs", tenantId] });
+    },
+  });
+}
+
 /** سحب مبلغ من رصيد الشريك المتاح (تمويل لسه متاح + أرباح مستحقة) — تسجيل صف `withdrawal`
  * بمبلغ سالب، زي useRecordSupplierPayment بالظبط (تحقق من الرصيد قبل السماح بالسحب). */
 export function useWithdrawPartnerFunds(tenantId: string | undefined) {
@@ -4529,6 +4782,7 @@ const ACCOUNT_NAMES: Record<AccountCode, string> = {
   "1100": "عملاء (ذمم مدينة)",
   "1200": "المخزون",
   "2000": "موردون (ذمم دائنة)",
+  "2100": "عربون عملاء (أمانة)",
   "3000": "إيرادات المبيعات",
   "3100": "إيرادات التمويل",
   "5000": "المصروفات",
@@ -6000,4 +6254,276 @@ export async function fetchWarrantyInfo(
     }
   }
   return results.sort((a, b) => b.sold_at.localeCompare(a.sold_at));
+}
+
+// ===================================================================================
+// بند 93 — الحساب الجاري / جهاز العروسة (ملف 0037). كله بيشتغل بس لو customer_accounts_enabled.
+// ===================================================================================
+
+export function useCustomerAccounts(tenantId: string | undefined, enabled = true) {
+  return useTenantList<CustomerAccount>("customer_accounts", enabled ? tenantId : undefined);
+}
+export function useCustomerAccountEntries(tenantId: string | undefined, enabled = true) {
+  return useTenantList<CustomerAccountEntry>(
+    "customer_account_entries",
+    enabled ? tenantId : undefined,
+    {
+      orderBy: "created_at",
+      ascending: false,
+    },
+  );
+}
+export function useReservations(tenantId: string | undefined, enabled = true) {
+  return useTenantList<Reservation>("reservations", enabled ? tenantId : undefined, {
+    orderBy: "created_at",
+    ascending: false,
+  });
+}
+export function useSalePickups(tenantId: string | undefined, enabled = true) {
+  return useTenantList<SalePickup>("sale_pickups", enabled ? tenantId : undefined);
+}
+
+function invalidateCustomerAccounts(
+  queryClient: ReturnType<typeof useQueryClient>,
+  tenantId?: string,
+) {
+  for (const key of [
+    "customer_accounts",
+    "customer_account_entries",
+    "reservations",
+    "sale_pickups",
+    "treasury_movements",
+    "journal_entries",
+    "audit-logs",
+  ]) {
+    void queryClient.invalidateQueries({ queryKey: [key, tenantId] });
+  }
+}
+
+const notReady = (e: { code?: string; message: string }) =>
+  e.code === "PGRST202" ||
+  e.code === "42P01" ||
+  (/customer_account/.test(e.message) && /does not exist|schema cache/.test(e.message))
+    ? new Error("الحساب الجاري لسه مش جاهز على القاعدة (ملف 0037)")
+    : new Error(e.message);
+
+export function useOpenCustomerAccount(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      customerId: string;
+      kind: CustomerAccount["kind"];
+      occasionDate?: string;
+      notes?: string;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data, error } = await supabase
+        .from("customer_accounts")
+        .insert({
+          tenant_id: tenantId,
+          customer_id: vars.customerId,
+          kind: vars.kind,
+          ...(vars.occasionDate && { occasion_date: vars.occasionDate }),
+          ...(vars.notes?.trim() && { notes: vars.notes.trim() }),
+        })
+        .select()
+        .single();
+      if (error) throw notReady(error);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: vars.actorUserId,
+        action: "customer_account.open",
+        entity: "customer_accounts",
+        entity_id: data.id as string,
+        new_value: data,
+      });
+      return data as CustomerAccount;
+    },
+    onSuccess: () => invalidateCustomerAccounts(queryClient, tenantId),
+  });
+}
+
+export function useUpdateCustomerAccount(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      accountId: string;
+      patch: Partial<Pick<CustomerAccount, "kind" | "occasion_date" | "notes" | "status">>;
+    }) => {
+      const { error } = await supabase
+        .from("customer_accounts")
+        .update(vars.patch)
+        .eq("id", vars.accountId);
+      if (error) throw notReady(error);
+    },
+    onSuccess: () => invalidateCustomerAccounts(queryClient, tenantId),
+  });
+}
+
+/** عربون (deposit) أو رد فلوس (refund): الدفتر والخزينة في عملية واحدة على السيرفر، وبعدها القيد
+ * (عربون: 1000 ← 2100؛ رد: 2100 ← 1000) — القيود اللي وافق عليها المالك. */
+export function useCustomerAccountCash(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      accountId: string;
+      type: "deposit" | "refund";
+      amount: number;
+      treasuryAccountId: string;
+      reason?: string;
+      customerName: string;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const amount = Math.round(vars.amount * 100) / 100;
+      if (!(amount > 0)) throw new Error("اكتب المبلغ");
+      const { data, error } = await supabase.rpc("customer_account_cash", {
+        p_account: vars.accountId,
+        p_type: vars.type,
+        p_amount: amount,
+        p_treasury_account: vars.treasuryAccountId,
+        p_reason: vars.reason ?? null,
+      });
+      if (error) throw notReady(error);
+      const entry = (data as { entry: CustomerAccountEntry }).entry;
+      const cash = { account_code: "1000" as const, account_name: ACCOUNT_NAMES["1000"] };
+      const held = { account_code: "2100" as const, account_name: ACCOUNT_NAMES["2100"] };
+      try {
+        await performPostJournalEntry(
+          tenantId,
+          vars.type === "deposit"
+            ? [
+                { ...cash, debit: amount, credit: 0 },
+                { ...held, debit: 0, credit: amount },
+              ]
+            : [
+                { ...held, debit: amount, credit: 0 },
+                { ...cash, debit: 0, credit: amount },
+              ],
+          vars.type === "deposit"
+            ? `عربون من ${vars.customerName}`
+            : `رد فلوس لـ${vars.customerName}`,
+          "customer_account",
+          entry.id,
+        );
+      } catch (e) {
+        console.warn("فشل قيد الحساب الجاري:", e instanceof Error ? e.message : e);
+      }
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: vars.actorUserId,
+        action: `customer_account.${vars.type}`,
+        entity: "customer_account_entries",
+        entity_id: entry.id,
+        new_value: entry,
+      });
+      return entry;
+    },
+    onSuccess: () => invalidateCustomerAccounts(queryClient, tenantId),
+  });
+}
+
+export function useCreateReservation(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      accountId: string;
+      productId: string;
+      quantity: number;
+      unitPrice: number;
+      note?: string;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (!Number.isInteger(vars.quantity) || vars.quantity <= 0) throw new Error("كمية غير صحيحة");
+      const { data, error } = await supabase
+        .from("reservations")
+        .insert({
+          tenant_id: tenantId,
+          account_id: vars.accountId,
+          product_id: vars.productId,
+          quantity: vars.quantity,
+          unit_price: vars.unitPrice,
+          user_id: vars.actorUserId,
+          ...(vars.note?.trim() && { note: vars.note.trim() }),
+        })
+        .select()
+        .single();
+      if (error) throw notReady(error);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: vars.actorUserId,
+        action: "reservation.create",
+        entity: "reservations",
+        entity_id: data.id as string,
+        new_value: data,
+      });
+      return data as Reservation;
+    },
+    onSuccess: () => invalidateCustomerAccounts(queryClient, tenantId),
+  });
+}
+
+export function useCancelReservation(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { reservationId: string; actorUserId: string | null }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const { data, error } = await supabase
+        .from("reservations")
+        .update({ status: "cancelled" })
+        .eq("id", vars.reservationId)
+        .eq("status", "active")
+        .select("id");
+      if (error) throw notReady(error);
+      if (!data || data.length === 0) throw new Error("الحجز ده مش نشط");
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: vars.actorUserId,
+        action: "reservation.cancel",
+        entity: "reservations",
+        entity_id: vars.reservationId,
+        new_value: { status: "cancelled" },
+      });
+    },
+    onSuccess: () => invalidateCustomerAccounts(queryClient, tenantId),
+  });
+}
+
+export function useRecordPickups(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      accountId: string;
+      lines: Array<{ saleId: string; productId: string; quantity: number }>;
+      receivedBy?: string;
+      actorUserId: string | null;
+    }) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      const lines = vars.lines.filter((l) => l.quantity > 0);
+      if (lines.length === 0) throw new Error("اختار اللي اتسلّم");
+      const { error } = await supabase.from("sale_pickups").insert(
+        lines.map((l) => ({
+          tenant_id: tenantId,
+          account_id: vars.accountId,
+          sale_id: l.saleId,
+          product_id: l.productId,
+          quantity: l.quantity,
+          user_id: vars.actorUserId,
+          ...(vars.receivedBy?.trim() && { received_by: vars.receivedBy.trim() }),
+        })),
+      );
+      if (error) throw notReady(error);
+      await insertAuditLog({
+        tenant_id: tenantId,
+        user_id: vars.actorUserId,
+        action: "customer_account.pickup",
+        entity: "sale_pickups",
+        entity_id: null,
+        new_value: { account_id: vars.accountId, lines, received_by: vars.receivedBy ?? null },
+      });
+    },
+    onSuccess: () => invalidateCustomerAccounts(queryClient, tenantId),
+  });
 }

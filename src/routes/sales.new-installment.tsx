@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { reservedQty } from "@/lib/customer-account";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -27,8 +28,11 @@ import {
   useProducts,
   usePurchases,
   useReceiveStock,
+  useReservations,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
+import { useTenantFeatures } from "@/hooks/use-tenant-features";
+import { takeInstallmentHandoff } from "@/lib/sale-handoff";
 import { useErrorSound } from "@/hooks/use-error-sound";
 import { playSound } from "@/lib/sounds";
 import { newOperationId, useOutbox } from "@/lib/outbox";
@@ -87,6 +91,20 @@ function NewInstallmentSalePage() {
   const [newProductError, setNewProductError] = useState<string | null>(null);
 
   useEffect(() => subscribeData(() => forceRerender((n) => n + 1)), []);
+  // بند 91 — جاي من «قسّط الباقي» في البيع الكاش: نفس السلة والعميل، والمدفوع = المقدّم.
+  useEffect(() => {
+    const h = takeInstallmentHandoff();
+    if (!h) return;
+    setCustomerId(h.customerId);
+    setCart(h.items);
+    setDownPayment(String(h.downPayment));
+    toast.info("السلة والمدفوع جايين من البيع الكاش — اختار الخطة وأكّد");
+  }, []);
+  // بند 92 — رأس مال واحد: مفيش اختيار شريك للصفقة.
+  const capitalPool = useTenantFeatures(session?.tenant_id).partners_mode === "capital_pool";
+  // بند 93 — المحجوز للعرايس مش متاح للبيع (في محل الحساب الجاري بس).
+  const reservationsOn = useTenantFeatures(session?.tenant_id).customer_accounts_enabled;
+  const { data: allReservations = [] } = useReservations(session?.tenant_id, reservationsOn);
 
   const { data: settingsData } = useCurrentTenantSettings(session?.tenant_id);
   const { data: allCustomers = [] } = useCustomers(session?.tenant_id);
@@ -161,7 +179,10 @@ function NewInstallmentSalePage() {
   const alreadyCartedQty = cart
     .filter((l) => l.product_id === selectedProductId)
     .reduce((sum, l) => sum + l.quantity, 0);
-  const remainingStock = stockForSelected - alreadyCartedQty;
+  const remainingStock =
+    stockForSelected -
+    alreadyCartedQty -
+    (reservationsOn && selectedProductId ? reservedQty(selectedProductId, allReservations) : 0);
 
   function addLine() {
     setError(null);
@@ -912,7 +933,7 @@ function NewInstallmentSalePage() {
           </div>
         )}
 
-        {cart.length > 0 && activePartners.length > 0 && (
+        {cart.length > 0 && activePartners.length > 0 && !capitalPool && (
           <PartnerDealPicker
             partners={activePartners}
             purchases={allPurchases}

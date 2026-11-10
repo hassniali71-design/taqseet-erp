@@ -323,6 +323,9 @@ export interface SaleItem {
   quantity: number;
   unit_price: number;
   line_total: number;
+  /** بند 89 — اتباع بوحدة أكبر: «5 دستة». `quantity` دايمًا بالقطعة. */
+  unit_name?: string;
+  unit_qty?: number;
 }
 
 export interface Sale {
@@ -499,6 +502,9 @@ export interface PurchaseItem {
   quantity: number;
   unit_cost: number;
   line_total: number;
+  /** بند 89 — اتشرى بوحدة أكبر: «5 دستة». `quantity` دايمًا بالقطعة. */
+  unit_name?: string;
+  unit_qty?: number;
 }
 
 export interface Purchase {
@@ -615,7 +621,9 @@ export interface TreasuryMovement {
     | "return"
     | "exchange"
     | "transfer"
-    | "partner_profit_payout";
+    | "partner_profit_payout"
+    | "customer_deposit"
+    | "customer_refund";
   /** Signed — positive increases the account's balance, negative decreases it. */
   amount: number;
   before: number;
@@ -685,7 +693,8 @@ export interface Expense {
  * touching debits/credits directly. Product-Profit vs Financing-Revenue separation (§75) is why
  * `3100` exists apart from `3000`.
  */
-export type AccountCode = "1000" | "1100" | "1200" | "2000" | "3000" | "3100" | "5000";
+/** 2100 = «عربون عملاء (أمانة)» — بند 93، بيستخدمه الحساب الجاري بس. */
+export type AccountCode = "1000" | "1100" | "1200" | "2000" | "2100" | "3000" | "3100" | "5000";
 
 export interface JournalLine {
   account_code: AccountCode;
@@ -771,5 +780,57 @@ export interface DeliveryOrder {
   status: "scheduled" | "out_for_delivery" | "delivered";
   delivered_at?: string;
   user_id: string | null;
+  created_at: string;
+}
+
+/** بند 93 (ملف 0037) — الحساب الجاري / جهاز العروسة. واحد لكل عميل. */
+export interface CustomerAccount {
+  id: string;
+  tenant_id: string;
+  customer_id: string;
+  kind: "general" | "bride";
+  occasion_date: string | null;
+  notes: string | null;
+  status: "open" | "closed";
+  created_at: string;
+}
+
+/** دفتر الحساب (append-only): الرصيد = deposit − use − refund. */
+export interface CustomerAccountEntry {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  type: "deposit" | "use" | "refund";
+  amount: number;
+  sale_id: string | null;
+  /** بيع اتعمل من الرصيد والحاجة لسه في المحل. */
+  held: boolean;
+  treasury_account_id: string | null;
+  reason: string | null;
+  user_id: string | null;
+  created_at: string;
+}
+
+export interface Reservation {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  product_id: string;
+  quantity: number;
+  unit_price: number;
+  status: "active" | "converted" | "cancelled";
+  sale_id: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+export interface SalePickup {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  sale_id: string;
+  product_id: string;
+  quantity: number;
+  received_by: string | null;
   created_at: string;
 }

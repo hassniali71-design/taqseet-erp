@@ -41,6 +41,8 @@ const MOVEMENT_TYPE_LABELS: Record<TreasuryMovement["type"], string> = {
   exchange: "استبدال",
   transfer: "تحويل بين خزائن (تسليم وردية)",
   partner_profit_payout: "صرف أرباح لشريك",
+  customer_deposit: "عربون عميل (أمانة)",
+  customer_refund: "رد فلوس عميل",
 };
 
 function isToday(isoDate: string): boolean {

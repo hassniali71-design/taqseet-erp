@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useTenantFeatures } from "@/hooks/use-tenant-features";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
@@ -17,6 +18,7 @@ const CHART_OF_ACCOUNTS: Array<{ code: AccountCode; name: string; kind: string }
   { code: "1100", name: "عملاء (ذمم مدينة)", kind: "أصل" },
   { code: "1200", name: "المخزون", kind: "أصل" },
   { code: "2000", name: "موردون (ذمم دائنة)", kind: "التزام" },
+  { code: "2100", name: "عربون عملاء (أمانة)", kind: "التزام" },
   { code: "3000", name: "إيرادات المبيعات", kind: "إيراد" },
   { code: "3100", name: "إيرادات التمويل", kind: "إيراد" },
   { code: "5000", name: "المصروفات", kind: "مصروف" },
@@ -24,6 +26,8 @@ const CHART_OF_ACCOUNTS: Array<{ code: AccountCode; name: string; kind: string }
 
 function AccountingPage() {
   const session = useRequireSession();
+  // بند 93 — حساب العربون بيظهر بس في المحل اللي فيه الحساب الجاري (مقفول = الشجرة زي ما هي).
+  const customerAccountsOn = useTenantFeatures(session?.tenant_id).customer_accounts_enabled;
   const [, forceRerender] = useState(0);
   const [search, setSearch] = useState("");
 
@@ -57,15 +61,17 @@ function AccountingPage() {
                 </tr>
               </thead>
               <tbody>
-                {CHART_OF_ACCOUNTS.map((acc) => (
-                  <tr key={acc.code} className="border-b border-border last:border-0">
-                    <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
-                      {acc.code}
-                    </td>
-                    <td className="px-4 py-3 text-foreground">{acc.name}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{acc.kind}</td>
-                  </tr>
-                ))}
+                {CHART_OF_ACCOUNTS.filter((a) => a.code !== "2100" || customerAccountsOn).map(
+                  (acc) => (
+                    <tr key={acc.code} className="border-b border-border last:border-0">
+                      <td className="px-4 py-3 font-medium text-foreground" dir="ltr">
+                        {acc.code}
+                      </td>
+                      <td className="px-4 py-3 text-foreground">{acc.name}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{acc.kind}</td>
+                    </tr>
+                  ),
+                )}
               </tbody>
             </table>
           </div>
