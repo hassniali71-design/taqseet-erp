@@ -2,8 +2,11 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
+import { toast } from "sonner";
+
 import { AppSidebar } from "@/components/AppSidebar";
 import { GoodsProductForm } from "@/components/GoodsProductForm";
+import { GoodsSheetImport } from "@/components/GoodsSheetImport";
 import { useTenantFeatures } from "@/hooks/use-tenant-features";
 import { playSound } from "@/lib/sounds";
 import { subscribeData } from "@/lib/data-store";
@@ -98,6 +101,7 @@ function ProductsPage() {
   const { data: tenantSettings } = useCurrentTenantSettings(session?.tenant_id);
   const createGoodsMutation = useCreateGoodsProducts(session?.tenant_id);
   const [goodsFormOpen, setGoodsFormOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false); // بند 88 — رفع شيت إكسيل
   const [kindFilter, setKindFilter] = useState<"all" | "device" | "goods">("all");
 
   if (!session) return null;
@@ -261,8 +265,8 @@ function ProductsPage() {
           )}
         </div>
 
-        {goodsEnabled && editingId === null && !goodsFormOpen && (
-          <div className="mt-4 grid grid-cols-2 gap-3">
+        {goodsEnabled && editingId === null && !goodsFormOpen && !sheetOpen && (
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
             <button
               type="button"
               onClick={startCreate}
@@ -277,7 +281,36 @@ function ProductsPage() {
             >
               🍽️ أدوات منزلية
             </button>
+            <button
+              type="button"
+              onClick={() => setSheetOpen(true)}
+              className="col-span-2 rounded-xl border-2 border-border bg-card p-4 text-center text-base font-bold text-foreground hover:border-primary sm:col-span-1"
+            >
+              📄 ارفع شيت إكسيل
+            </button>
           </div>
+        )}
+
+        {goodsEnabled && sheetOpen && (
+          <GoodsSheetImport
+            existingNames={products.map((p) => p.name)}
+            saving={createGoodsMutation.isPending}
+            onCancel={() => setSheetOpen(false)}
+            onSave={(items) =>
+              createGoodsMutation.mutate(items, {
+                onSuccess: () => {
+                  playSound("done");
+                  toast.success(`اتسجّل ${items.length} صنف`);
+                  setSheetOpen(false);
+                  setKindFilter("goods");
+                },
+                onError: (e) => {
+                  playSound("error");
+                  toast.error(e.message);
+                },
+              })
+            }
+          />
         )}
 
         {goodsEnabled && goodsFormOpen && (
