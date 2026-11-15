@@ -229,3 +229,21 @@ export async function lastLocalSave(tenantId: string): Promise<number | null> {
   }
   return best;
 }
+
+/** بند 94–96 — صف اتعمل من غير نت (صنف/عميل/حركة رصيد) بيتحط في نسخة الجهاز بنفس الرقم اللي هيتسجّل
+ * بيه على السيرفر، فبيظهر في القوايم على طول، ولما النت يرجع الصف الحقيقي بيحل محله (الدمج بالـid). */
+export async function putLocalRows(tenantId: string, table: string, rows: Row[]) {
+  const key = snapshotKey(tenantId, table);
+  const snap = await localGet<Snapshot<Row>>(key);
+  if (!snap) return;
+  const ids = new Set(rows.map((r) => r.id));
+  await localSet(key, { ...snap, rows: [...rows, ...snap.rows.filter((r) => !ids.has(r.id))] });
+}
+
+export async function dropLocalRows(tenantId: string, table: string, ids: string[]) {
+  const key = snapshotKey(tenantId, table);
+  const snap = await localGet<Snapshot<Row>>(key);
+  if (!snap) return;
+  const drop = new Set(ids);
+  await localSet(key, { ...snap, rows: snap.rows.filter((r) => !drop.has(r.id)) });
+}

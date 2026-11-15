@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { getSession } from "@/lib/data-store";
 import { PushBanner } from "@/components/PushNotifications";
 import { outboxRemove, useOutbox, type OutboxEntry } from "@/lib/outbox";
+import { dropOfflineRows } from "@/lib/supabase-queries";
 import { applyUpdate, useOnline, useUpdateAvailable } from "@/lib/pwa";
 import { lastLocalSave } from "@/lib/table-sync";
 
@@ -56,6 +57,7 @@ export function AppStatusBar() {
             onClick={() => {
               if (tenantId && window.confirm(`إلغاء العملية دي نهائيًا؟\n${describe(e)}`)) {
                 void outboxRemove(tenantId, e.id);
+                void dropOfflineRows(e);
               }
             }}
             className="mt-2 rounded-md bg-white px-3 py-1 text-xs font-bold text-destructive hover:opacity-90"
@@ -110,6 +112,11 @@ export function AppStatusBar() {
 function describe(e: OutboxEntry): string {
   if (e.kind === "collect") {
     return `تحصيل ${e.amount.toLocaleString("ar-EG")} ج.م${e.contractNumber ? ` لعقد ${e.contractNumber}` : ""}${e.customerName ? ` (${e.customerName})` : ""}`;
+  }
+  if (e.kind === "product") return `صنف جديد: ${String(e.product["name"] ?? "")}`;
+  if (e.kind === "customer") return `عميل جديد: ${String(e.customer["name"] ?? "")}`;
+  if (e.kind === "sale") {
+    return `فاتورة كاش مؤقتة${e.customerName ? ` لـ${e.customerName}` : ""} — ${e.total.toLocaleString("ar-EG")} ج.م`;
   }
   return `عقد مؤقت لـ${e.customerName} — إجمالي ${e.totalAmount.toLocaleString("ar-EG")} ج.م`;
 }

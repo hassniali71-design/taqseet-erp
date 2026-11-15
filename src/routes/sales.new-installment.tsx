@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { reservedQty } from "@/lib/customer-account";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -29,13 +30,15 @@ import {
   usePurchases,
   useReceiveStock,
   useReservations,
+  isOfflineNow,
+  queueOfflineProduct,
 } from "@/lib/supabase-queries";
 import { useRequireSession } from "@/hooks/use-session";
 import { useTenantFeatures } from "@/hooks/use-tenant-features";
 import { takeInstallmentHandoff } from "@/lib/sale-handoff";
 import { useErrorSound } from "@/hooks/use-error-sound";
 import { playSound } from "@/lib/sounds";
-import { newOperationId, useOutbox } from "@/lib/outbox";
+import { newOperationId, pendingStockEffects, useOutbox } from "@/lib/outbox";
 import type { OfflineNewCustomer } from "@/lib/supabase-queries";
 
 export const Route = createFileRoute("/sales/new-installment")({
@@ -54,6 +57,7 @@ type CartLine = {
 
 function NewInstallmentSalePage() {
   const session = useRequireSession();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [, forceRerender] = useState(0);
   const [customerId, setCustomerId] = useState("");
@@ -156,15 +160,9 @@ function NewInstallmentSalePage() {
     : [];
   const cartedSerialIds = new Set(cart.map((l) => l.serial_id).filter(Boolean));
   // سيريالات اتباعت في عقود مؤقتة لسه مستنية النت (بند 80) — متتعرضش تاني.
-  const queuedSerialIds = new Set(
-    outbox.flatMap((e) =>
-      e.kind === "contract"
-        ? ((e.payload.contract["items"] as Array<{ serial_id?: string }> | undefined) ?? [])
-            .map((i) => i.serial_id)
-            .filter(Boolean)
-        : [],
-    ),
-  );
+  // (بند 95: والفواتير الكاش المستنية كمان.)
+  const pendingFx = pendingStockEffects(outbox);
+  const queuedSerialIds = pendingFx.serialIds;
   const usableSerials = availableSerials.filter(
     (s) => !cartedSerialIds.has(s.id) && !queuedSerialIds.has(s.id),
   );
@@ -181,7 +179,10 @@ function NewInstallmentSalePage() {
     .reduce((sum, l) => sum + l.quantity, 0);
   const remainingStock =
     stockForSelected -
-    alreadyCartedQty -
+    alreadyCartedQty +
+    pendingFx.movements
+      .filter((m) => m.product_id === selectedProductId)
+      .reduce((sum, m) => sum + m.quantity, 0) -
     (reservationsOn && selectedProductId ? reservedQty(selectedProductId, allReservations) : 0);
 
   function addLine() {
@@ -316,10 +317,6 @@ function NewInstallmentSalePage() {
       setNewProductError("أدخل كمية صحيحة");
       return;
     }
-    if (isOffline()) {
-      setNewProductError("إضافة جهاز جديد للمخزن محتاجة نت — اختار جهاز موجود أو استنى النت");
-      return;
-    }
     const cost = Number(newProductCost);
     if (!newProductCost || cost <= 0) {
       setNewProductError(
@@ -327,27 +324,44 @@ function NewInstallmentSalePage() {
       );
       return;
     }
+    const newProductInput = {
+      name: newProductName.trim(),
+      unit: "قطعة",
+      cost_price: cost,
+      cash_price: price,
+      installment_price: price,
+      min_stock: 0,
+      max_stock: 0,
+      serial_required: false,
+    };
     try {
-      const product = await createProductMutation.mutateAsync({
-        input: {
-          name: newProductName.trim(),
-          unit: "قطعة",
-          cost_price: cost,
-          cash_price: price,
-          installment_price: price,
-          min_stock: 0,
-          max_stock: 0,
-          serial_required: false,
-        },
-        actorUserId,
-      });
-      await receiveStockMutation.mutateAsync({
-        product,
-        quantity: qty,
-        serialNumbers: undefined,
-        actorUserId,
-        reference: "إضافة سريعة وقت البيع",
-      });
+      let product;
+      if (isOfflineNow() && session) {
+        // بند 94 — من غير نت: الصنف ورصيده بيتحفظوا على الجهاز ويتبعتوا قبل الفاتورة.
+        product = await queueOfflineProduct(
+          session.tenant_id,
+          actorUserId,
+          newProductInput,
+          qty,
+          "إضافة سريعة وقت البيع",
+        );
+        await queryClient.invalidateQueries({ queryKey: ["products", session.tenant_id] });
+        await queryClient.invalidateQueries({
+          queryKey: ["inventory_movements", session.tenant_id],
+        });
+      } else {
+        product = await createProductMutation.mutateAsync({
+          input: newProductInput,
+          actorUserId,
+        });
+        await receiveStockMutation.mutateAsync({
+          product,
+          quantity: qty,
+          serialNumbers: undefined,
+          actorUserId,
+          reference: "إضافة سريعة وقت البيع",
+        });
+      }
       setSelectedProductId(product.id);
       setUnitPriceOverride(String(price));
       setQuantity(String(qty));

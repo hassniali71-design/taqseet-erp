@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { toast } from "sonner";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -12,6 +13,7 @@ import {
   computeCustomerRiskAssessment,
   dateInputToTimestamp,
   useCreateCustomer,
+  isOfflineNow,
   useCurrentTenantSettings,
   useCustomers,
   useInstallmentContracts,
@@ -107,11 +109,22 @@ function CustomersPage() {
     };
     const ledgerBook = form.ledger_book.trim();
     if (editingId === "new") {
-      createCustomerMutation.mutate({
-        input: { ...payload, ...(ledgerBook && { ledger_book: ledgerBook }) },
-        actorUserId,
-        ...(form.join_date && { createdAt: dateInputToTimestamp(form.join_date) }),
-      });
+      createCustomerMutation.mutate(
+        {
+          input: { ...payload, ...(ledgerBook && { ledger_book: ledgerBook }) },
+          actorUserId,
+          ...(form.join_date && { createdAt: dateInputToTimestamp(form.join_date) }),
+        },
+        {
+          onSuccess: () => {
+            // بند 96 — من غير نت: العميل اتحفظ على الجهاز وبيظهر في القايمة، وكوده بييجي مع النت.
+            if (isOfflineNow()) {
+              toast.success("العميل اتحفظ على الجهاز — هيتسجّل وياخد كوده أول ما النت يرجع");
+            }
+          },
+          onError: (e) => toast.error(e instanceof Error ? e.message : "حدث خطأ"),
+        },
+      );
     } else if (editingId) {
       // null صريح عشان مسح الدفتر من التعديل يتحفظ فعلًا (مش يتجاهل).
       updateCustomerMutation.mutate({

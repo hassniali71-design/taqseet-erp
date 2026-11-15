@@ -48,7 +48,52 @@ export type QueuedContract = {
   partners: unknown;
 };
 
-export type QueuedOp = QueuedCollect | QueuedContract;
+/** بند 94 — صنف جديد اتعمل من جوه الفاتورة والنت فاصل: بيتبعت قبل الفاتورة اللي عليه (الترتيب). */
+export type QueuedProduct = {
+  kind: "product";
+  /** = رقم الصنف (id) نفسه — اتولّد على الجهاز. */
+  id: string;
+  tenantId: string;
+  at: string;
+  actorUserId: string | null;
+  product: Record<string, unknown>;
+  openingQty: number;
+  /** رقم حركة الرصيد الافتتاحي — ثابت عشان متتسجّلش مرتين. */
+  movementId: string;
+  reference: string;
+};
+
+/** بند 96 — عميل جديد من صفحة العملاء والنت فاصل. */
+export type QueuedCustomer = {
+  kind: "customer";
+  id: string;
+  tenantId: string;
+  at: string;
+  actorUserId: string | null;
+  customer: Record<string, unknown>;
+  createdAt?: string;
+};
+
+/** بند 95 — بيع كاش والنت فاصل: بيتعمل على السيرفر بنفس دالة البيع لما النت يرجع. */
+export type QueuedSale = {
+  kind: "sale";
+  /** = رقم الفاتورة (id) نفسه. */
+  id: string;
+  tenantId: string;
+  at: string;
+  actorUserId: string | null;
+  customerName: string;
+  total: number;
+  input: Record<string, unknown> & {
+    items: Array<{ product_id: string; serial_id?: string; quantity: number }>;
+  };
+  employeeDiscountLimitPct: number;
+  createdAt?: string;
+  /** تسوية الشركاء (لو اتختار شريك) — بتحصل بعد ما الفاتورة توصل. */
+  partners: unknown;
+};
+
+export type QueuedOp = QueuedCollect | QueuedContract | QueuedProduct | QueuedCustomer | QueuedSale;
 
 export type OutboxEntry = QueuedOp & {
   status: "pending" | "rejected" | "waiting_update";
@@ -227,4 +272,29 @@ export function pendingCollectedFor(entries: OutboxEntry[], contractId: string):
         .reduce((sum, e) => sum + (e.kind === "collect" ? e.amount : 0), 0) * 100,
     ) / 100
   );
+}
+
+/** اللي العمليات المستنية حجزته من المخزن (عقود وفواتير كاش لسه موصلتش) — عشان منبيعوش تاني على نفس
+ * الجهاز. المرفوضة مش محسوبة. */
+export function pendingStockEffects(entries: OutboxEntry[]): {
+  serialIds: Set<string>;
+  movements: Array<{ product_id: string; quantity: number }>;
+} {
+  const serialIds = new Set<string>();
+  const movements: Array<{ product_id: string; quantity: number }> = [];
+  for (const e of entries) {
+    if (e.status === "rejected") continue;
+    const items =
+      e.kind === "contract"
+        ? ((e.payload.contract["items"] as
+            Array<{ product_id: string; serial_id?: string; quantity: number }> | undefined) ?? [])
+        : e.kind === "sale"
+          ? e.input.items
+          : [];
+    for (const i of items) {
+      if (i.serial_id) serialIds.add(i.serial_id);
+      else movements.push({ product_id: i.product_id, quantity: -i.quantity });
+    }
+  }
+  return { serialIds, movements };
 }

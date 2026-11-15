@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { reservedQty } from "@/lib/customer-account";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 import { AppSidebar } from "@/components/AppSidebar";
 import { DateInput } from "@/components/ui/DateInput";
@@ -31,7 +32,11 @@ import {
   useCreateInstallmentPlan,
   useCreateInstallmentContract,
   useReservations,
+  isOfflineNow,
+  queueOfflineProduct,
+  queueOfflineSale,
 } from "@/lib/supabase-queries";
+import { pendingStockEffects, useOutbox } from "@/lib/outbox";
 import { useRequireSession } from "@/hooks/use-session";
 import { useTenantFeatures } from "@/hooks/use-tenant-features";
 import { unitOptionsFor, unitQtyLabel } from "@/lib/units";
@@ -58,6 +63,7 @@ type CartLine = {
 function NewSalePage() {
   const session = useRequireSession();
   const queryClient = useQueryClient();
+  const outbox = useOutbox(session?.tenant_id);
   const navigate = useNavigate();
   const [, forceRerender] = useState(0);
   const [customerId, setCustomerId] = useState("");
@@ -129,7 +135,11 @@ function NewSalePage() {
     ? allSerials.filter((s) => s.product_id === selectedProduct.id && s.status === "available")
     : [];
   const cartedSerialIds = new Set(cart.map((l) => l.serial_id).filter(Boolean));
-  const usableSerials = availableSerials.filter((s) => !cartedSerialIds.has(s.id));
+  // بند 95 — اللي العمليات المستنية (من غير نت) حجزته متتعرضش تاني.
+  const pendingFx = pendingStockEffects(outbox);
+  const usableSerials = availableSerials.filter(
+    (s) => !cartedSerialIds.has(s.id) && !pendingFx.serialIds.has(s.id),
+  );
   const stockForSelected = selectedProduct
     ? computeProductStock(
         selectedProduct.id,
@@ -143,7 +153,10 @@ function NewSalePage() {
     .reduce((sum, l) => sum + l.quantity, 0);
   const remainingStock =
     stockForSelected -
-    alreadyCartedQty -
+    alreadyCartedQty +
+    pendingFx.movements
+      .filter((m) => m.product_id === selectedProductId)
+      .reduce((sum, m) => sum + m.quantity, 0) -
     (reservationsOn && selectedProductId ? reservedQty(selectedProductId, allReservations) : 0);
   // بند 89 — وحدات الصنف (قطعة + دستة...)؛ صنف من غير وحدات = وحدة واحدة ومفيش اختيار.
   const unitOptions = goodsEnabled ? unitOptionsFor(selectedProduct, allUnits) : [];
@@ -275,27 +288,44 @@ function NewSalePage() {
       );
       return;
     }
+    const newProductInput = {
+      name: newProductName.trim(),
+      unit: "قطعة",
+      cost_price: cost,
+      cash_price: price,
+      installment_price: price,
+      min_stock: 0,
+      max_stock: 0,
+      serial_required: false,
+    };
     try {
-      const product = await createProductMutation.mutateAsync({
-        input: {
-          name: newProductName.trim(),
-          unit: "قطعة",
-          cost_price: cost,
-          cash_price: price,
-          installment_price: price,
-          min_stock: 0,
-          max_stock: 0,
-          serial_required: false,
-        },
-        actorUserId,
-      });
-      await receiveStockMutation.mutateAsync({
-        product,
-        quantity: qty,
-        serialNumbers: undefined,
-        actorUserId,
-        reference: "إضافة سريعة وقت البيع",
-      });
+      let product;
+      if (isOfflineNow() && session) {
+        // بند 94 — من غير نت: الصنف ورصيده بيتحفظوا على الجهاز ويتبعتوا قبل الفاتورة.
+        product = await queueOfflineProduct(
+          session.tenant_id,
+          actorUserId,
+          newProductInput,
+          qty,
+          "إضافة سريعة وقت البيع",
+        );
+        await queryClient.invalidateQueries({ queryKey: ["products", session.tenant_id] });
+        await queryClient.invalidateQueries({
+          queryKey: ["inventory_movements", session.tenant_id],
+        });
+      } else {
+        product = await createProductMutation.mutateAsync({
+          input: newProductInput,
+          actorUserId,
+        });
+        await receiveStockMutation.mutateAsync({
+          product,
+          quantity: qty,
+          serialNumbers: undefined,
+          actorUserId,
+          reference: "إضافة سريعة وقت البيع",
+        });
+      }
       setSelectedProductId(product.id);
       setUnitPriceOverride(String(price));
       setQuantity(String(qty));
@@ -394,69 +424,86 @@ function NewSalePage() {
     }
   }
 
+  function partnerSettlements() {
+    return selectedPartnerIds.map((partnerId) => {
+      const partner = activePartners.find((p) => p.id === partnerId);
+      const splitPct = Number(partnerSplits[partnerId]) || 0;
+      const profitSharePct =
+        Number(partnerProfitShares[partnerId] ?? partner?.profit_share_pct) || 0;
+      const preview = computePartnerDealPreview(subtotal, cartCost, splitPct, profitSharePct);
+      return {
+        partnerId,
+        ...(singleProductId ? { productId: singleProductId } : {}),
+        costRecovered: preview.costRecovered,
+        profitAmount: preview.profitAmount,
+        dealValue: subtotal,
+        splitPct,
+        profitSharePct,
+      };
+    });
+  }
+
   function handleConfirm() {
     setError(null);
     if (isPartial || overpaid) return;
-    createSaleMutation.mutate(
-      {
-        input: {
-          customer_id: customerId || null,
-          items: cart.map((l) => ({
-            product_id: l.product_id,
-            quantity: l.quantity,
-            unit_price: l.unit_price,
-            ...(l.serial_id && { serial_id: l.serial_id }),
-            ...(l.unit_name && l.unit_qty && { unit_name: l.unit_name, unit_qty: l.unit_qty }),
-          })),
-          discount_pct: Number(discountPct) || 0,
-          ...(returnWindowDays && { return_window_days: Number(returnWindowDays) }),
-        },
-        actorUserId,
-        employeeDiscountLimitPct,
-        ...(saleDate && { createdAt: dateInputToTimestamp(saleDate) }),
+    const saleArgs = {
+      input: {
+        customer_id: customerId || null,
+        items: cart.map((l) => ({
+          product_id: l.product_id,
+          quantity: l.quantity,
+          unit_price: l.unit_price,
+          ...(l.serial_id && { serial_id: l.serial_id }),
+          ...(l.unit_name && l.unit_qty && { unit_name: l.unit_name, unit_qty: l.unit_qty }),
+        })),
+        discount_pct: Number(discountPct) || 0,
+        ...(returnWindowDays && { return_window_days: Number(returnWindowDays) }),
       },
-      {
-        onSuccess: (sale) => {
-          playSound("success");
-          if (selectedPartnerIds.length > 0 && session) {
-            void settlePartnersForDeal(
-              session.tenant_id,
-              actorUserId,
-              sale.invoice_number,
-              sale.id,
-              undefined,
-              selectedPartnerIds.map((partnerId) => {
-                const partner = activePartners.find((p) => p.id === partnerId);
-                const splitPct = Number(partnerSplits[partnerId]) || 0;
-                const profitSharePct =
-                  Number(partnerProfitShares[partnerId] ?? partner?.profit_share_pct) || 0;
-                const preview = computePartnerDealPreview(
-                  subtotal,
-                  cartCost,
-                  splitPct,
-                  profitSharePct,
-                );
-                return {
-                  partnerId,
-                  ...(singleProductId ? { productId: singleProductId } : {}),
-                  costRecovered: preview.costRecovered,
-                  profitAmount: preview.profitAmount,
-                  dealValue: subtotal,
-                  splitPct,
-                  profitSharePct,
-                };
-              }),
-            ).then(() =>
-              queryClient.invalidateQueries({
-                queryKey: ["partner_transactions", session.tenant_id],
-              }),
-            );
-          }
-          void navigate({ to: "/sales/$id", params: { id: sale.id } });
-        },
-        onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
+      actorUserId,
+      employeeDiscountLimitPct,
+      ...(saleDate && { createdAt: dateInputToTimestamp(saleDate) }),
+    };
+    // بند 95 — من غير نت: الفاتورة بتتحفظ على الجهاز وتتبعت لوحدها أول ما النت يرجع.
+    if (isOfflineNow() && session) {
+      const settlements = partnerSettlements();
+      void queueOfflineSale(
+        session.tenant_id,
+        saleArgs,
+        settlements.length > 0 ? settlements : null,
+      )
+        .then(() => {
+          playSound("done");
+          toast.success(
+            "اتحفظت كفاتورة مؤقتة على الجهاز — هتتبعت لوحدها وتاخد رقمها الحقيقي أول ما النت يرجع",
+          );
+          setCart([]);
+          setPaidNow("");
+          setSelectedPartnerIds([]);
+        })
+        .catch((e: unknown) => setError(e instanceof Error ? e.message : "حدث خطأ"));
+      return;
+    }
+    createSaleMutation.mutate(saleArgs, {
+      onSuccess: (sale) => {
+        playSound("success");
+        if (selectedPartnerIds.length > 0 && session) {
+          void settlePartnersForDeal(
+            session.tenant_id,
+            actorUserId,
+            sale.invoice_number,
+            sale.id,
+            undefined,
+            partnerSettlements(),
+          ).then(() =>
+            queryClient.invalidateQueries({
+              queryKey: ["partner_transactions", session.tenant_id],
+            }),
+          );
+        }
+        void navigate({ to: "/sales/$id", params: { id: sale.id } });
       },
-    );
+      onError: (e) => setError(e instanceof Error ? e.message : "حدث خطأ"),
+    });
   }
 
   return (

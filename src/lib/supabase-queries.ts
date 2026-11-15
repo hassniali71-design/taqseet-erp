@@ -8,7 +8,7 @@ import {
 } from "@/lib/data-store";
 import type { CustomerRiskAssessment } from "@/lib/data-store";
 import { fetchAll } from "@/lib/fetch-all";
-import { syncTable } from "@/lib/table-sync";
+import { dropLocalRows, putLocalRows, syncTable } from "@/lib/table-sync";
 import {
   isTransient,
   newOperationId,
@@ -16,6 +16,7 @@ import {
   outboxList,
   outboxUpdate,
   registerOutboxSender,
+  pendingStockEffects,
   type OutboxEntry,
   type QueuedContract,
   type SendResult,
@@ -522,6 +523,8 @@ export function useCustomers(tenantId: string | undefined) {
 export function useCreateCustomer(tenantId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
+    // بند 96 — العميل الجديد ممكن يتحفظ على الجهاز والنت فاصل (أي شاشة بتعمل عميل).
+    networkMode: "always",
     mutationFn: async ({
       input,
       actorUserId,
@@ -533,6 +536,7 @@ export function useCreateCustomer(tenantId: string | undefined) {
       createdAt?: string;
     }) => {
       if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      if (isOfflineNow()) return queueOfflineCustomer(tenantId, actorUserId, input, createdAt);
       const data = await insertWithGeneratedCode<Customer>(
         "customers",
         tenantId,
@@ -1363,296 +1367,307 @@ async function performCancelSaleAfterFailedAccountUse(
   }
 }
 
-export function useCreateSale(tenantId: string | undefined) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      input,
-      actorUserId,
-      employeeDiscountLimitPct,
-      createdAt,
-      fromCustomerAccount,
-    }: {
-      input: CreateSaleInput;
-      actorUserId: string | null;
-      employeeDiscountLimitPct: number;
-      /** تاريخ مفتوح اختياري — لبيع قديم بيسجّله العميل دلوقتي بأثر رجعي على التقارير. */
-      createdAt?: string;
-      /** بند 93 — الدفع من رصيد العميل (الحساب الجاري): الخزينة متتحركش، والقيد 2100 ← 3000.
-       * `held` = الحاجة اتسابت في المحل لحد ما تتسلّم. من غيره = البيع الكاش زي ما هو بالحرف. */
-      fromCustomerAccount?: { accountId: string; held: boolean; reservationIds?: string[] };
-    }) => {
-      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
-      if (input.items.length === 0) throw new Error("لازم تضيف صنف واحد على الأقل");
-      if (fromCustomerAccount && !input.customer_id) {
-        throw new Error("البيع من الرصيد لازم يكون باسم العميل");
+export interface CreateSaleArgs {
+  input: CreateSaleInput;
+  actorUserId: string | null;
+  employeeDiscountLimitPct: number;
+  /** تاريخ مفتوح اختياري — لبيع قديم بيسجّله العميل دلوقتي بأثر رجعي على التقارير. */
+  createdAt?: string;
+  /** بند 93 — الدفع من رصيد العميل (الحساب الجاري): الخزينة متتحركش، والقيد 2100 ← 3000.
+   * `held` = الحاجة اتسابت في المحل لحد ما تتسلّم. من غيره = البيع الكاش زي ما هو بالحرف. */
+  fromCustomerAccount?: { accountId: string; held: boolean; reservationIds?: string[] };
+  /** بند 95 — رقم الفاتورة متولّد على الجهاز (بيع اتعمل من غير نت)، عشان متتسجّلش مرتين. */
+  saleId?: string;
+}
+
+/** البيع الكاش نفسه — هو هو اللي useCreateSale بيعمله، واتفصل عشان طابور «من غير نت» يشغّله لما
+ * النت يرجع (بند 95). */
+async function performCreateSale(
+  tenantId: string,
+  {
+    input,
+    actorUserId,
+    employeeDiscountLimitPct,
+    createdAt,
+    fromCustomerAccount,
+    saleId,
+  }: CreateSaleArgs,
+): Promise<Sale> {
+  if (input.items.length === 0) throw new Error("لازم تضيف صنف واحد على الأقل");
+  if (fromCustomerAccount && !input.customer_id) {
+    throw new Error("البيع من الرصيد لازم يكون باسم العميل");
+  }
+  let accountBalance: number | null = null;
+  if (fromCustomerAccount) {
+    const { data: bal, error: balError } = await supabase.rpc("customer_account_balance", {
+      p_account: fromCustomerAccount.accountId,
+    });
+    if (balError) throw new Error(balError.message);
+    accountBalance = Number(bal ?? 0);
+  }
+  if (input.discount_pct < 0 || input.discount_pct > employeeDiscountLimitPct) {
+    throw new Error(`أقصى خصم مسموح بدون اعتماد مدير هو ${employeeDiscountLimitPct}%`);
+  }
+
+  const [
+    { data: products, error: productsError },
+    { data: allSerials, error: serialsError },
+    { data: movements, error: movementsError },
+  ] = await Promise.all([
+    fetchAll(supabase.from("products").select("*").eq("tenant_id", tenantId)),
+    fetchAll(supabase.from("product_serials").select("*").eq("tenant_id", tenantId)),
+    fetchAll(
+      supabase.from("inventory_movements").select("product_id, quantity").eq("tenant_id", tenantId),
+    ),
+  ]);
+  if (productsError) throw new Error(productsError.message);
+  if (serialsError) throw new Error(serialsError.message);
+  if (movementsError) throw new Error(movementsError.message);
+
+  let customer: Customer | null = null;
+  if (input.customer_id) {
+    const { data: customerRow, error: customerError } = await supabase
+      .from("customers")
+      .select("*")
+      .eq("id", input.customer_id)
+      .single();
+    if (customerError || !customerRow) throw new Error("العميل غير موجود");
+    customer = customerRow as Customer;
+  }
+
+  const saleItems: SaleItem[] = [];
+  const soldSerialIds = new Set<string>();
+  const stockTracker = new Map<string, number>();
+  const movementDrafts: Array<{
+    product_id: string;
+    quantity: number;
+    before: number;
+    after: number;
+  }> = [];
+
+  function currentStock(productId: string, serialRequired: boolean) {
+    if (stockTracker.has(productId)) return stockTracker.get(productId) as number;
+    return computeProductStock(
+      productId,
+      serialRequired,
+      (allSerials ?? []) as ProductSerial[],
+      (movements ?? []) as InventoryMovement[],
+    );
+  }
+
+  for (const line of input.items) {
+    const product = (products ?? []).find((p) => p.id === line.product_id) as Product | undefined;
+    if (!product) throw new Error("منتج غير موجود");
+    if (!product.active) throw new Error(`المنتج "${product.name}" غير نشط`);
+    const stock = currentStock(product.id, product.serial_required);
+
+    if (product.serial_required) {
+      if (line.quantity !== 1) {
+        throw new Error(`المنتج "${product.name}" يُباع سيريال واحد لكل سطر`);
       }
-      let accountBalance: number | null = null;
-      if (fromCustomerAccount) {
-        const { data: bal, error: balError } = await supabase.rpc("customer_account_balance", {
-          p_account: fromCustomerAccount.accountId,
-        });
-        if (balError) throw new Error(balError.message);
-        accountBalance = Number(bal ?? 0);
+      if (!line.serial_id) throw new Error(`اختر سيريال للمنتج "${product.name}"`);
+      if (soldSerialIds.has(line.serial_id)) {
+        throw new Error("لا يمكن بيع نفس السيريال مرتين في نفس الفاتورة");
       }
-      if (input.discount_pct < 0 || input.discount_pct > employeeDiscountLimitPct) {
-        throw new Error(`أقصى خصم مسموح بدون اعتماد مدير هو ${employeeDiscountLimitPct}%`);
+      const serial = (allSerials ?? []).find(
+        (s) => s.id === line.serial_id && s.product_id === product.id,
+      );
+      if (!serial) throw new Error("السيريال غير موجود");
+      if (serial.status !== "available") {
+        throw new Error(`السيريال "${serial.serial_number as string}" غير متاح للبيع`);
       }
-
-      const [
-        { data: products, error: productsError },
-        { data: allSerials, error: serialsError },
-        { data: movements, error: movementsError },
-      ] = await Promise.all([
-        fetchAll(supabase.from("products").select("*").eq("tenant_id", tenantId)),
-        fetchAll(supabase.from("product_serials").select("*").eq("tenant_id", tenantId)),
-        fetchAll(
-          supabase
-            .from("inventory_movements")
-            .select("product_id, quantity")
-            .eq("tenant_id", tenantId),
-        ),
-      ]);
-      if (productsError) throw new Error(productsError.message);
-      if (serialsError) throw new Error(serialsError.message);
-      if (movementsError) throw new Error(movementsError.message);
-
-      let customer: Customer | null = null;
-      if (input.customer_id) {
-        const { data: customerRow, error: customerError } = await supabase
-          .from("customers")
-          .select("*")
-          .eq("id", input.customer_id)
-          .single();
-        if (customerError || !customerRow) throw new Error("العميل غير موجود");
-        customer = customerRow as Customer;
-      }
-
-      const saleItems: SaleItem[] = [];
-      const soldSerialIds = new Set<string>();
-      const stockTracker = new Map<string, number>();
-      const movementDrafts: Array<{
-        product_id: string;
-        quantity: number;
-        before: number;
-        after: number;
-      }> = [];
-
-      function currentStock(productId: string, serialRequired: boolean) {
-        if (stockTracker.has(productId)) return stockTracker.get(productId) as number;
-        return computeProductStock(
-          productId,
-          serialRequired,
-          (allSerials ?? []) as ProductSerial[],
-          (movements ?? []) as InventoryMovement[],
-        );
-      }
-
-      for (const line of input.items) {
-        const product = (products ?? []).find((p) => p.id === line.product_id) as
-          Product | undefined;
-        if (!product) throw new Error("منتج غير موجود");
-        if (!product.active) throw new Error(`المنتج "${product.name}" غير نشط`);
-        const stock = currentStock(product.id, product.serial_required);
-
-        if (product.serial_required) {
-          if (line.quantity !== 1) {
-            throw new Error(`المنتج "${product.name}" يُباع سيريال واحد لكل سطر`);
-          }
-          if (!line.serial_id) throw new Error(`اختر سيريال للمنتج "${product.name}"`);
-          if (soldSerialIds.has(line.serial_id)) {
-            throw new Error("لا يمكن بيع نفس السيريال مرتين في نفس الفاتورة");
-          }
-          const serial = (allSerials ?? []).find(
-            (s) => s.id === line.serial_id && s.product_id === product.id,
-          );
-          if (!serial) throw new Error("السيريال غير موجود");
-          if (serial.status !== "available") {
-            throw new Error(`السيريال "${serial.serial_number as string}" غير متاح للبيع`);
-          }
-          soldSerialIds.add(serial.id as string);
-          const unitPrice = line.unit_price ?? product.cash_price;
-          saleItems.push({
-            product_id: product.id,
-            product_name: product.name,
-            serial_id: serial.id as string,
-            serial_number: serial.serial_number as string,
-            quantity: 1,
-            unit_price: unitPrice,
-            line_total: unitPrice,
-          });
-          stockTracker.set(product.id, stock - 1);
-          movementDrafts.push({
-            product_id: product.id,
-            quantity: -1,
-            before: stock,
-            after: stock - 1,
-          });
-        } else {
-          if (line.quantity <= 0) throw new Error(`كمية غير صحيحة للمنتج "${product.name}"`);
-          if (line.quantity > stock) {
-            throw new Error(`المخزون غير كافٍ للمنتج "${product.name}" (متاح ${stock})`);
-          }
-          const unitPrice = line.unit_price ?? product.cash_price;
-          saleItems.push({
-            product_id: product.id,
-            product_name: product.name,
-            quantity: line.quantity,
-            unit_price: unitPrice,
-            // بند 89: سعر القطعة من الدستة ممكن يبقى كسر (200 ÷ 24)، فالسطر بيتقرّب لقرش.
-            line_total: line.unit_name
-              ? Math.round(unitPrice * line.quantity * 100) / 100
-              : unitPrice * line.quantity,
-            ...(line.unit_name &&
-              line.unit_qty && {
-                unit_name: line.unit_name,
-                unit_qty: line.unit_qty,
-              }),
-          });
-          stockTracker.set(product.id, stock - line.quantity);
-          movementDrafts.push({
-            product_id: product.id,
-            quantity: -line.quantity,
-            before: stock,
-            after: stock - line.quantity,
-          });
-        }
-      }
-
-      const subtotal = saleItems.reduce((sum, i) => sum + i.line_total, 0);
-      const discount_amount = Math.round(subtotal * (input.discount_pct / 100) * 100) / 100;
-      const total = Math.round((subtotal - discount_amount) * 100) / 100;
-      if (accountBalance !== null && total > accountBalance) {
-        throw new Error(`رصيدها مش كفاية (${accountBalance} ج.م) — الفاتورة ${total} ج.م`);
-      }
-      const invoice_number = await nextInvoiceNumber(tenantId);
-
-      const { data: sale, error: saleError } = await supabase
-        .from("sales")
-        .insert({
-          tenant_id: tenantId,
-          invoice_number,
-          customer_id: input.customer_id,
-          customer_name: customer?.name ?? "عميل نقدي",
-          items: saleItems,
-          subtotal,
-          discount_pct: input.discount_pct,
-          discount_amount,
-          total,
-          user_id: actorUserId,
-          status: "completed",
-          ...(input.return_window_days && { return_window_days: input.return_window_days }),
-          ...(createdAt ? { created_at: createdAt } : {}),
-        })
-        .select()
-        .single();
-      if (saleError) throw new Error(saleError.message);
-
-      if (soldSerialIds.size > 0) {
-        const { error: updateSerialsError } = await supabase
-          .from("product_serials")
-          .update({ status: "sold" })
-          .in("id", Array.from(soldSerialIds));
-        if (updateSerialsError) throw new Error(updateSerialsError.message);
-      }
-
-      if (movementDrafts.length > 0) {
-        const { error: movementsInsertError } = await supabase.from("inventory_movements").insert(
-          movementDrafts.map((m) => ({
-            tenant_id: tenantId,
-            product_id: m.product_id,
-            type: "sale",
-            quantity: m.quantity,
-            before: m.before,
-            after: m.after,
-            user_id: actorUserId,
-            reference: invoice_number,
-            ...(createdAt ? { created_at: createdAt } : {}),
-          })),
-        );
-        if (movementsInsertError) throw new Error(movementsInsertError.message);
-      }
-
-      await insertAuditLog({
-        tenant_id: tenantId,
-        user_id: actorUserId,
-        action: "sale.create",
-        entity: "sales",
-        entity_id: sale.id as string,
-        new_value: sale,
+      soldSerialIds.add(serial.id as string);
+      const unitPrice = line.unit_price ?? product.cash_price;
+      saleItems.push({
+        product_id: product.id,
+        product_name: product.name,
+        serial_id: serial.id as string,
+        serial_number: serial.serial_number as string,
+        quantity: 1,
+        unit_price: unitPrice,
+        line_total: unitPrice,
       });
-
-      if (fromCustomerAccount) {
-        // الخصم من رصيدها بقفل الحساب (ملف 0037)؛ لو الرصيد مش كفاية الفاتورة بتتلغي فورًا.
-        const { error: useError } = await supabase.rpc("customer_account_use", {
-          p_account: fromCustomerAccount.accountId,
-          p_sale: sale.id as string,
-          p_amount: total,
-          p_held: fromCustomerAccount.held,
-        });
-        if (useError) {
-          await performCancelSaleAfterFailedAccountUse(
-            tenantId,
-            sale as Sale,
-            movementDrafts,
-            soldSerialIds,
-            actorUserId,
-          );
-          throw new Error(useError.message);
-        }
-        if (fromCustomerAccount.reservationIds?.length) {
-          await supabase
-            .from("reservations")
-            .update({ status: "converted", sale_id: sale.id as string })
-            .in("id", fromCustomerAccount.reservationIds)
-            .eq("status", "active");
-        }
-        try {
-          await performPostJournalEntry(
-            tenantId,
-            [
-              {
-                account_code: "2100",
-                account_name: ACCOUNT_NAMES["2100"],
-                debit: total,
-                credit: 0,
-              },
-              {
-                account_code: "3000",
-                account_name: ACCOUNT_NAMES["3000"],
-                debit: 0,
-                credit: total,
-              },
-            ],
-            `بيع من رصيد العميل ${invoice_number}`,
-            "sale",
-            sale.id as string,
-            createdAt,
-          );
-        } catch (e) {
-          console.warn("فشل قيد البيع من الرصيد:", e instanceof Error ? e.message : e);
-        }
-        return sale as Sale;
+      stockTracker.set(product.id, stock - 1);
+      movementDrafts.push({
+        product_id: product.id,
+        quantity: -1,
+        before: stock,
+        after: stock - 1,
+      });
+    } else {
+      if (line.quantity <= 0) throw new Error(`كمية غير صحيحة للمنتج "${product.name}"`);
+      if (line.quantity > stock) {
+        throw new Error(`المخزون غير كافٍ للمنتج "${product.name}" (متاح ${stock})`);
       }
+      const unitPrice = line.unit_price ?? product.cash_price;
+      saleItems.push({
+        product_id: product.id,
+        product_name: product.name,
+        quantity: line.quantity,
+        unit_price: unitPrice,
+        // بند 89: سعر القطعة من الدستة ممكن يبقى كسر (200 ÷ 24)، فالسطر بيتقرّب لقرش.
+        line_total: line.unit_name
+          ? Math.round(unitPrice * line.quantity * 100) / 100
+          : unitPrice * line.quantity,
+        ...(line.unit_name &&
+          line.unit_qty && {
+            unit_name: line.unit_name,
+            unit_qty: line.unit_qty,
+          }),
+      });
+      stockTracker.set(product.id, stock - line.quantity);
+      movementDrafts.push({
+        product_id: product.id,
+        quantity: -line.quantity,
+        before: stock,
+        after: stock - line.quantity,
+      });
+    }
+  }
 
-      await postFinancials(
+  const subtotal = saleItems.reduce((sum, i) => sum + i.line_total, 0);
+  const discount_amount = Math.round(subtotal * (input.discount_pct / 100) * 100) / 100;
+  const total = Math.round((subtotal - discount_amount) * 100) / 100;
+  if (accountBalance !== null && total > accountBalance) {
+    throw new Error(`رصيدها مش كفاية (${accountBalance} ج.م) — الفاتورة ${total} ج.م`);
+  }
+  const invoice_number = await nextInvoiceNumber(tenantId);
+
+  const { data: sale, error: saleError } = await supabase
+    .from("sales")
+    .insert({
+      ...(saleId && { id: saleId }),
+      tenant_id: tenantId,
+      invoice_number,
+      customer_id: input.customer_id,
+      customer_name: customer?.name ?? "عميل نقدي",
+      items: saleItems,
+      subtotal,
+      discount_pct: input.discount_pct,
+      discount_amount,
+      total,
+      user_id: actorUserId,
+      status: "completed",
+      ...(input.return_window_days && { return_window_days: input.return_window_days }),
+      ...(createdAt ? { created_at: createdAt } : {}),
+    })
+    .select()
+    .single();
+  if (saleError) throw new Error(saleError.message);
+
+  if (soldSerialIds.size > 0) {
+    const { error: updateSerialsError } = await supabase
+      .from("product_serials")
+      .update({ status: "sold" })
+      .in("id", Array.from(soldSerialIds));
+    if (updateSerialsError) throw new Error(updateSerialsError.message);
+  }
+
+  if (movementDrafts.length > 0) {
+    const { error: movementsInsertError } = await supabase.from("inventory_movements").insert(
+      movementDrafts.map((m) => ({
+        tenant_id: tenantId,
+        product_id: m.product_id,
+        type: "sale",
+        quantity: m.quantity,
+        before: m.before,
+        after: m.after,
+        user_id: actorUserId,
+        reference: invoice_number,
+        ...(createdAt ? { created_at: createdAt } : {}),
+      })),
+    );
+    if (movementsInsertError) throw new Error(movementsInsertError.message);
+  }
+
+  await insertAuditLog({
+    tenant_id: tenantId,
+    user_id: actorUserId,
+    action: "sale.create",
+    entity: "sales",
+    entity_id: sale.id as string,
+    new_value: sale,
+  });
+
+  if (fromCustomerAccount) {
+    // الخصم من رصيدها بقفل الحساب (ملف 0037)؛ لو الرصيد مش كفاية الفاتورة بتتلغي فورًا.
+    const { error: useError } = await supabase.rpc("customer_account_use", {
+      p_account: fromCustomerAccount.accountId,
+      p_sale: sale.id as string,
+      p_amount: total,
+      p_held: fromCustomerAccount.held,
+    });
+    if (useError) {
+      await performCancelSaleAfterFailedAccountUse(
         tenantId,
-        "cashier",
-        "sale",
-        total,
+        sale as Sale,
+        movementDrafts,
+        soldSerialIds,
         actorUserId,
-        invoice_number,
+      );
+      throw new Error(useError.message);
+    }
+    if (fromCustomerAccount.reservationIds?.length) {
+      await supabase
+        .from("reservations")
+        .update({ status: "converted", sale_id: sale.id as string })
+        .in("id", fromCustomerAccount.reservationIds)
+        .eq("status", "active");
+    }
+    try {
+      await performPostJournalEntry(
+        tenantId,
         [
-          { account_code: "1000", account_name: ACCOUNT_NAMES["1000"], debit: total, credit: 0 },
-          { account_code: "3000", account_name: ACCOUNT_NAMES["3000"], debit: 0, credit: total },
+          {
+            account_code: "2100",
+            account_name: ACCOUNT_NAMES["2100"],
+            debit: total,
+            credit: 0,
+          },
+          {
+            account_code: "3000",
+            account_name: ACCOUNT_NAMES["3000"],
+            debit: 0,
+            credit: total,
+          },
         ],
-        `بيع نقدي ${invoice_number}`,
+        `بيع من رصيد العميل ${invoice_number}`,
         "sale",
         sale.id as string,
         createdAt,
       );
+    } catch (e) {
+      console.warn("فشل قيد البيع من الرصيد:", e instanceof Error ? e.message : e);
+    }
+    return sale as Sale;
+  }
 
-      return sale as Sale;
+  await postFinancials(
+    tenantId,
+    "cashier",
+    "sale",
+    total,
+    actorUserId,
+    invoice_number,
+    [
+      { account_code: "1000", account_name: ACCOUNT_NAMES["1000"], debit: total, credit: 0 },
+      { account_code: "3000", account_name: ACCOUNT_NAMES["3000"], debit: 0, credit: total },
+    ],
+    `بيع نقدي ${invoice_number}`,
+    "sale",
+    sale.id as string,
+    createdAt,
+  );
+
+  return sale as Sale;
+}
+
+export function useCreateSale(tenantId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: CreateSaleArgs) => {
+      if (!tenantId) throw new Error("لا توجد جلسة نشطة");
+      return performCreateSale(tenantId, args);
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["sales", tenantId] });
@@ -2328,21 +2343,10 @@ export function useCreateInstallmentContract(tenantId: string | undefined) {
           : plans.find((p) => p.id === input.plan_id);
         if (!plan) throw new Error("خطة التقسيط غير موجودة");
         // العقود اللي لسه في الطابور حجزت سيريالاتها/كمياتها — منبيعهاش تاني على نفس الجهاز.
-        const pending = (await outboxList(tenantId)).filter(
-          (e): e is OutboxEntry & QueuedContract => e.kind === "contract",
-        );
-        const reservedSerials = new Set(
-          pending.flatMap((e) =>
-            ((e.payload.contract["items"] as SaleItem[] | undefined) ?? [])
-              .map((i) => i.serial_id)
-              .filter(Boolean),
-          ),
-        );
-        const reservedMovements = pending.flatMap((e) =>
-          ((e.payload.contract["items"] as SaleItem[] | undefined) ?? [])
-            .filter((i) => !i.serial_id)
-            .map((i) => ({ product_id: i.product_id, quantity: -i.quantity }) as InventoryMovement),
-        );
+        // (بند 95: والفواتير الكاش اللي لسه في الطابور كمان.)
+        const effects = pendingStockEffects(await outboxList(tenantId));
+        const reservedSerials = effects.serialIds;
+        const reservedMovements = effects.movements as InventoryMovement[];
         const draft = buildInstallmentContractDraft(
           { ...input, customer_id: customer.id, plan_id: plan.id },
           customer,
@@ -6526,4 +6530,292 @@ export function useRecordPickups(tenantId: string | undefined) {
     },
     onSuccess: () => invalidateCustomerAccounts(queryClient, tenantId),
   });
+}
+
+// ===================================================================================
+// بنود 94–96 — صنف جديد، وعميل جديد، وبيع كاش من غير نت. كلهم بيتحفظوا على الجهاز برقم ثابت
+// اتولّد هنا (نفس الرقم اللي هيتسجّل بيه على السيرفر)، وبيتبعتوا بالترتيب لما النت يرجع — فالصنف
+// والعميل بيوصلوا قبل الفاتورة/العقد اللي عليهم. الصف بيظهر في نسخة الجهاز على طول عشان يتختار.
+// ===================================================================================
+
+const isOfflineNow = () => typeof navigator !== "undefined" && navigator.onLine === false;
+export { isOfflineNow };
+
+async function rowExists(table: string, id: string) {
+  const { data, error } = await supabase.from(table).select("id").eq("id", id).maybeSingle();
+  if (error) throw Object.assign(new Error(error.message), { code: error.code });
+  return Boolean(data);
+}
+
+function sendFailure(e: unknown): SendResult {
+  if (isTransient(e)) return { ok: false, retry: true };
+  return { ok: false, retry: false, error: e instanceof Error ? e.message : String(e) };
+}
+
+/** صنف جديد + رصيده الافتتاحي، على الجهاز. بيرجّع الصنف عشان الفاتورة تختاره على طول. */
+export async function queueOfflineProduct(
+  tenantId: string,
+  actorUserId: string | null,
+  input: Omit<Product, "id" | "tenant_id" | "code" | "active" | "created_at">,
+  openingQty: number,
+  reference: string,
+): Promise<Product> {
+  if (!(openingQty > 0) || !Number.isInteger(openingQty)) throw new Error("أدخل كمية صحيحة");
+  const id = newOperationId();
+  const movementId = newOperationId();
+  const at = new Date().toISOString();
+  const row = {
+    ...input,
+    id,
+    tenant_id: tenantId,
+    code: "(لسه متسجّلش)",
+    active: true,
+    created_at: at,
+    updated_at: at,
+  } as unknown as Product;
+  await outboxAdd({
+    kind: "product",
+    id,
+    tenantId,
+    at,
+    actorUserId,
+    product: input as unknown as Record<string, unknown>,
+    openingQty,
+    movementId,
+    reference,
+  });
+  await putLocalRows(tenantId, "products", [row as unknown as { id: string }]);
+  await putLocalRows(tenantId, "inventory_movements", [
+    {
+      id: movementId,
+      tenant_id: tenantId,
+      product_id: id,
+      type: "receipt",
+      quantity: openingQty,
+      before: 0,
+      after: openingQty,
+      user_id: actorUserId,
+      reference,
+      created_at: at,
+      updated_at: at,
+    },
+  ]);
+  return row;
+}
+
+async function sendQueuedProduct(entry: OutboxEntry): Promise<SendResult> {
+  if (entry.kind !== "product") return { ok: false, retry: false, error: "عملية غير معروفة" };
+  try {
+    if (!(await rowExists("products", entry.id))) {
+      const data = await insertWithGeneratedCode<Product>(
+        "products",
+        entry.tenantId,
+        "PRD",
+        (code) => ({
+          ...entry.product,
+          id: entry.id,
+          tenant_id: entry.tenantId,
+          code,
+          active: true,
+          created_at: entry.at,
+        }),
+      );
+      await insertAuditLog({
+        tenant_id: entry.tenantId,
+        user_id: entry.actorUserId,
+        action: "product.create",
+        entity: "products",
+        entity_id: entry.id,
+        new_value: { ...data, offline_at: entry.at },
+      });
+    }
+    if (!(await rowExists("inventory_movements", entry.movementId))) {
+      const { error } = await supabase.from("inventory_movements").insert({
+        id: entry.movementId,
+        tenant_id: entry.tenantId,
+        product_id: entry.id,
+        type: "receipt",
+        quantity: entry.openingQty,
+        before: 0,
+        after: entry.openingQty,
+        user_id: entry.actorUserId,
+        reference: entry.reference,
+        created_at: entry.at,
+      });
+      if (error) throw Object.assign(new Error(error.message), { code: error.code });
+    }
+    return { ok: true };
+  } catch (e) {
+    return sendFailure(e);
+  }
+}
+registerOutboxSender("product", sendQueuedProduct);
+
+/** عميل جديد على الجهاز (من صفحة العملاء أو أي فاتورة). */
+export async function queueOfflineCustomer(
+  tenantId: string,
+  actorUserId: string | null,
+  input: Omit<Customer, "id" | "tenant_id" | "code" | "status" | "created_at">,
+  createdAt?: string,
+): Promise<Customer> {
+  const id = newOperationId();
+  const at = new Date().toISOString();
+  const row = {
+    ...input,
+    id,
+    tenant_id: tenantId,
+    code: "(لسه متسجّلش)",
+    status: "active",
+    created_at: createdAt ?? at,
+    updated_at: at,
+  } as unknown as Customer;
+  await outboxAdd({
+    kind: "customer",
+    id,
+    tenantId,
+    at,
+    actorUserId,
+    customer: input as unknown as Record<string, unknown>,
+    ...(createdAt && { createdAt }),
+  });
+  await putLocalRows(tenantId, "customers", [row as unknown as { id: string }]);
+  return row;
+}
+
+async function sendQueuedCustomer(entry: OutboxEntry): Promise<SendResult> {
+  if (entry.kind !== "customer") return { ok: false, retry: false, error: "عملية غير معروفة" };
+  try {
+    if (!(await rowExists("customers", entry.id))) {
+      const data = await insertWithGeneratedCode<Customer>(
+        "customers",
+        entry.tenantId,
+        "CUST",
+        (code) => ({
+          ...entry.customer,
+          id: entry.id,
+          tenant_id: entry.tenantId,
+          code,
+          status: "active",
+          created_at: entry.createdAt ?? entry.at,
+        }),
+      );
+      await insertAuditLog({
+        tenant_id: entry.tenantId,
+        user_id: entry.actorUserId,
+        action: "customer.create",
+        entity: "customers",
+        entity_id: entry.id,
+        new_value: { ...data, offline_at: entry.at },
+      });
+    }
+    return { ok: true };
+  } catch (e) {
+    return sendFailure(e);
+  }
+}
+registerOutboxSender("customer", sendQueuedCustomer);
+
+/** بيع كاش على الجهاز: بيتأكد من المخزن على نسخة الجهاز (ناقص اللي العمليات المستنية حجزته)، وبيتحفظ
+ * في الطابور. على السيرفر بيتعمل بنفس دالة البيع بالظبط (`performCreateSale`)، وبوقت العملية الحقيقي. */
+export async function queueOfflineSale(
+  tenantId: string,
+  args: Omit<CreateSaleArgs, "saleId" | "fromCustomerAccount">,
+  partners: Parameters<typeof settlePartnersForDeal>[5] | null,
+): Promise<{ queued: true; id: string }> {
+  const { input } = args;
+  if (input.items.length === 0) throw new Error("لازم تضيف صنف واحد على الأقل");
+  if (input.discount_pct < 0 || input.discount_pct > args.employeeDiscountLimitPct) {
+    throw new Error(`أقصى خصم مسموح بدون اعتماد مدير هو ${args.employeeDiscountLimitPct}%`);
+  }
+  const [products, serials, movements, customers] = await Promise.all([
+    syncTable<Product>("products", tenantId),
+    syncTable<ProductSerial>("product_serials", tenantId),
+    syncTable<InventoryMovement>("inventory_movements", tenantId),
+    syncTable<Customer>("customers", tenantId),
+  ]);
+  const effects = pendingStockEffects(await outboxList(tenantId));
+  const allMovements = [...movements, ...(effects.movements as InventoryMovement[])];
+  const used = new Map<string, number>();
+  let subtotal = 0;
+  for (const line of input.items) {
+    const product = products.find((p) => p.id === line.product_id);
+    if (!product || !product.active) throw new Error("صنف غير موجود أو موقوف");
+    if (product.serial_required) {
+      const serial = serials.find((x) => x.id === line.serial_id && x.product_id === product.id);
+      if (!serial || serial.status !== "available" || effects.serialIds.has(serial.id)) {
+        throw new Error(`السيريال بتاع "${product.name}" مش متاح`);
+      }
+    } else {
+      const stock =
+        computeProductStock(product.id, false, serials, allMovements) - (used.get(product.id) ?? 0);
+      if (line.quantity <= 0 || line.quantity > stock) {
+        throw new Error(`المخزون غير كافٍ للمنتج "${product.name}" (متاح ${stock})`);
+      }
+      used.set(product.id, (used.get(product.id) ?? 0) + line.quantity);
+    }
+    subtotal += (line.unit_price ?? product.cash_price) * line.quantity;
+  }
+  const discount = Math.round(subtotal * (input.discount_pct / 100) * 100) / 100;
+  const total = Math.round((subtotal - discount) * 100) / 100;
+  const id = newOperationId();
+  await outboxAdd({
+    kind: "sale",
+    id,
+    tenantId,
+    at: new Date().toISOString(),
+    actorUserId: args.actorUserId,
+    customerName: customers.find((c) => c.id === input.customer_id)?.name ?? "",
+    total,
+    input: input as unknown as QueuedSaleInput,
+    employeeDiscountLimitPct: args.employeeDiscountLimitPct,
+    ...(args.createdAt && { createdAt: args.createdAt }),
+    partners: partners ?? null,
+  });
+  return { queued: true, id };
+}
+type QueuedSaleInput = Record<string, unknown> & {
+  items: Array<{ product_id: string; serial_id?: string; quantity: number }>;
+};
+
+async function sendQueuedSale(entry: OutboxEntry): Promise<SendResult> {
+  if (entry.kind !== "sale") return { ok: false, retry: false, error: "عملية غير معروفة" };
+  try {
+    if (await rowExists("sales", entry.id)) return { ok: true };
+    const sale = await performCreateSale(entry.tenantId, {
+      input: entry.input as unknown as CreateSaleInput,
+      actorUserId: entry.actorUserId,
+      employeeDiscountLimitPct: entry.employeeDiscountLimitPct,
+      createdAt: entry.createdAt ?? entry.at,
+      saleId: entry.id,
+    });
+    const partners = entry.partners as Parameters<typeof settlePartnersForDeal>[5] | null;
+    if (partners && partners.length > 0) {
+      try {
+        await settlePartnersForDeal(
+          entry.tenantId,
+          entry.actorUserId,
+          sale.invoice_number,
+          sale.id,
+          undefined,
+          partners,
+        );
+      } catch (e) {
+        console.warn("فشل تسوية الشركاء لفاتورة من غير نت:", e);
+      }
+    }
+    return { ok: true };
+  } catch (e) {
+    return sendFailure(e);
+  }
+}
+registerOutboxSender("sale", sendQueuedSale);
+
+/** لما المستخدم يلغي عملية مرفوضة: صفها المؤقت بيتشال من نسخة الجهاز. */
+export async function dropOfflineRows(entry: OutboxEntry) {
+  if (entry.kind === "product") {
+    await dropLocalRows(entry.tenantId, "products", [entry.id]);
+    await dropLocalRows(entry.tenantId, "inventory_movements", [entry.movementId]);
+  } else if (entry.kind === "customer") {
+    await dropLocalRows(entry.tenantId, "customers", [entry.id]);
+  }
 }
